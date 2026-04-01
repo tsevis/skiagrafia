@@ -4,10 +4,6 @@
 >
 > A desktop application for AI-powered image segmentation, masking, and vectorization.
 
-[![Python](https://img.shields.io/badge/python-3.11+-blue.svg)](https://www.python.org/downloads/)
-[![Platform](https://img.shields.io/badge/platform-macOS%20Apple%20Silicon-lightgrey.svg)](https://developer.apple.com/documentation/techdocs/50056847)
-[![Architecture](https://img.shields.io/badge/architecture-v5.0-orange.svg)](docs/CLAUDEv5.md)
-
 **Skiagrafia** uses local ML models to automatically segment images into semantic layers (objects and their parts), producing both vector (SVG) and bitmap (TIFF/PNG) outputs. Designed for designers and production workflows.
 
 <p align="center">
