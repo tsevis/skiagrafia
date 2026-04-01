@@ -1,0 +1,29 @@
+[project]
+name = "skiagrafia"
+version = "0.1.0"
+description = "Semantic vectorizing & masking creator"
+requires-python = ">=3.11"
+dependencies = [
+    "torch",
+    "torchvision",
+    "tkinterdnd2",
+    "pillow",
+    "opencv-python-headless",
+    "numpy",
+    "scipy",
+    "pydantic>=2.0",
+    "sqlitedict",
+    "dask[distributed]",
+    "tqdm",
+    "rich",
+    "cairosvg",
+    "vtracer",
+    "ollama",
+    "lxml",
+    "transformers",
+    "accelerate",
+]
+
+[build-system]
+requires = ["setuptools>=68.0"]
+build-backend = "setuptools.backends._legacy:_Backend"
