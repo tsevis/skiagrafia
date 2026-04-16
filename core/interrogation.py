@@ -394,6 +394,8 @@ class GuidedInterrogator:
             return True
         if all(c.display_label.lower() in _VAGUE_TERMS for c in candidates):
             return True
+        if len(candidates) < 2:
+            return True
         return False
 
     def _merge_candidates(
@@ -522,7 +524,7 @@ class GuidedInterrogator:
     def _filter_child_parts(self, parts: list[str], parent_label: str) -> list[str]:
         cleaned: list[str] = []
         parent_words = set(parent_label.lower().split())
-        max_parts = 3 if self._settings.profile == "fast" else 8 if self._settings.profile == "deep" else 4
+        max_parts = 3 if self._settings.profile == "fast" else 8 if self._settings.profile == "deep" else 6
         for part in parts:
             item = part.strip().lower()
             if not item or item == parent_label.lower():

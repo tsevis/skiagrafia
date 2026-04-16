@@ -64,6 +64,7 @@ class Segmenter(Protocol):
         image: NDArray[np.uint8],
         bbox: tuple[int, int, int, int],
         label: str = "",
+        prefer_full_box: bool = False,
     ) -> NDArray[np.uint8]:
         """Return binary mask (H, W) uint8, values 0 or 255."""
         ...

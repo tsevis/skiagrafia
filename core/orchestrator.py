@@ -32,9 +32,13 @@ from utils.coord_math import tight_bbox
 logger = logging.getLogger(__name__)
 
 MIN_CHILD_COVERAGE_PCT = 0.5
+MAX_CHILD_PARENT_IOU = 0.85
+MAX_CHILD_CHILD_IOU = 0.80
 MIN_PARENT_COVERAGE_PCT = 0.5
 MIN_CONFIRMED_COVERAGE_PCT = 0.05
 PARENT_IOU_MERGE = 0.50
+PARENT_CONTAINMENT_MERGE = 0.75
+BBOX_IOU_MERGE = 0.60
 BBOX_EXPAND_RATIO = 0.30
 MAX_LABEL_FILENAME_LEN = 60  # max chars of a label used in output filenames
 
@@ -95,6 +99,23 @@ def _mask_iou(a: NDArray[np.uint8], b: NDArray[np.uint8]) -> float:
     return float(inter / union) if union else 0.0
 
 
+def _mask_containment(a: NDArray[np.uint8], b: NDArray[np.uint8]) -> float:
+    """Fraction of the *smaller* mask that is contained in the larger one.
+
+    Returns a value in [0, 1].  A high value means one mask is mostly
+    inside the other — strong evidence they represent the same object even
+    when IoU is low (because one mask is much larger).
+    """
+    a_bool, b_bool = a > 127, b > 127
+    a_area = int(a_bool.sum())
+    b_area = int(b_bool.sum())
+    if a_area == 0 or b_area == 0:
+        return 0.0
+    inter = int(np.logical_and(a_bool, b_bool).sum())
+    smaller = min(a_area, b_area)
+    return float(inter / smaller)
+
+
 def _bbox_overlaps(
     child_bbox: tuple[int, int, int, int],
     parent_bbox: tuple[int, int, int, int],
@@ -117,6 +138,24 @@ def _bbox_area(bbox: tuple[int, int, int, int]) -> int:
     return max(0, x1 - x0) * max(0, y1 - y0)
 
 
+def _bbox_iou(
+    a: tuple[int, int, int, int],
+    b: tuple[int, int, int, int],
+) -> float:
+    """Intersection-over-union of two bounding boxes."""
+    ax0, ay0, ax1, ay1 = a
+    bx0, by0, bx1, by1 = b
+    ix0 = max(ax0, bx0)
+    iy0 = max(ay0, by0)
+    ix1 = min(ax1, bx1)
+    iy1 = min(ay1, by1)
+    inter = max(0, ix1 - ix0) * max(0, iy1 - iy0)
+    area_a = _bbox_area(a)
+    area_b = _bbox_area(b)
+    union = area_a + area_b - inter
+    return float(inter / union) if union else 0.0
+
+
 def _crop_to_bbox(
     image: NDArray[np.uint8],
     bbox: tuple[int, int, int, int],
@@ -129,6 +168,20 @@ def _crop_to_bbox(
     x1 = min(w, x1 + padding)
     y1 = min(h, y1 + padding)
     return image[y0:y1, x0:x1], x0, y0
+
+
+def _clip_mask_to_bbox(
+    mask: NDArray[np.uint8],
+    bbox: tuple[int, int, int, int],
+) -> NDArray[np.uint8]:
+    """Zero out mask pixels outside the bounding box."""
+    x0, y0, x1, y1 = bbox
+    h, w = mask.shape[:2]
+    x0, y0 = max(0, x0), max(0, y0)
+    x1, y1 = min(w, x1), min(h, y1)
+    clipped = np.zeros_like(mask)
+    clipped[y0:y1, x0:x1] = mask[y0:y1, x0:x1]
+    return clipped
 
 
 class Orchestrator:
@@ -237,7 +290,7 @@ class Orchestrator:
         for parent in parents:
             # STEP 2 — GroundingDINO
             self._report(2, f"GroundingDINO: {parent.display_label}")
-            det_result = self._detect_candidate(image, parent, manual_lookup)
+            det_result, is_manual = self._detect_candidate_ex(image, parent, manual_lookup)
             used_fallback_bbox = False
             if det_result is None:
                 if parent.source_model == "confirmed":
@@ -258,7 +311,12 @@ class Orchestrator:
 
             # STEP 3 — SAM parent
             self._report(3, f"SAM 2.1 — {parent.display_label}")
-            parent_mask = self._segmenter.segment(image, det_result.bbox, parent.display_label)
+            parent_mask = self._segmenter.segment(
+                image, det_result.bbox, parent.display_label,
+                prefer_full_box=is_manual,
+            )
+            if is_manual:
+                parent_mask = _clip_mask_to_bbox(parent_mask, det_result.bbox)
             coverage = mask_coverage(parent_mask)
             min_coverage = (
                 MIN_CONFIRMED_COVERAGE_PCT
@@ -272,20 +330,47 @@ class Orchestrator:
                 )
                 continue
 
-            # IoU dedup — a properly-detected mask always wins over a
-            # fallback-bbox mask (which is unreliable since SAM picks the
-            # most salient object in the whole image).
+            # IoU dedup — merge duplicate detections of the same physical
+            # object.  Three complementary checks, any one triggers merge:
+            #   1. Mask pixel IoU > 0.50
+            #   2. Smaller mask ≥75% contained inside the larger mask
+            #   3. Detection bounding-box IoU > 0.60
+            # Check (2) catches the common "urn"/"vase" vs "guitar" case
+            # where SAM segments the same area but the IoU is low because
+            # one mask is a strict subset of the other.
             skip = False
+            # Convert tight_bbox (y0,x0,y1,x1) to (x0,y0,x1,y1) for comparison
+            det_bbox_xyxy = det_result.bbox  # already (x0,y0,x1,y1)
             for ex_lbl in list(accepted_parents):
-                iou = _mask_iou(parent_mask, masks[ex_lbl])
-                if iou <= PARENT_IOU_MERGE:
+                m_iou = _mask_iou(parent_mask, masks[ex_lbl])
+                m_contain = _mask_containment(parent_mask, masks[ex_lbl])
+                # Convert stored tight_bbox (y0,x0,y1,x1) → (x0,y0,x1,y1)
+                ey0, ex0, ey1, ex1 = bboxes[ex_lbl]
+                ex_bbox_xyxy = (ex0, ey0, ex1, ey1)
+                b_iou = _bbox_iou(det_bbox_xyxy, ex_bbox_xyxy)
+                logger.info(
+                    "Dedup check '%s' vs '%s': mask_iou=%.3f, containment=%.3f, "
+                    "bbox_iou=%.3f | det_bbox=%s, ex_bbox=%s",
+                    parent.display_label, ex_lbl, m_iou, m_contain, b_iou,
+                    det_bbox_xyxy, ex_bbox_xyxy,
+                )
+                is_dup = (
+                    m_iou > PARENT_IOU_MERGE
+                    or m_contain > PARENT_CONTAINMENT_MERGE
+                    or b_iou > BBOX_IOU_MERGE
+                )
+                if not is_dup:
                     continue
+                logger.info(
+                    "Dedup '%s' vs '%s': mask_iou=%.2f, containment=%.2f, bbox_iou=%.2f",
+                    parent.display_label, ex_lbl, m_iou, m_contain, b_iou,
+                )
                 ex_is_fallback = ex_lbl in fallback_bbox_parents
                 if ex_is_fallback and not used_fallback_bbox:
                     # Current has a real detection — evict the fallback entry
                     logger.info(
-                        "Replacing fallback-bbox '%s' with properly-detected '%s' (IoU %.2f)",
-                        ex_lbl, parent.display_label, iou,
+                        "Replacing fallback-bbox '%s' with properly-detected '%s'",
+                        ex_lbl, parent.display_label,
                     )
                     accepted_parents.remove(ex_lbl)
                     fallback_bbox_parents.discard(ex_lbl)
@@ -300,6 +385,10 @@ class Orchestrator:
                     )
                 else:
                     # Existing wins (both proper, or current is fallback)
+                    logger.info(
+                        "Keeping '%s', dropping duplicate '%s'",
+                        ex_lbl, parent.display_label,
+                    )
                     extra = children_by_parent.get(parent.display_label, [])
                     existing_c = set(children_by_parent.get(ex_lbl, []))
                     children_by_parent.setdefault(ex_lbl, []).extend(
@@ -325,6 +414,7 @@ class Orchestrator:
             if children:
                 self._report(4, f"SAM 2.1 — {len(children)} children of '{parent.display_label}'")
                 body_mask = parent_mask.copy()
+                accepted_child_masks: list[tuple[str, NDArray[np.uint8]]] = []
                 for child_label in children:
                     child_det = self._detect_candidate(
                         image,
@@ -338,6 +428,33 @@ class Orchestrator:
                     child_mask = self._segmenter.segment(image, child_det.bbox, child_label)
                     if mask_coverage(child_mask) < MIN_CHILD_COVERAGE_PCT:
                         continue
+
+                    # Reject child if its mask is too similar to the parent
+                    # (GroundingDINO couldn't isolate the sub-part)
+                    parent_iou = _mask_iou(child_mask, parent_mask)
+                    if parent_iou > MAX_CHILD_PARENT_IOU:
+                        logger.info(
+                            "Child '%s' mask too similar to parent '%s' "
+                            "(iou=%.2f > %.2f), skipping",
+                            child_label, parent.display_label,
+                            parent_iou, MAX_CHILD_PARENT_IOU,
+                        )
+                        continue
+
+                    # Reject child if its mask duplicates an already-accepted child
+                    child_dup = False
+                    for ex_child_label, ex_child_mask in accepted_child_masks:
+                        if _mask_iou(child_mask, ex_child_mask) > MAX_CHILD_CHILD_IOU:
+                            logger.info(
+                                "Child '%s' duplicates '%s' (iou > %.2f), skipping",
+                                child_label, ex_child_label, MAX_CHILD_CHILD_IOU,
+                            )
+                            child_dup = True
+                            break
+                    if child_dup:
+                        continue
+
+                    accepted_child_masks.append((child_label, child_mask))
                     masks[child_label] = child_mask
                     body_mask = boolean_subtract(body_mask, child_mask)
                     result.layers.append(
@@ -415,6 +532,16 @@ class Orchestrator:
         candidate: InterrogationCandidate,
         manual_lookup: dict[str, list[tuple[int, int, int, int]]] | None = None,
     ):
+        det, _is_manual = self._detect_candidate_ex(image, candidate, manual_lookup)
+        return det
+
+    def _detect_candidate_ex(
+        self,
+        image: NDArray[np.uint8],
+        candidate: InterrogationCandidate,
+        manual_lookup: dict[str, list[tuple[int, int, int, int]]] | None = None,
+    ) -> tuple[DetectionResult | None, bool]:
+        """Like _detect_candidate but also returns whether detection was manual."""
         if manual_lookup:
             manual_bbox = self._consume_manual_bbox(manual_lookup, candidate)
             if manual_bbox is not None:
@@ -422,7 +549,7 @@ class Orchestrator:
                     label=candidate.display_label,
                     bbox=manual_bbox,
                     confidence=1.0,
-                )
+                ), True
         phrases = candidate.detector_phrases or [candidate.display_label]
         for phrase in phrases:
             detection = self._detector.detect_box(
@@ -432,8 +559,8 @@ class Orchestrator:
                 self._text_threshold,
             )
             if detection is not None:
-                return detection
-        return None
+                return detection, False
+        return None, False
 
     def _build_manual_lookup(
         self,

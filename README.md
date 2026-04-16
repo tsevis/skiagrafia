@@ -4,6 +4,10 @@
 >
 > A desktop application for AI-powered image segmentation, masking, and vectorization.
 
+[![Python](https://img.shields.io/badge/python-3.11+-blue.svg)](https://www.python.org/downloads/)
+[![Platform](https://img.shields.io/badge/platform-macOS%20Apple%20Silicon-lightgrey.svg)](https://developer.apple.com/documentation/techdocs/50056847)
+[![Architecture](https://img.shields.io/badge/architecture-v5.2-orange.svg)](docs/CLAUDEv5.md)
+
 **Skiagrafia** uses local ML models to automatically segment images into semantic layers (objects and their parts), producing both vector (SVG) and bitmap (TIFF/PNG) outputs. Designed for designers and production workflows.
 
 <p align="center">
@@ -38,7 +42,7 @@ python main.py
 4. [Installation](#installation)
 5. [Quick Start](#quick-start)
 6. [Operating Modes](#operating-modes)
-7. [Architecture v5.1](#architecture-v51)
+7. [Architecture v5.2](#architecture-v52)
 8. [Pipeline Details](#pipeline-details)
 9. [ML Models](#ml-models)
 10. [User Interface](#user-interface)
@@ -86,9 +90,9 @@ Skiagrafia addresses a common challenge in design and production workflows: conv
 
 ### ML Pipeline (10-step)
 
-- **Moondream 2**: Semantic interrogation via Ollama with fallback chain
-- **GroundingDINO**: Text-to-bounding-box detection
-- **SAM 2.1 HQ**: State-of-the-art segmentation
+- **Moondream 2**: Semantic interrogation via Ollama with dual-prompt strategy and fallback chain
+- **GroundingDINO**: Text-to-bounding-box detection with scan-stage deduplication
+- **SAM 2.1 HQ**: State-of-the-art segmentation with multi-mask output for manual bboxes
 - **VitMatte**: High-quality alpha matting
 - **VTracer**: Bitmap-to-SVG spline fitting
 
@@ -241,7 +245,7 @@ Single Image Mode provides an interactive designer workflow with a three-panel l
 
 **Features:**
 
-- Real-time preview with zoom and pan
+- Real-time preview with zoom, pan, and scrollbar navigation
 - Layer visibility toggles
 - Parameter adjustment without re-running pipeline
 - Individual layer export
@@ -290,9 +294,9 @@ Step 6: Output
 
 ---
 
-## Architecture v5.1
+## Architecture v5.2
 
-v5.1 implements contract-based dependency injection with five capability protocols for decoupled model management and a lean 10-step structural pipeline.
+v5.2 implements contract-based dependency injection with five capability protocols for decoupled model management and a lean 10-step structural pipeline. v5.2 adds two-stage deduplication, child mask validation, multi-mask manual bbox handling, and scrollbar canvas navigation.
 
 ### Design Principles
 
@@ -307,8 +311,8 @@ v5.1 implements contract-based dependency injection with five capability protoco
 ```
 ┌─────────────────────────────────────────────────────────────────┐
 │                     UI Layer                                    │
-│  main_window.py · left_panel.py · step_progress.py              │
-│  batch_runner.py                                                │
+│  main_window.py · left_panel.py · canvas_panel.py                │
+│  step_progress.py · batch_runner.py                             │
 │                                                                 │
 │  Reads preferences → builds concrete clients → injects          │
 │  them into Orchestrator via CapabilitySet                       │
@@ -351,7 +355,7 @@ v5.1 implements contract-based dependency injection with five capability protoco
 |----------|--------|------------------------|
 | `Interrogator` | `interrogate()` | `GuidedInterrogator` (Moondream + fallbacks) |
 | `Detector` | `detect_box()` | `GroundedSAM` (GroundingDINO) |
-| `Segmenter` | `segment()`, `clear_cache()` | `GroundedSAM` (SAM 2.1 HQ) |
+| `Segmenter` | `segment(prefer_full_box)`, `clear_cache()` | `GroundedSAM` (SAM 2.1 HQ) |
 | `AlphaRefiner` | `predict()` | `VitMatteRefiner` |
 | `Vectorizer` | `trace()` | `VTracerVectorizer` |
 
@@ -367,10 +371,13 @@ The `Orchestrator` class executes a 10-step structural pipeline:
 Step 1:  Load image as numpy array (BGR -> RGB)
 Step 2:  Moondream interrogation — get parents, filter against confirmed labels,
          get children per confirmed parent
-Step 3:  GroundingDINO detection — text-to-bounding-box per parent label
-Step 4:  SAM 2.1 HQ parent segmentation — mask from bounding box prompt
-         Tighten bbox from mask contour
+Step 3:  GroundingDINO detection — text-to-bounding-box per parent label,
+         scan-stage bbox dedup (IoU + containment) removes duplicate detections
+Step 4:  SAM 2.1 HQ parent segmentation — mask from bounding box prompt,
+         multi-mask output for manual bboxes (prefer_full_box), tighten bbox
+         from mask contour, pipeline-stage dedup (mask IoU + containment + bbox IoU)
 Step 5:  SAM child segmentation — crop region, detect + segment per child,
+         child mask validation (reject parent-similar >85% IoU, sibling dedup >80% IoU),
          boolean-subtract children from parent body mask
 Step 6:  Coordinate remapping — transform child masks from crop space to
          full image space, validate dimensions
@@ -464,6 +471,7 @@ Step 10: SVG assembly — group paths by layer hierarchy, write final SVG,
 - Hiera Large backbone for precision
 - MPS acceleration on Apple Silicon
 - Automatic mask refinement
+- Multi-mask output mode for manual bboxes (selects highest fill ratio)
 
 **Configuration**:
 - Model: `sam2.1_hiera_large.pt`
@@ -508,6 +516,7 @@ Three-panel layout:
 
 **Center Panel (Canvas)**:
 - Image preview with zoom/pan (Fit, +/- buttons, scroll wheel, keyboard shortcuts)
+- Scrollbar navigation when zoomed in (horizontal and vertical)
 - Layer overlay toggles (Original, Masks, Vectors, Composite)
 - Real-time mask visualization
 - Color-coded layer display
@@ -617,8 +626,11 @@ export USE_FLAX=0
 # PyTorch MPS fallback
 export PYTORCH_ENABLE_MPS_FALLBACK=1
 
+# Prevent stale .pyc caches from masking source changes
+export PYTHONDONTWRITEBYTECODE=1
+
 # Cairo library path for PDF export (macOS)
-export PKG_CONFIG_PATH="/opt/homebrew/opt/libffi/lib/pkgconfig"
+export DYLD_FALLBACK_LIBRARY_PATH="/opt/homebrew/lib"
 ```
 
 ### Template Files
@@ -692,7 +704,7 @@ Vector PDF export via CairoSVG:
 
 ### Core Classes
 
-#### Orchestrator (v5.1)
+#### Orchestrator (v5.2)
 
 ```python
 from core.orchestrator import Orchestrator
@@ -874,6 +886,23 @@ export DYLD_FALLBACK_LIBRARY_PATH="/opt/homebrew/lib"
 ---
 
 ## License
+<<<<<<< HEAD
 MIT Licence
 
 Built with ❤️ for the design community.
+=======
+
+Released under the MIT License. See [LICENSE](LICENSE).
+
+---
+
+## Related Documentation
+
+| Document | Description |
+|----------|-------------|
+| **[FILE_STRUCTURE.md](FILE_STRUCTURE.md)** | Complete file structure and module descriptions |
+| **[docs/CLAUDE.md](docs/CLAUDE.md)** | Implementation guide for AI assistants |
+| **[docs/CLAUDEv5.md](docs/CLAUDEv5.md)** | v5.0 architecture and contracts refactor notes |
+| **[docs/CLAUDEv4.md](docs/CLAUDEv4.md)** | v4 implementation notes and historical reference |
+| **[docs/CLAUDE_DOMAIN_GUIDES_TAB.md](docs/CLAUDE_DOMAIN_GUIDES_TAB.md)** | Domain Guides tab implementation spec |
+>>>>>>> 830ca12 (Update skiagrafia pipeline and UI)

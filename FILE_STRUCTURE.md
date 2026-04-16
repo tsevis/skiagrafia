@@ -5,7 +5,7 @@
 
 [![Python](https://img.shields.io/badge/python-3.11+-blue.svg)](https://www.python.org/downloads/)
 [![Platform](https://img.shields.io/badge/platform-macOS%20Apple%20Silicon-lightgrey.svg)](https://developer.apple.com/documentation/techdocs/50056847)
-[![Architecture](https://img.shields.io/badge/architecture-v5.0-orange.svg)](docs/CLAUDEv5.md)
+[![Architecture](https://img.shields.io/badge/architecture-v5.2-orange.svg)](docs/CLAUDEv5.md)
 
 ---
 
@@ -13,7 +13,7 @@
 
 Skiagrafia is a Python desktop application that uses local ML models (GroundingDINO, SAM 2.1 HQ, VitMatte, Moondream 2) to semantically segment images and produce vector (SVG) and bitmap (TIFF/PNG) outputs. It features a Tkinter-based GUI with two operating modes: **Single Image** (designer workflow) and **Batch** (production pipeline).
 
-**Architecture v5.0**: Contract-based dependency injection with five capability protocols for decoupled model management.
+**Architecture v5.2**: Contract-based dependency injection with five capability protocols, multi-level deduplication (scan-stage bbox dedup + pipeline-stage mask/containment dedup), and smart child validation.
 
 ---
 
@@ -35,26 +35,21 @@ skiagrafia/
 │
 ├── main.py                          # Application entry point
 ├── pyproject.toml                   # Project dependencies and metadata
-├── run.sh                           # Shell script launcher
+├── run.sh                           # Shell script launcher (sets offline env)
 ├── README.md                        # Main documentation
 ├── FILE_STRUCTURE.md                # This file
-│
-├── .claude/                         # Claude Code assistant settings
-│   └── settings.local.json
-│
-├── .qwen/                           # Qwen Code assistant settings
-│   └── settings.json
+├── LICENSE                          # MIT license
 │
 ├── core/                            # Core pipeline and state management
 │   ├── __init__.py
-│   ├── orchestrator.py              # 12-step pipeline with injected capabilities
+│   ├── orchestrator.py              # 10-step pipeline with injected capabilities
 │   ├── batch_runner.py              # ProcessPoolExecutor batch coordinator
 │   ├── batch_template.py            # Single → Batch template serialization
 │   ├── state_manager.py             # SQLiteDict job state persistence
 │   ├── interrogation.py             # GuidedInterrogator with VLM fallback chain
 │   ├── knowledge.py                 # KnowledgePack and ObjectKnowledge models
-│   ├── contracts.py                 # v5.0: Five capability Protocol interfaces
-│   └── factory.py                   # v5.0: CapabilitySet builder from preferences
+│   ├── contracts.py                 # Five capability Protocol interfaces
+│   └── factory.py                   # CapabilitySet builder from preferences
 │
 ├── models/                          # ML model wrappers (protocol implementations)
 │   ├── __init__.py
@@ -66,8 +61,7 @@ skiagrafia/
 │   ├── __init__.py
 │   ├── mask_ops.py                  # Boolean ops, bbox, mask refinement
 │   ├── image_filter.py              # Bilateral filter, K-Means
-│   ├── vectorizer.py                # VTracer wrapper (Vectorizer protocol)
-│   ├── svg_assembler.py             # SVG composition and layer assembly
+│   ├── vectorizer.py                # VTracer wrapper (Vectorizer protocol) + SVG assembly
 │   └── output_writer.py             # TIFF/PNG/SVG/PDF serialization
 │
 ├── ui/                              # User interface components
@@ -79,8 +73,8 @@ skiagrafia/
 │   ├── single/                      # Single image mode UI
 │   │   ├── __init__.py
 │   │   ├── single_view.py           # Three-panel layout manager
-│   │   ├── left_panel.py            # Drop zone, labels, parameters, Process
-│   │   ├── canvas_panel.py          # Dark canvas, zoom/pan, overlays
+│   │   ├── left_panel.py            # Drop zone, labels, parameters, scan dedup
+│   │   ├── canvas_panel.py          # Canvas with zoom/pan, scrollbars, overlays
 │   │   ├── right_panel.py           # Layers list, controls, export
 │   │   └── canvas_overlays.py       # Mask/vector overlay rendering
 │   │
@@ -100,34 +94,24 @@ skiagrafia/
 │   │
 │   └── preferences/                 # Preferences window
 │       ├── __init__.py
-│       └── preferences_window.py    # Five-tab modal (General, Models, Pipeline, Appearance, Templates)
+│       ├── preferences_window.py    # Six-tab modal (General, Models, Pipeline, Appearance, Templates, Domain Guides)
+│       └── guide_editor.py          # Domain guide TOML editor component
 │
 ├── utils/                           # Utility modules
 │   ├── __init__.py
 │   ├── mps_utils.py                 # MPS/CPU device detection
-│   ├── model_manager.py             # v5.0: ModelManager class for lifecycle
+│   ├── model_manager.py             # ModelManager class for lifecycle
 │   ├── coord_math.py                # Affine remap, crop, bbox helpers
 │   ├── thumbnail.py                 # 32×32 SVG thumbnail renderer
 │   └── preferences.py               # JSON preferences load/save
 │
-├── docs/                            # Documentation and planning
-│   ├── CLAUDE.md                    # Implementation guide for Claude Code
-│   ├── CLAUDEv4.md                  # Claude Code v4 implementation notes
-│   ├── CLAUDEv5.md                  # v5.0 Contracts & DI refactor guide
-│   ├── CLAUDE_FIXES.md              # Bug fixes and troubleshooting guide
-│   ├── CLAUDE_HEALTHCHECK.md        # System health check procedures
-│   ├── skiaplan.ai                  # Architecture diagram (Adobe Illustrator)
-│   ├── skiaplan.png                 # Architecture diagram preview
-│   ├── skiaplan.txt                 # Architecture planning notes
-│   ├── skiaplan2.jpg                # Alternative architecture sketch
-│   ├── skiaplan2.png                # Alternative architecture sketch preview
-│   ├── Strategic Optimization for Skiagrafia & Moondream.md
-│   ├── Skiagrafia Health Report -- 2026-03-28.md
-│   ├── Proposal for a Modular Plugin Architecture.md
-│   └── Skiagrafia as a Plugin-Based Platform.md
+├── tests/                           # Test suite
+│   ├── test_contracts.py            # Protocol conformance and instantiation tests
+│   └── test_knowledge_interrogation.py  # KnowledgePack, interrogation helpers
 │
-└── skiagrafia_out/                  # Output directory for generated files
-    └── (generated outputs)          # SVG, TIFF, PNG exports from processing
+└── docs/                            # Documentation and planning
+    ├── skiagrafia-readme.jpg        # README hero image
+    └── Skiagrafia.png               # Application icon
 ```
 
 ---
@@ -140,37 +124,36 @@ skiagrafia/
 |------|---------|
 | `main.py` | Application bootstrap: environment setup (offline mode), logging, Ollama health check, TkinterDnD root window, MainWindow instantiation |
 | `pyproject.toml` | Project metadata and dependencies (torch, torchvision, tkinterdnd2, pillow, opencv-python-headless, etc.) |
-| `run.sh` | Shell script launcher that sets environment variables for offline inference |
+| `run.sh` | Shell script launcher that sets environment variables for offline inference and disables bytecode caching |
 
-### Core Pipeline (v5.0 Architecture)
+### Core Pipeline
 
 | File | Purpose |
 |------|---------|
-| `orchestrator.py` | **12-step pipeline** with injected `CapabilitySet`. Knows only Protocol interfaces, never concrete model clients. Pipeline: Load → Interrogate → Detect → Segment (parent) → Segment (children) → Remap coords → Alpha refine → Mask refine → Vectorize → Assemble SVG → Export |
+| `orchestrator.py` | **10-step pipeline** with injected `CapabilitySet`. Knows only Protocol interfaces. Includes multi-level parent dedup (mask IoU, mask containment, bbox IoU) and child validation (parent-similarity rejection, child-child dedup). Pipeline: Load → Interrogate → Detect → Segment parent → Segment children → Remap → Alpha refine → Mask refine → Vectorize → SVG assembly |
 | `batch_runner.py` | Coordinates parallel processing via `ProcessPoolExecutor`; uses factory to build capabilities in worker processes |
 | `batch_template.py` | Pydantic model for serializing Single mode parameters into reusable Batch templates |
 | `state_manager.py` | SQLiteDict-based persistence for batch job state (pending, running, complete, failed) |
-| `interrogation.py` | `GuidedInterrogator` with VLM fallback chain (primary → fallback → reasoner), tiled fallback for high-res images |
+| `interrogation.py` | `GuidedInterrogator` with VLM fallback chain (primary → fallback → reasoner), tiled fallback for high-res images, configurable child parts cap per profile |
 | `knowledge.py` | `KnowledgePack` and `ObjectKnowledge` Pydantic models for semantic label normalization and detector phrase ranking |
-| `contracts.py` | **v5.0**: Five `@runtime_checkable` Protocol interfaces (Interrogator, Detector, Segmenter, AlphaRefiner, Vectorizer) + `CapabilitySet` bundle |
-| `factory.py` | **v5.0**: `build_capabilities()` function that reads preferences and constructs wired `CapabilitySet` with concrete clients |
+| `contracts.py` | Five `@runtime_checkable` Protocol interfaces (Interrogator, Detector, Segmenter, AlphaRefiner, Vectorizer) + `CapabilitySet` bundle |
+| `factory.py` | `build_capabilities()` function that reads preferences and constructs wired `CapabilitySet` with concrete clients |
 
 ### ML Model Clients (Protocol Implementations)
 
 | File | Purpose |
 |------|---------|
-| `moondream_client.py` | `MoondreamClient`: HTTP client for Ollama API; implements `Interrogator` protocol |
-| `grounded_sam.py` | `GroundedSAM`: Wraps GroundingDINO (text→bbox) and SAM 2.1 HQ (bbox→mask); implements `Detector` + `Segmenter` protocols; lazy model loading |
+| `moondream_client.py` | `MoondreamClient`: HTTP client for Ollama API; multi-prompt child detection with numbering cleanup; implements `Interrogator` protocol |
+| `grounded_sam.py` | `GroundedSAM`: GroundingDINO (text→bbox) + SAM 2.1 HQ (bbox→mask); `prefer_full_box` multi-mask mode for manual bboxes; synonym retry for ambiguous labels; implements `Detector` + `Segmenter` protocols |
 | `vitmatte_refiner.py` | `VitMatteRefiner`: Alpha matting for fine edge detail; implements `AlphaRefiner` protocol |
 
 ### Processors
 
 | File | Purpose |
 |------|---------|
-| `mask_ops.py` | Boolean operations (subtract, union), bounding box calculations, mask refinement (morphology, contour filtering) |
+| `mask_ops.py` | Boolean operations (subtract, union, intersect), bounding box calculations, mask refinement (bilateral, morphology, contour filtering), coverage metrics |
 | `image_filter.py` | Bilateral filtering for edge-preserving smoothing, K-Means color quantization |
-| `vectorizer.py` | `VTracerVectorizer` class (implements `Vectorizer` protocol) + `trace_mask()` function + `assemble_svg()` composition |
-| `svg_assembler.py` | SVG composition and layer assembly utilities for hybrid raster+vector output |
+| `vectorizer.py` | `VTracerVectorizer` class (implements `Vectorizer` protocol) + `trace_mask()` + `assemble_svg()` multi-layer composition |
 | `output_writer.py` | Serialization to TIFF (4-channel), PNG, SVG, PDF formats |
 
 ### UI Components
@@ -180,41 +163,45 @@ skiagrafia/
 | `ui/theme.py` | Color palette (mirrors macOS system colors), ttk style configuration |
 | `ui/main_window.py` | Top-level shell: title bar, mode switcher, content area swap, preferences access |
 | `ui/mode_switcher.py` | Custom ttk.Frame with segmented control buttons for Single/Batch mode |
-| `ui/single/` | Single image mode: three-panel layout (left: controls, center: canvas, right: layers) |
 | `ui/single/single_view.py` | Three-panel layout manager coordinating left/center/right panels |
-| `ui/single/left_panel.py` | Drop zone, label list, VTracer parameters, Process/Export buttons |
-| `ui/single/canvas_panel.py` | Dark canvas with zoom/pan, overlay rendering for masks/vectors |
+| `ui/single/left_panel.py` | Drop zone, label list, VTracer parameters, Process/Export buttons, **scan-stage bbox dedup** (filters duplicate detections before they reach the UI) |
+| `ui/single/canvas_panel.py` | Canvas with zoom/pan, **horizontal and vertical scrollbars**, overlay rendering for masks/vectors, manual box drawing, compare slider |
 | `ui/single/right_panel.py` | Hierarchical layer list with visibility toggles and export controls |
 | `ui/single/canvas_overlays.py` | Mask and vector overlay rendering utilities |
-| `ui/batch/` | Batch mode: six-step wizard with sidebar navigation and progress tracking |
 | `ui/batch/batch_view.py` | Six-step wizard layout manager |
 | `ui/batch/sidebar.py` | Numbered step navigation with completion indicators |
 | `ui/batch/bottom_bar.py` | Status display, progress bar, navigation buttons |
-| `ui/batch/steps/` | Individual wizard step implementations |
 | `ui/batch/steps/step_import.py` | Step 1: Folder selection, template loading, recursion depth |
 | `ui/batch/steps/step_configure.py` | Step 2: Output format, VTracer parameters, naming conventions |
 | `ui/batch/steps/step_interrogate.py` | Step 3: Moondream scanning progress with tag cloud preview |
 | `ui/batch/steps/step_triage.py` | Step 4: Human label review and confirmation (mandatory gate) |
 | `ui/batch/steps/step_progress.py` | Step 5: Real-time progress with per-image status and thumbnails |
 | `ui/batch/steps/step_output.py` | Step 6: Summary statistics, export bundles, retry failed jobs |
-| `ui/preferences/` | Five-tab preferences modal |
-| `ui/preferences/preferences_window.py` | Preferences window: General, Models & Ollama, Pipeline, Appearance, Templates |
+| `ui/preferences/preferences_window.py` | Six-tab preferences modal: General, Models & Ollama, Pipeline, Appearance, Templates, Domain Guides |
+| `ui/preferences/guide_editor.py` | Domain guide TOML editor component with scrollable form and live preview |
 
 ### Utilities
 
 | File | Purpose |
 |------|---------|
 | `mps_utils.py` | PyTorch MPS device detection with CPU fallback |
-| `model_manager.py` | **v5.0**: `ModelManager` class for model lifecycle (discovery, download, path resolution, device residency tracking, memory-aware unload) |
-| `coord_math.py` | Coordinate transformations: crop with padding, mask remapping, tight bounding box |
+| `model_manager.py` | `ModelManager` class for model lifecycle (discovery, download, path resolution, device residency tracking) |
+| `coord_math.py` | Coordinate transformations: crop with padding, mask remapping, tight bounding box (`y0,x0,y1,x1` format) |
 | `thumbnail.py` | CairoSVG-based 32×32 SVG thumbnail rendering with LRU cache |
 | `preferences.py` | JSON file I/O for user preferences stored in `~/.config/skiagrafia/`; `get_models_dir()` helper |
+
+### Tests
+
+| File | Purpose |
+|------|---------|
+| `test_contracts.py` | Protocol conformance (all concrete classes satisfy their protocols), CapabilitySet construction, ModelManager, Orchestrator instantiation and signature tests |
+| `test_knowledge_interrogation.py` | KnowledgePack loading/validation, child parts filtering, composition prompts, candidate parsing, detector phrase ranking, reasoner gating |
 
 ---
 
 ## Data Flow
 
-### v5.0 Architecture Overview
+### Architecture Overview
 
 ```
 ┌─────────────────────────────────────────────────────────────────┐
@@ -231,6 +218,8 @@ skiagrafia/
 │                   Orchestrator                                  │
 │  Knows ONLY the Protocol interfaces.                            │
 │  Never imports a concrete model client.                         │
+│  Multi-level dedup: mask IoU, containment, bbox IoU.            │
+│  Child validation: parent-similarity, child-child dedup.        │
 └────────────────────────┬────────────────────────────────────────┘
                          │ calls Protocol methods
                          ▼
@@ -260,24 +249,34 @@ skiagrafia/
 ### Single Image Mode Pipeline
 
 ```
-[Image Drop] ──► [Moondream Scan] ──► [Label Selection]
-                         │
-                         ▼
+[Image Drop] ──► [Moondream Scan] ──► [GroundingDINO Boxes]
+                                              │
+                                    ┌─────────▼──────────┐
+                                    │  Scan-Stage Dedup   │
+                                    │  bbox IoU + contain │
+                                    │  (left_panel.py)    │
+                                    └─────────┬──────────┘
+                                              │
+                                    [Label Selection]
+                                              │
+                                              ▼
 ┌─────────────────────────────────────────────────────────────────┐
-│                 ORCHESTRATOR (12 steps)                         │
+│                 ORCHESTRATOR (10 steps)                          │
 │                                                                  │
-│  0.  Initialize capabilities (injected via CapabilitySet)       │
 │  1.  Load Image (RGB conversion, metadata)                      │
 │  2.  Moondream Interrogation → parent/child labels              │
 │  3.  GroundingDINO Detection → bounding boxes                   │
+│      ├── Manual bbox: prefer_full_box + clip to bbox            │
+│      └── Pipeline-stage dedup: mask IoU, containment, bbox IoU  │
 │  4.  SAM 2.1 HQ Parent Segmentation → parent mask               │
-│  5.  SAM 2.1 HQ Child Segmentation (cropped) → child masks      │
+│  5.  SAM 2.1 HQ Child Segmentation → child masks                │
+│      ├── Reject if child IoU > 0.85 with parent (same object)  │
+│      └── Reject if child IoU > 0.80 with sibling (duplicate)   │
 │  6.  Coordinate Remapping (crop → full canvas)                  │
 │  7.  VitMatte Alpha Refinement → soft alpha mattes              │
 │  8.  Mask Refinement (bilateral, morphology, contour filter)    │
 │  9.  VTracer Vectorization → SVG path data                      │
-│  10. SVG Assembly (grouped layers, hierarchy)                   │
-│  11. Export (TIFF/PNG/SVG/PDF)                                  │
+│  10. SVG Assembly + Export (TIFF/SVG)                           │
 └─────────────────────────────────────────────────────────────────┘
                          │
                          ▼
@@ -301,28 +300,28 @@ Step 6: Output    ──► Summary, export bundles, retry failed
 
 | Class | Module | Description |
 |-------|--------|-------------|
-| `Orchestrator` | `core/orchestrator.py` | 12-step pipeline executor; receives `CapabilitySet` via constructor injection |
+| `Orchestrator` | `core/orchestrator.py` | 10-step pipeline executor; receives `CapabilitySet` via constructor injection; multi-level parent dedup and child validation |
 | `PipelineResult` | `core/orchestrator.py` | Pydantic model for pipeline output (layers, paths, errors) |
-| `LayerResult` | `core/orchestrator.py` | Pydantic model for a single layer result (mask, alpha, svg_path, label) |
+| `LayerResult` | `core/orchestrator.py` | Pydantic model for a single layer result (label, role, bbox, svg_data) |
 | `CapabilitySet` | `core/contracts.py` | Pydantic bundle of all five capability protocols for dependency injection |
 | `Interrogator` | `core/contracts.py` | Protocol: `interrogate(image, confirmed_labels, knowledge_pack)` |
-| `Detector` | `core/contracts.py` | Protocol: `detect_box(image, prompt, box_threshold, text_threshold)` |
-| `Segmenter` | `core/contracts.py` | Protocol: `segment(image, boxes, remap_points)` + `clear_cache()` |
+| `Detector` | `core/contracts.py` | Protocol: `detect_box(image, label, box_threshold, text_threshold)` |
+| `Segmenter` | `core/contracts.py` | Protocol: `segment(image, bbox, label, prefer_full_box)` + `clear_cache()` |
 | `AlphaRefiner` | `core/contracts.py` | Protocol: `predict(image, mask)` |
-| `Vectorizer` | `core/contracts.py` | Protocol: `trace(image, mask, params)` |
-| `GuidedInterrogator` | `core/interrogation.py` | VLM interrogation with fallback chain and tiled processing |
-| `KnowledgePack` | `core/knowledge.py` | Normalized label taxonomy with detector phrase rankings |
-| `GroundedSAM` | `models/grounded_sam.py` | GroundingDINO + SAM 2.1 HQ wrapper; implements Detector + Segmenter |
-| `MoondreamClient` | `models/moondream_client.py` | Ollama HTTP client for semantic interrogation |
+| `Vectorizer` | `core/contracts.py` | Protocol: `trace(mask)` |
+| `GuidedInterrogator` | `core/interrogation.py` | VLM interrogation with fallback chain, tiled processing, configurable child parts cap |
+| `InterrogationCandidate` | `core/interrogation.py` | Pydantic model: canonical/display labels, detector phrases, confidence, role |
+| `KnowledgePack` | `core/knowledge.py` | TOML-based label taxonomy with detector phrase rankings and child parts |
+| `GroundedSAM` | `models/grounded_sam.py` | GroundingDINO + SAM 2.1 HQ wrapper; `prefer_full_box` multi-mask selection; synonym retry; implements Detector + Segmenter |
+| `MoondreamClient` | `models/moondream_client.py` | Ollama HTTP client; multi-prompt child detection with numbering cleanup |
 | `VitMatteRefiner` | `models/vitmatte_refiner.py` | Alpha matting model wrapper |
 | `VTracerVectorizer` | `processors/vectorizer.py` | VTracer wrapper implementing Vectorizer protocol |
+| `CanvasPanel` | `ui/single/canvas_panel.py` | Tkinter canvas with zoom/pan, scrollbars, overlay rendering, manual box drawing |
 | `ModelManager` | `utils/model_manager.py` | Model lifecycle management with user-configurable directory |
-| `ModelInfo` | `utils/model_manager.py` | Model metadata (path, size, status, device residency) |
 | `BatchTemplate` | `core/batch_template.py` | Pydantic model for reusable batch configurations |
 | `MainWindow` | `ui/main_window.py` | Application shell; manages mode switching |
 | `SingleView` | `ui/single/single_view.py` | Three-panel layout for single image mode |
 | `BatchView` | `ui/batch/batch_view.py` | Six-step wizard for batch mode |
-| `ZoomableCanvas` | `ui/single/canvas_panel.py` | Tkinter canvas with zoom/pan support |
 
 ---
 
@@ -331,7 +330,6 @@ Step 6: Output    ──► Summary, export bundles, retry failed
 | Location | Purpose |
 |----------|---------|
 | `.claude/settings.local.json` | Claude Code assistant project settings |
-| `.qwen/settings.json` | Qwen Code assistant project settings |
 | `~/.config/skiagrafia/preferences.json` | User preferences (theme, defaults, paths, models_directory) |
 | `~/.config/skiagrafia/templates/*.json` | Saved batch templates |
 | `~/.config/skiagrafia/skiagrafia.log` | Application log file |
@@ -349,7 +347,6 @@ Step 6: Output    ──► Summary, export bundles, retry failed
 | `numpy`, `scipy` | Numerical operations |
 | `pydantic` | Data validation and settings |
 | `sqlitedict` | Persistent state storage |
-| `dask[distributed]` | Parallel processing |
 | `tqdm`, `rich` | Progress bars and logging |
 | `cairosvg` | SVG rendering and PDF export |
 | `vtracer` | Bitmap to vector conversion |
@@ -376,7 +373,7 @@ Step 6: Output    ──► Summary, export bundles, retry failed
 # Run the application
 python main.py
 
-# Or use the shell script
+# Or use the shell script (recommended — sets env vars)
 ./run.sh
 ```
 

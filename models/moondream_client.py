@@ -78,6 +78,29 @@ def _dedupe(items: list[str], limit: int) -> list[str]:
     return result[:limit]
 
 
+_NUMBERING_RE = re.compile(
+    r"^\s*\d+[\].):\-]\s*"  # strips "1] ", "2. ", "3) ", "4- " etc.
+)
+
+
+def _split_children_response(response: str) -> list[str]:
+    """Split and clean a Moondream children response.
+
+    Handles comma-separated, newline-separated, and numbered lists.
+    Strips numbering artifacts like '1]', '2.', '3)' that Moondream
+    sometimes produces.
+    """
+    parts: list[str] = [response]
+    for splitter in (",", "\n", ";"):
+        parts = list(chain.from_iterable(p.split(splitter) for p in parts))
+    cleaned: list[str] = []
+    for part in parts:
+        item = _NUMBERING_RE.sub("", part).strip()
+        if item:
+            cleaned.append(item)
+    return cleaned
+
+
 class MoondreamClient:
     """Ollama HTTP client for Moondream 2 semantic interrogation."""
 
@@ -199,16 +222,32 @@ class MoondreamClient:
     def get_children(
         self, image: NDArray[np.uint8], parent_label: str
     ) -> list[str]:
-        """Detect sub-parts of a parent object (deduplicated, capped)."""
-        prompt = (
-            f"Name up to {MAX_CHILDREN} distinct visible parts of the '{parent_label}' ONLY. "
-            "Do NOT list parts belonging to other objects in the image. "
-            "Reply ONLY with a comma-separated list. No numbering, no explanation. "
-            "Do NOT list colours. Do NOT repeat any item."
-        )
-        response = self._query(image, prompt)
-        raw = [c.strip() for c in response.split(",") if c.strip()]
-        children = _dedupe(raw, MAX_CHILDREN)
+        """Detect sub-parts of a parent object (deduplicated, capped).
+
+        Runs two prompt strategies and merges results for better coverage.
+        """
+        prompts = [
+            (
+                f"What are the visible parts and components of this {parent_label}? "
+                "List specific physical parts like buttons, knobs, panels, handles. "
+                "Reply ONLY as a comma-separated list. No numbering."
+            ),
+            (
+                f"Name the distinct physical sub-parts of the '{parent_label}' visible in this image. "
+                "Focus on parts that have clear outlines: controls, hardware, structural elements. "
+                "Reply ONLY as a comma-separated list. No numbering, no explanation."
+            ),
+        ]
+
+        all_raw: list[str] = []
+        for prompt in prompts:
+            response = self._query(image, prompt)
+            raw = _split_children_response(response)
+            all_raw.extend(raw)
+            if len(_dedupe(all_raw, MAX_CHILDREN)) >= 4:
+                break
+
+        children = _dedupe(all_raw, MAX_CHILDREN)
         logger.info("Moondream children of '%s': %s", parent_label, children)
         return children
 

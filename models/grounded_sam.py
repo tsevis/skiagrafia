@@ -43,6 +43,83 @@ def _patch_onnx_ml_dtypes() -> None:
 
 _patch_onnx_ml_dtypes()
 
+
+def _patch_bert_head_mask() -> None:
+    """Restore `get_head_mask` on `BertModel` for GroundingDINO compatibility.
+
+    transformers >=5.0 removed `get_head_mask` from `BertModel`, but
+    GroundingDINO's `BertModelWarper` reads it as an attribute during init.
+    We reinstate the historical implementation.
+    """
+    try:
+        from transformers.models.bert.modeling_bert import BertModel
+    except Exception:
+        return
+
+    if hasattr(BertModel, "get_head_mask"):
+        return
+
+    def get_head_mask(
+        self,
+        head_mask,
+        num_hidden_layers: int,
+        is_attention_chunked: bool = False,
+    ):
+        if head_mask is None:
+            return [None] * num_hidden_layers
+        if head_mask.dim() == 1:
+            head_mask = head_mask.unsqueeze(0).unsqueeze(0).unsqueeze(-1).unsqueeze(-1)
+            head_mask = head_mask.expand(num_hidden_layers, -1, -1, -1, -1)
+        elif head_mask.dim() == 2:
+            head_mask = head_mask.unsqueeze(1).unsqueeze(-1).unsqueeze(-1)
+        if is_attention_chunked:
+            head_mask = head_mask.unsqueeze(-1)
+        return head_mask
+
+    BertModel.get_head_mask = get_head_mask  # type: ignore[attr-defined]
+    logger.info("Patched BertModel.get_head_mask for GroundingDINO compatibility")
+
+
+def _patch_get_extended_attention_mask() -> None:
+    """Accept legacy `device` positional in `get_extended_attention_mask`.
+
+    transformers >=5.0 dropped the `device` parameter, but GroundingDINO's
+    `BertModelWarper.forward` still calls
+    `self.get_extended_attention_mask(mask, shape, device)`. We wrap the
+    method to detect a `torch.device` in that slot and discard it.
+    """
+    try:
+        from transformers.modeling_utils import ModuleUtilsMixin
+    except Exception:
+        return
+
+    original = ModuleUtilsMixin.get_extended_attention_mask
+    if getattr(original, "_skiagrafia_patched", False):
+        return
+
+    def get_extended_attention_mask(
+        self,
+        attention_mask,
+        input_shape,
+        device=None,
+        dtype=None,
+    ):
+        if isinstance(device, torch.dtype) and dtype is None:
+            dtype, device = device, None
+        elif not isinstance(device, torch.device) and device is not None and dtype is None:
+            dtype = device
+        return original(self, attention_mask, input_shape, dtype=dtype)
+
+    get_extended_attention_mask._skiagrafia_patched = True  # type: ignore[attr-defined]
+    ModuleUtilsMixin.get_extended_attention_mask = get_extended_attention_mask  # type: ignore[assignment]
+    logger.info(
+        "Patched ModuleUtilsMixin.get_extended_attention_mask for GroundingDINO compatibility"
+    )
+
+
+_patch_bert_head_mask()
+_patch_get_extended_attention_mask()
+
 # Ambiguous labels that GroundingDINO often fails to detect.
 # Maps short/ambiguous label → list of more specific synonyms to try.
 _LABEL_SYNONYMS: dict[str, list[str]] = {
@@ -238,8 +315,18 @@ class GroundedSAM:
         image: NDArray[np.uint8],
         bbox: tuple[int, int, int, int],
         label: str = "",
+        prefer_full_box: bool = False,
     ) -> NDArray[np.uint8]:
         """Run SAM 2.1 HQ segmentation within a bounding box.
+
+        Parameters
+        ----------
+        prefer_full_box : bool
+            When True (used for manual bounding boxes), request multiple
+            mask candidates from SAM and pick the one with the highest
+            coverage inside the bbox.  This prevents SAM from segmenting
+            only a sub-object (e.g. the screen content instead of the
+            whole monitor).
 
         Returns binary mask (0/255) at image resolution.
         """
@@ -249,23 +336,50 @@ class GroundedSAM:
 
         box_array = np.array(bbox, dtype=np.float32)
 
-        masks, scores, _ = self._sam_predictor.predict(
-            box=box_array,
-            multimask_output=False,
-        )
+        if prefer_full_box:
+            masks, scores, _ = self._sam_predictor.predict(
+                box=box_array,
+                multimask_output=True,
+            )
+            # Pick the mask with the highest coverage inside the bbox
+            best_idx = self._best_mask_for_bbox(masks, bbox)
+            mask = (masks[best_idx] > 0).astype(np.uint8) * 255
+        else:
+            masks, scores, _ = self._sam_predictor.predict(
+                box=box_array,
+                multimask_output=False,
+            )
+            mask = (masks[0] > 0).astype(np.uint8) * 255
 
-        # masks shape: (1, H, W) → (H, W)
-        mask = (masks[0] > 0).astype(np.uint8) * 255
         logger.info(
-            "SAM segment '%s': mask %s, coverage %.1f%%",
+            "SAM segment '%s': mask %s, coverage %.1f%%, prefer_full_box=%s",
             label,
             mask.shape,
             (mask > 0).sum() / mask.size * 100,
+            prefer_full_box,
         )
 
         cache_key = f"{label}_{bbox}"
         self._masks_cache[cache_key] = mask
         return mask
+
+    @staticmethod
+    def _best_mask_for_bbox(
+        masks: NDArray,
+        bbox: tuple[int, int, int, int],
+    ) -> int:
+        """Return index of the mask with the highest fill ratio inside bbox."""
+        x0, y0, x1, y1 = bbox
+        box_area = max(1, (x1 - x0) * (y1 - y0))
+        best_idx = 0
+        best_fill = -1.0
+        for i in range(masks.shape[0]):
+            roi = masks[i, y0:y1, x0:x1]
+            fill = float((roi > 0).sum()) / box_area
+            if fill > best_fill:
+                best_fill = fill
+                best_idx = i
+        return best_idx
 
     def detect_and_segment(
         self,

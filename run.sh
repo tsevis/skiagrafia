@@ -11,6 +11,8 @@ export HF_HUB_OFFLINE=1
 export HF_DATASETS_OFFLINE=1
 export TOKENIZERS_PARALLELISM=false
 export PYTORCH_ENABLE_MPS_FALLBACK=1
+# Prevent stale .pyc caches from masking source changes
+export PYTHONDONTWRITEBYTECODE=1
 # Prevent transformers from importing TensorFlow/Flax (not needed, causes crashes)
 export USE_TF=0
 export USE_FLAX=0

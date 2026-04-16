@@ -118,13 +118,29 @@ class CanvasPanel:
         ).pack(side=tk.RIGHT, padx=(0, 4))
 
     def _build_canvas(self) -> None:
-        """Build the main zoomable canvas."""
+        """Build the main zoomable canvas with scrollbars."""
+        canvas_frame = ttk.Frame(self.frame)
+        canvas_frame.pack(fill=tk.BOTH, expand=True)
+
         self._canvas = tk.Canvas(
-            self.frame,
+            canvas_frame,
             bg="#E9E7E2",
             highlightthickness=0,
         )
-        self._canvas.pack(fill=tk.BOTH, expand=True)
+
+        self._h_scroll = ttk.Scrollbar(
+            canvas_frame, orient=tk.HORIZONTAL, command=self._on_scrollbar_x,
+        )
+        self._v_scroll = ttk.Scrollbar(
+            canvas_frame, orient=tk.VERTICAL, command=self._on_scrollbar_y,
+        )
+
+        self._canvas.grid(row=0, column=0, sticky="nsew")
+        self._v_scroll.grid(row=0, column=1, sticky="ns")
+        self._h_scroll.grid(row=1, column=0, sticky="ew")
+
+        canvas_frame.grid_rowconfigure(0, weight=1)
+        canvas_frame.grid_columnconfigure(0, weight=1)
 
     def _build_preview_controls(self) -> None:
         controls = ttk.Frame(self.frame)
@@ -273,6 +289,7 @@ class CanvasPanel:
         self._canvas.delete("all")
         self._draw_checkerboard(cw, ch)
         self._draw_view_mode(display_w, display_h)
+        self._sync_scrollbars(cw, ch, display_w, display_h)
 
     def refresh_overlays(self) -> None:
         """Re-render overlays after processing or zoom change."""
@@ -678,6 +695,71 @@ class CanvasPanel:
             self.zoom_to_cover()
         else:
             self._redraw()
+
+    def _sync_scrollbars(
+        self, cw: int, ch: int, display_w: int, display_h: int,
+    ) -> None:
+        """Update scrollbar thumb positions and sizes based on pan/zoom."""
+        if display_w <= cw:
+            self._h_scroll.set(0.0, 1.0)
+        else:
+            # visible fraction and offset within the full image width
+            thumb = cw / display_w
+            left = -self._pan_x / display_w
+            self._h_scroll.set(
+                max(0.0, min(1.0 - thumb, left)),
+                min(1.0, left + thumb),
+            )
+
+        if display_h <= ch:
+            self._v_scroll.set(0.0, 1.0)
+        else:
+            thumb = ch / display_h
+            top = -self._pan_y / display_h
+            self._v_scroll.set(
+                max(0.0, min(1.0 - thumb, top)),
+                min(1.0, top + thumb),
+            )
+
+    def _on_scrollbar_x(self, *args: str) -> None:
+        """Handle horizontal scrollbar interaction."""
+        if self._source_image is None:
+            return
+        display_w = self._source_size[0] * self._zoom
+        cw = self._canvas.winfo_width()
+        if display_w <= cw:
+            return
+        self._auto_cover = False
+        if args[0] == "moveto":
+            fraction = float(args[1])
+            self._pan_x = -fraction * display_w
+        elif args[0] == "scroll":
+            amount = int(args[1])
+            if args[2] == "units":
+                self._pan_x -= amount * 20
+            else:  # pages
+                self._pan_x -= amount * cw * 0.9
+        self._redraw()
+
+    def _on_scrollbar_y(self, *args: str) -> None:
+        """Handle vertical scrollbar interaction."""
+        if self._source_image is None:
+            return
+        display_h = self._source_size[1] * self._zoom
+        ch = self._canvas.winfo_height()
+        if display_h <= ch:
+            return
+        self._auto_cover = False
+        if args[0] == "moveto":
+            fraction = float(args[1])
+            self._pan_y = -fraction * display_h
+        elif args[0] == "scroll":
+            amount = int(args[1])
+            if args[2] == "units":
+                self._pan_y -= amount * 20
+            else:  # pages
+                self._pan_y -= amount * ch * 0.9
+        self._redraw()
 
     def set_active_layer(self, label: str) -> None:
         """Update status bar with active layer name."""
