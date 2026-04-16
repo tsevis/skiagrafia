@@ -311,7 +311,7 @@ v5.2 implements contract-based dependency injection with five capability protoco
 ```
 ┌─────────────────────────────────────────────────────────────────┐
 │                     UI Layer                                    │
-│  main_window.py · left_panel.py · canvas_panel.py                │
+│  main_window.py · left_panel.py · canvas_panel.py               │
 │  step_progress.py · batch_runner.py                             │
 │                                                                 │
 │  Reads preferences → builds concrete clients → injects          │
@@ -393,29 +393,29 @@ Step 10: SVG assembly — group paths by layer hierarchy, write final SVG,
 ### Batch Processing Architecture
 
 ```
-┌─────────────────────────────────────────────────────────────────┐
-│                        BatchRunner                              │
-│                                                                 │
+┌────────────────────────────────────────────────────────────────┐
+│                        BatchRunner                             │
+│                                                                │
 │  ┌─────────────────────────────────────────────────────────┐   │
-│  │                  ProcessPoolExecutor                     │   │
-│  │                                                          │   │
+│  │                  ProcessPoolExecutor                    │   │
+│  │                                                         │   │
 │  │   Worker 1        Worker 2        Worker 3        ...   │   │
 │  │   ┌─────────┐     ┌─────────┐     ┌─────────┐           │   │
 │  │   │Orchestr.│     │Orchestr.│     │Orchestr.│           │   │
 │  │   │ Image A │     │ Image B │     │ Image C │           │   │
 │  │   └─────────┘     └─────────┘     └─────────┘           │   │
-│  │                                                          │   │
+│  │                                                         │   │
 │  └─────────────────────────────────────────────────────────┘   │
 │                              │                                 │
 │                              v                                 │
 │  ┌─────────────────────────────────────────────────────────┐   │
-│  │                     StateManager                         │   │
-│  │                                                          │   │
-│  │   SQLiteDict: {job_id: JobRecord(status, result, ...)}   │   │
-│  │                                                          │   │
+│  │                     StateManager                        │   │
+│  │                                                         │   │
+│  │   SQLiteDict: {job_id: JobRecord(status, result, ...)}  │   │
+│  │                                                         │   │
 │  └─────────────────────────────────────────────────────────┘   │
-│                                                                 │
-└─────────────────────────────────────────────────────────────────┘
+│                                                                │
+└────────────────────────────────────────────────────────────────┘
 ```
 
 ---
