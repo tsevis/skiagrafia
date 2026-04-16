@@ -894,15 +894,3 @@ Built with ❤️ for the design community.
 
 Released under the MIT License. See [LICENSE](LICENSE).
 
----
-
-## Related Documentation
-
-| Document | Description |
-|----------|-------------|
-| **[FILE_STRUCTURE.md](FILE_STRUCTURE.md)** | Complete file structure and module descriptions |
-| **[docs/CLAUDE.md](docs/CLAUDE.md)** | Implementation guide for AI assistants |
-| **[docs/CLAUDEv5.md](docs/CLAUDEv5.md)** | v5.0 architecture and contracts refactor notes |
-| **[docs/CLAUDEv4.md](docs/CLAUDEv4.md)** | v4 implementation notes and historical reference |
-| **[docs/CLAUDE_DOMAIN_GUIDES_TAB.md](docs/CLAUDE_DOMAIN_GUIDES_TAB.md)** | Domain Guides tab implementation spec |
->>>>>>> 830ca12 (Update skiagrafia pipeline and UI)
