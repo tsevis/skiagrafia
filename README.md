@@ -886,11 +886,10 @@ export DYLD_FALLBACK_LIBRARY_PATH="/opt/homebrew/lib"
 ---
 
 ## License
-<<<<<<< HEAD
 MIT Licence
 
 Built with ❤️ for the design community.
 =======
 
-Released under the MIT License. See [LICENSE](LICENSE).
+Released under the MIT License. See [LICENSE].
 
