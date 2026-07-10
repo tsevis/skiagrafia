@@ -3,7 +3,6 @@ from __future__ import annotations
 import logging
 from enum import StrEnum
 from pathlib import Path
-from typing import Any
 
 from pydantic import BaseModel
 from sqlitedict import SqliteDict

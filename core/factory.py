@@ -10,7 +10,6 @@ no singletons, no tkinter references.
 """
 from __future__ import annotations
 
-from pathlib import Path
 from typing import Any
 
 from core.contracts import CapabilitySet
@@ -18,9 +17,89 @@ from core.interrogation import GuidedInterrogator, InterrogationSettings
 from core.knowledge import KnowledgePack
 from models.grounded_sam import GroundedSAM
 from models.vitmatte_refiner import VitMatteRefiner
+from models.vlm_client import (
+    BACKEND_LLAMACPP,
+    BACKEND_OLLAMA,
+    DEFAULT_LLAMACPP_URL,
+    DEFAULT_OLLAMA_URL,
+)
 from processors.vectorizer import VTracerVectorizer
 from utils.model_manager import ModelManager
 from utils.preferences import get_models_dir
+
+
+def build_interrogation_settings(
+    prefs: dict[str, Any],
+    *,
+    kp_defaults: dict[str, Any] | None = None,
+    overrides: dict[str, Any] | None = None,
+) -> InterrogationSettings:
+    """Build InterrogationSettings from preferences (single source of truth).
+
+    Backend resolution:
+    - "ollama"   -- primary + fallback chain + separate text reasoner.
+    - "llamacpp" -- one llama.cpp server hosts ONE loaded model, so there is
+      no fallback chain and the same model acts as the text reasoner.
+
+    Parameters
+    ----------
+    prefs : dict
+        User preferences (same shape as load_preferences() output).
+    kp_defaults : dict, optional
+        Knowledge-pack batch defaults (may set "preferred_vlm").
+    overrides : dict, optional
+        Per-run overrides: preferred_vlm, text_reasoner_model, profile,
+        fallback_mode, enable_tiling.
+    """
+    kp_defaults = kp_defaults or {}
+    overrides = overrides or {}
+
+    backend = str(prefs.get("vlm_backend", BACKEND_OLLAMA))
+    if backend == BACKEND_LLAMACPP:
+        host = str(prefs.get("llamacpp_url", DEFAULT_LLAMACPP_URL))
+        default_model = str(prefs.get("llamacpp_model", "Qwen3-VL-8B-Instruct"))
+        fallback_vlms: list[str] = []
+        default_reasoner = default_model
+    else:
+        backend = BACKEND_OLLAMA
+        host = str(prefs.get("ollama_url", DEFAULT_OLLAMA_URL))
+        default_model = str(prefs.get("ollama_model", "qwen2.5vl:3b"))
+        fallback_pool = [
+            str(prefs.get("preferred_fallback_vlm", "gemma4:e4b")),
+            "minicpm-v",
+        ]
+        fallback_vlms = list(dict.fromkeys(m for m in fallback_pool if m))
+        default_reasoner = str(prefs.get("preferred_text_reasoner", "gemma4:e4b"))
+
+    primary_vlm = str(
+        overrides.get("preferred_vlm")
+        or kp_defaults.get("preferred_vlm")
+        or default_model
+    )
+    fallback_vlms = [m for m in fallback_vlms if m != primary_vlm]
+
+    return InterrogationSettings(
+        host=host,
+        primary_vlm=primary_vlm,
+        fallback_vlms=fallback_vlms,
+        reasoner_model=str(overrides.get("text_reasoner_model") or default_reasoner),
+        backend=backend,
+        profile=str(
+            overrides.get("profile")
+            or prefs.get("interrogation_profile", "balanced")
+        ),
+        fallback_mode=str(
+            overrides.get("fallback_mode")
+            or prefs.get("interrogation_fallback_mode", "adaptive_auto")
+        ),
+        enable_tiling=bool(
+            overrides.get(
+                "enable_tiling",
+                prefs.get("enable_tiled_fallback", True),
+            )
+        ),
+        max_aliases_per_object=int(prefs.get("max_aliases_per_object", 4)),
+    )
 
 
 def build_capabilities(
@@ -54,24 +133,7 @@ def build_capabilities(
 
     # 2. Build GuidedInterrogator
     interrogator = GuidedInterrogator(
-        InterrogationSettings(
-            host=prefs.get("ollama_url", "http://localhost:11434"),
-            primary_vlm=str(
-                kp_defaults.get(
-                    "preferred_vlm",
-                    prefs.get("ollama_model", "moondream"),
-                )
-            ),
-            fallback_vlms=[
-                prefs.get("preferred_fallback_vlm", "minicpm-v"),
-                "llava:7b",
-            ],
-            reasoner_model=prefs.get("preferred_text_reasoner", "qwen3.5"),
-            profile=prefs.get("interrogation_profile", "balanced"),
-            fallback_mode=prefs.get("interrogation_fallback_mode", "adaptive_auto"),
-            enable_tiling=prefs.get("enable_tiled_fallback", True),
-            max_aliases_per_object=prefs.get("max_aliases_per_object", 4),
-        )
+        build_interrogation_settings(prefs, kp_defaults=kp_defaults)
     )
 
     # 3. Build GroundedSAM (serves as both Detector and Segmenter)

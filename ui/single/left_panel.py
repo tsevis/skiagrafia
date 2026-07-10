@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import logging
-import os
 import queue
 import threading
 import tkinter as tk
@@ -367,7 +366,8 @@ class LeftPanel:
 
         def _worker() -> None:
             try:
-                from core.interrogation import GuidedInterrogator, InterrogationSettings
+                from core.factory import build_interrogation_settings
+                from core.interrogation import GuidedInterrogator
                 from core.knowledge import KnowledgePack
                 import cv2
 
@@ -379,26 +379,9 @@ class LeftPanel:
                     else None
                 )
                 interrogator = GuidedInterrogator(
-                    InterrogationSettings(
-                        host=self._app.prefs.get("ollama_url", "http://localhost:11434"),
-                        primary_vlm=str(
-                            self._knowledge_pack_defaults.get(
-                                "preferred_vlm",
-                                self._app.prefs.get("ollama_model", "moondream"),
-                            )
-                        ),
-                        fallback_vlms=[
-                            self._app.prefs.get("preferred_fallback_vlm", "minicpm-v"),
-                            "llava:7b",
-                        ],
-                        reasoner_model=self._app.prefs.get(
-                            "preferred_text_reasoner", "qwen3.5"
-                        ),
-                        profile=self._app.prefs.get("interrogation_profile", "balanced"),
-                        fallback_mode=self._app.prefs.get(
-                            "interrogation_fallback_mode", "adaptive_auto"
-                        ),
-                        enable_tiling=self._app.prefs.get("enable_tiled_fallback", True),
+                    build_interrogation_settings(
+                        self._app.prefs,
+                        kp_defaults=self._knowledge_pack_defaults,
                     )
                 )
                 detected = interrogator.interrogate(image, knowledge_pack=knowledge_pack)
@@ -473,9 +456,9 @@ class LeftPanel:
                 if kept_labels and self._labels:
                     before = len(self._labels)
                     self._labels = [
-                        l for l in self._labels
-                        if l.get("label", "").lower() in kept_labels
-                        or l.get("role") != "parent"
+                        lbl for lbl in self._labels
+                        if lbl.get("label", "").lower() in kept_labels
+                        or lbl.get("role") != "parent"
                     ]
                     if len(self._labels) < before:
                         self._render_label_pills()
@@ -599,7 +582,7 @@ class LeftPanel:
     def _delete_label(self, label_data: dict) -> None:
         """Remove a label from the list and its scan preview detection."""
         label = label_data.get("label", "")
-        self._labels = [l for l in self._labels if l is not label_data]
+        self._labels = [lbl for lbl in self._labels if lbl is not label_data]
         self._view.remove_scan_detection(label)
         self._render_label_pills()
 
@@ -716,8 +699,8 @@ class LeftPanel:
         # Collect parent labels only — these are used as a whitelist + additions
         # for Moondream detection. Children are auto-discovered per parent.
         active_labels = [
-            l.get("canonical_label", l["label"]) for l in self._labels
-            if l.get("role") == "parent"
+            lbl.get("canonical_label", lbl["label"]) for lbl in self._labels
+            if lbl.get("role") == "parent"
         ]
 
         def _progress_callback(step: int, msg: str) -> None:
@@ -784,7 +767,7 @@ class LeftPanel:
 
     def get_confirmed_labels(self) -> list[str]:
         """Return list of active (non-toggled-off) labels."""
-        return [l.get("canonical_label", l["label"]) for l in self._labels]
+        return [lbl.get("canonical_label", lbl["label"]) for lbl in self._labels]
 
     def _get_output_mode(self) -> str:
         """Build output mode string from checkbox state."""

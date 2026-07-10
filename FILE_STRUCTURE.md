@@ -53,7 +53,8 @@ skiagrafia/
 │
 ├── models/                          # ML model wrappers (protocol implementations)
 │   ├── __init__.py
-│   ├── moondream_client.py          # Ollama HTTP client (Interrogator)
+│   ├── vlm_client.py                # VLM backends: OllamaVLMClient + LlamaCppVLMClient
+│   ├── moondream_client.py          # Backward-compat shim re-exporting vlm_client
 │   ├── grounded_sam.py              # GroundingDINO + SAM 2.1 HQ (Detector + Segmenter)
 │   └── vitmatte_refiner.py          # VitMatte alpha matting (AlphaRefiner)
 │
@@ -69,6 +70,7 @@ skiagrafia/
 │   ├── theme.py                     # Color palette and styling
 │   ├── main_window.py               # Main shell: titlebar, mode switcher
 │   ├── mode_switcher.py             # Segmented control for Single/Batch
+│   ├── setup_wizard.py              # First-run setup dialog (model downloads)
 │   │
 │   ├── single/                      # Single image mode UI
 │   │   ├── __init__.py
@@ -100,14 +102,17 @@ skiagrafia/
 ├── utils/                           # Utility modules
 │   ├── __init__.py
 │   ├── mps_utils.py                 # MPS/CPU device detection
-│   ├── model_manager.py             # ModelManager class for lifecycle
+│   ├── model_manager.py             # ModelManager: registry, downloads (file/hf/zip)
+│   ├── bootstrap.py                 # First-run setup detection + Ollama pulls
 │   ├── coord_math.py                # Affine remap, crop, bbox helpers
 │   ├── thumbnail.py                 # 32×32 SVG thumbnail renderer
-│   └── preferences.py               # JSON preferences load/save
+│   └── preferences.py               # JSON preferences load/save + legacy migration
 │
 ├── tests/                           # Test suite
 │   ├── test_contracts.py            # Protocol conformance and instantiation tests
-│   └── test_knowledge_interrogation.py  # KnowledgePack, interrogation helpers
+│   ├── test_knowledge_interrogation.py  # KnowledgePack, interrogation helpers
+│   ├── test_vlm_client.py           # VLM backends: parsing, llama.cpp transport
+│   └── test_backend_config.py       # Backend wiring, prefs migration, bootstrap
 │
 └── docs/                            # Documentation and planning
     ├── skiagrafia-readme.jpg        # README hero image
@@ -122,7 +127,7 @@ skiagrafia/
 
 | File | Purpose |
 |------|---------|
-| `main.py` | Application bootstrap: environment setup (offline mode), logging, Ollama health check, TkinterDnD root window, MainWindow instantiation |
+| `main.py` | Application bootstrap: environment setup (offline mode), logging, VLM backend health check (Ollama or llama.cpp), first-run setup check, TkinterDnD root window, MainWindow instantiation |
 | `pyproject.toml` | Project metadata and dependencies (torch, torchvision, tkinterdnd2, pillow, opencv-python-headless, etc.) |
 | `run.sh` | Shell script launcher that sets environment variables for offline inference and disables bytecode caching |
 
@@ -143,7 +148,8 @@ skiagrafia/
 
 | File | Purpose |
 |------|---------|
-| `moondream_client.py` | `MoondreamClient`: HTTP client for Ollama API; multi-prompt child detection with numbering cleanup; implements `Interrogator` protocol |
+| `vlm_client.py` | `BaseVLMClient` shared prompt/parsing logic; `OllamaVLMClient` (Ollama API) and `LlamaCppVLMClient` (OpenAI-compatible llama.cpp server); `create_vlm_client()` backend factory |
+| `moondream_client.py` | Backward-compat shim: re-exports `MoondreamClient` (= `OllamaVLMClient`) from `vlm_client` |
 | `grounded_sam.py` | `GroundedSAM`: GroundingDINO (text→bbox) + SAM 2.1 HQ (bbox→mask); `prefer_full_box` multi-mask mode for manual bboxes; synonym retry for ambiguous labels; implements `Detector` + `Segmenter` protocols |
 | `vitmatte_refiner.py` | `VitMatteRefiner`: Alpha matting for fine edge detail; implements `AlphaRefiner` protocol |
 
@@ -232,7 +238,7 @@ skiagrafia/
                          ▼
 ┌─────────────────────────────────────────────────────────────────┐
 │              Concrete Model Clients (models/)                   │
-│  moondream_client.py · grounded_sam.py · vitmatte_refiner.py    │
+│  vlm_client.py · grounded_sam.py · vitmatte_refiner.py          │
 │                                                                 │
 │  Each receives its model path from ModelManager.                │
 └────────────────────────┬────────────────────────────────────────┘
@@ -313,7 +319,7 @@ Step 6: Output    ──► Summary, export bundles, retry failed
 | `InterrogationCandidate` | `core/interrogation.py` | Pydantic model: canonical/display labels, detector phrases, confidence, role |
 | `KnowledgePack` | `core/knowledge.py` | TOML-based label taxonomy with detector phrase rankings and child parts |
 | `GroundedSAM` | `models/grounded_sam.py` | GroundingDINO + SAM 2.1 HQ wrapper; `prefer_full_box` multi-mask selection; synonym retry; implements Detector + Segmenter |
-| `MoondreamClient` | `models/moondream_client.py` | Ollama HTTP client; multi-prompt child detection with numbering cleanup |
+| `OllamaVLMClient` / `LlamaCppVLMClient` | `models/vlm_client.py` | Interchangeable VLM transports; shared multi-prompt child detection with numbering cleanup |
 | `VitMatteRefiner` | `models/vitmatte_refiner.py` | Alpha matting model wrapper |
 | `VTracerVectorizer` | `processors/vectorizer.py` | VTracer wrapper implementing Vectorizer protocol |
 | `CanvasPanel` | `ui/single/canvas_panel.py` | Tkinter canvas with zoom/pan, scrollbars, overlay rendering, manual box drawing |

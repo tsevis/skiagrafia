@@ -8,6 +8,10 @@ import logging
 import os
 import sys
 from pathlib import Path
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    import tkinter as tk
 
 # 100% local inference — block ALL network downloads from HuggingFace/transformers.
 # Must be set before any transformers/huggingface import.
@@ -59,24 +63,68 @@ def setup_logging() -> None:
     logging.getLogger("urllib3").setLevel(logging.WARNING)
 
 
-def check_ollama() -> None:
-    """Verify Ollama is reachable at startup."""
+def check_vlm_backend() -> None:
+    """Verify the configured VLM backend (Ollama or llama.cpp) at startup."""
     logger = logging.getLogger(__name__)
     try:
-        from models.moondream_client import MoondreamClient
+        from core.factory import build_interrogation_settings
+        from models.vlm_client import create_vlm_client
         from utils.preferences import load_preferences
 
         prefs = load_preferences()
-        client = MoondreamClient(
-            host=prefs.get("ollama_url", "http://localhost:11434"),
-            model=prefs.get("ollama_model", "moondream"),
+        settings = build_interrogation_settings(prefs)
+        client = create_vlm_client(
+            backend=settings.backend,
+            host=settings.host,
+            model=settings.primary_vlm,
         )
         if client.health_check():
-            logger.info("Ollama connected — model ready")
+            logger.info(
+                "VLM backend '%s' connected — model '%s' ready",
+                settings.backend,
+                settings.primary_vlm,
+            )
         else:
-            logger.warning("Ollama model not found — scan will fail until resolved")
+            logger.warning(
+                "VLM backend '%s' has no model '%s' — scan will fail until resolved",
+                settings.backend,
+                settings.primary_vlm,
+            )
     except Exception:
-        logger.warning("Ollama not reachable — scan features unavailable", exc_info=True)
+        logger.warning(
+            "VLM backend not reachable — scan features unavailable", exc_info=True
+        )
+
+
+def check_first_run(root: "tk.Misc") -> None:
+    """Open the setup wizard when required components are missing.
+
+    The readiness probe does disk and network I/O, so it runs on a worker
+    thread; the wizard itself is created back on the Tk main loop.
+    """
+    logger = logging.getLogger(__name__)
+    import threading
+
+    def _probe() -> None:
+        try:
+            from utils.bootstrap import is_setup_complete
+            from utils.preferences import load_preferences
+
+            prefs = load_preferences()
+            if is_setup_complete(prefs):
+                return
+
+            def _open() -> None:
+                from ui.setup_wizard import SetupWizard
+
+                SetupWizard(root, prefs)
+                logger.info("First-run setup wizard opened")
+
+            root.after(0, _open)
+        except Exception:
+            logger.warning("First-run check failed", exc_info=True)
+
+    threading.Thread(target=_probe, daemon=True).start()
 
 
 def main() -> None:
@@ -86,7 +134,7 @@ def main() -> None:
     logger.info("Starting Skiagrafia")
 
     try:
-        from tkinterdnd2 import TkinterDnD
+        from tkinterdnd2 import TkinterDnD  # type: ignore[import-untyped]
 
         root = TkinterDnD.Tk()
     except ImportError:
@@ -95,12 +143,13 @@ def main() -> None:
 
         root = tk.Tk()
 
-    # Check Ollama in background (don't block UI startup)
-    root.after(500, check_ollama)
+    # Check VLM backend + first-run setup in background (don't block UI startup)
+    root.after(500, check_vlm_backend)
+    root.after(900, check_first_run, root)
 
     from ui.main_window import MainWindow
 
-    app = MainWindow(root)
+    _app = MainWindow(root)  # noqa: F841 — must stay referenced for Tk callbacks
 
     logger.info("Skiagrafia ready")
     root.mainloop()

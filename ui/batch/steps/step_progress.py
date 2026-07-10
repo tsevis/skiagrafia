@@ -280,7 +280,7 @@ class StepProgress:
         """Update metrics from a BatchProgress object."""
         total = getattr(progress, "total", 0)
         completed = getattr(progress, "completed", 0)
-        failed = getattr(progress, "failed", 0)
+        _failed = getattr(progress, "failed", 0)  # reserved for a failures card
         remaining = getattr(progress, "remaining", 0)
         speed = getattr(progress, "images_per_min", 0)
         eta = getattr(progress, "eta_seconds", 0)

@@ -11,7 +11,7 @@ from typing import TYPE_CHECKING
 from ui.preferences.guide_editor import GuideEditorTab
 from ui.theme import is_macos
 from utils.model_manager import ModelManager, REGISTRY
-from utils.preferences import DEFAULT_MODELS_DIR, get_models_dir, load_preferences, save_preferences
+from utils.preferences import DEFAULT_MODELS_DIR, get_models_dir, save_preferences
 
 if TYPE_CHECKING:
     from ui.main_window import MainWindow
@@ -102,14 +102,29 @@ class PreferencesWindow:
         if path:
             self._output_dir_var.set(path)
 
-    # ── Tab 2: Models & Ollama ─────────────────────────────────
+    # ── Tab 2: Models & VLM backends ───────────────────────────
 
     def _build_models_tab(self) -> None:
         tab = ttk.Frame(self._notebook, padding=12)
         self._notebook.add(tab, text="  Models  ")
 
-        # Ollama URL
-        ttk.Label(tab, text="Ollama server URL").pack(anchor=tk.W, pady=(0, 2))
+        # Backend selection
+        backend_row = ttk.Frame(tab)
+        backend_row.pack(fill=tk.X, pady=(0, 6))
+        ttk.Label(backend_row, text="VLM backend", width=20).pack(side=tk.LEFT)
+        self._backend_var = tk.StringVar(
+            value=self._prefs.get("vlm_backend", "ollama")
+        )
+        ttk.Combobox(
+            backend_row,
+            textvariable=self._backend_var,
+            values=["ollama", "llamacpp"],
+            state="readonly",
+            width=18,
+        ).pack(side=tk.LEFT)
+
+        # Ollama settings
+        ttk.Label(tab, text="Ollama server URL").pack(anchor=tk.W, pady=(4, 2))
         self._ollama_url_var = tk.StringVar(
             value=self._prefs.get("ollama_url", "http://localhost:11434")
         )
@@ -117,47 +132,66 @@ class PreferencesWindow:
             fill=tk.X, pady=(0, 4)
         )
 
-        # Ollama model
         ttk.Label(tab, text="Ollama model name").pack(anchor=tk.W, pady=(4, 2))
         self._ollama_model_var = tk.StringVar(
-            value=self._prefs.get("ollama_model", "moondream")
+            value=self._prefs.get("ollama_model", "qwen2.5vl:3b")
         )
         ttk.Combobox(
             tab,
             textvariable=self._ollama_model_var,
-            values=["moondream", "minicpm-v", "llava:7b"],
+            values=["qwen2.5vl:3b", "gemma4:e4b", "minicpm-v", "llava:7b", "moondream"],
             width=20,
         ).pack(anchor=tk.W, pady=(0, 4))
 
         ttk.Label(tab, text="Preferred fallback VLM").pack(anchor=tk.W, pady=(4, 2))
         self._fallback_vlm_var = tk.StringVar(
-            value=self._prefs.get("preferred_fallback_vlm", "minicpm-v")
+            value=self._prefs.get("preferred_fallback_vlm", "gemma4:e4b")
         )
         ttk.Combobox(
             tab,
             textvariable=self._fallback_vlm_var,
-            values=["minicpm-v", "llava:7b", "moondream"],
+            values=["gemma4:e4b", "minicpm-v", "llava:7b", "moondream"],
             state="readonly",
             width=20,
         ).pack(anchor=tk.W, pady=(0, 4))
 
         ttk.Label(tab, text="Text reasoner").pack(anchor=tk.W, pady=(4, 2))
         self._reasoner_var = tk.StringVar(
-            value=self._prefs.get("preferred_text_reasoner", "qwen3.5")
+            value=self._prefs.get("preferred_text_reasoner", "gemma4:e4b")
         )
         ttk.Combobox(
             tab,
             textvariable=self._reasoner_var,
-            values=["qwen3.5", "gpt-oss:20b", "qwen3-coder:30b"],
-            state="readonly",
-            width=20,
+            values=["gemma4:e4b", "ilsp/llama-krikri-8b-instruct", "qwen2.5vl:3b"],
+            width=24,
         ).pack(anchor=tk.W, pady=(0, 4))
 
-        # Test connection
+        # llama.cpp settings
+        ttk.Separator(tab, orient=tk.HORIZONTAL).pack(fill=tk.X, pady=6)
+        ttk.Label(tab, text="llama.cpp server URL").pack(anchor=tk.W, pady=(0, 2))
+        self._llamacpp_url_var = tk.StringVar(
+            value=self._prefs.get("llamacpp_url", "http://localhost:8080")
+        )
+        ttk.Entry(tab, textvariable=self._llamacpp_url_var).pack(
+            fill=tk.X, pady=(0, 4)
+        )
+        self._llamacpp_model_var = tk.StringVar(
+            value=self._prefs.get("llamacpp_model", "Qwen3-VL-8B-Instruct")
+        )
+        ttk.Label(
+            tab,
+            text=(
+                "llama.cpp serves its loaded model, e.g.:  "
+                "llama-server -hf Qwen/Qwen3-VL-8B-Instruct-GGUF:Q4_K_M --port 8080 -c 8192"
+            ),
+            foreground="gray",
+        ).pack(anchor=tk.W, pady=(0, 4))
+
+        # Test connection (tests the backend selected above)
         test_frame = ttk.Frame(tab)
         test_frame.pack(fill=tk.X, pady=(0, 8))
         ttk.Button(
-            test_frame, text="Test connection", command=self._test_ollama
+            test_frame, text="Test connection", command=self._test_backend
         ).pack(side=tk.LEFT)
         self._test_result = ttk.Label(test_frame, text="")
         self._test_result.pack(side=tk.LEFT, padx=8)
@@ -259,13 +293,18 @@ class PreferencesWindow:
                         "", tk.END, values=(p.name, size, "Extra")
                     )
 
-    def _test_ollama(self) -> None:
-        from models.moondream_client import MoondreamClient
+    def _test_backend(self) -> None:
+        from models.vlm_client import create_vlm_client
 
-        client = MoondreamClient(
-            host=self._ollama_url_var.get(),
-            model=self._ollama_model_var.get(),
-        )
+        backend = self._backend_var.get()
+        if backend == "llamacpp":
+            host = self._llamacpp_url_var.get()
+            model = self._llamacpp_model_var.get()
+        else:
+            host = self._ollama_url_var.get()
+            model = self._ollama_model_var.get()
+
+        client = create_vlm_client(backend=backend, host=host, model=model)
         if client.health_check():
             self._test_result.config(text="\u2713 Connected", foreground="green")
         else:
@@ -609,8 +648,11 @@ class PreferencesWindow:
             "default_mode": self._mode_var.get(),
             "save_session_on_quit": self._save_session_var.get(),
             "show_notifications": self._notifications_var.get(),
+            "vlm_backend": self._backend_var.get(),
             "ollama_url": self._ollama_url_var.get(),
             "ollama_model": self._ollama_model_var.get(),
+            "llamacpp_url": self._llamacpp_url_var.get(),
+            "llamacpp_model": self._llamacpp_model_var.get(),
             "models_directory": models_dir_val,
             "preferred_fallback_vlm": self._fallback_vlm_var.get(),
             "preferred_text_reasoner": self._reasoner_var.get(),

@@ -6,7 +6,6 @@ from pathlib import Path
 from tkinter import ttk
 from typing import TYPE_CHECKING
 
-from core.batch_template import BatchTemplate
 from core.knowledge import load_knowledge_pack
 from core.state_manager import StateManager
 

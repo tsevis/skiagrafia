@@ -541,11 +541,11 @@ class RightPanel:
         labels = left.get_confirmed_labels()
 
         # Build parent/child structure
-        parents = [l for l in self._layers if l.get("role") == "parent"]
+        parents = [layer for layer in self._layers if layer.get("role") == "parent"]
         children_map: dict[str, list[str]] = {}
-        for l in self._layers:
-            if l.get("role") == "child" and l.get("parent_label"):
-                children_map.setdefault(l["parent_label"], []).append(l["label"])
+        for layer in self._layers:
+            if layer.get("role") == "child" and layer.get("parent_label"):
+                children_map.setdefault(layer["parent_label"], []).append(layer["label"])
 
         # Dialog
         dialog = tk.Toplevel(self._root)

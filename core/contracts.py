@@ -15,6 +15,7 @@ from numpy.typing import NDArray
 from pydantic import BaseModel, ConfigDict
 
 if TYPE_CHECKING:
+    from core.interrogation import InterrogationResult
     from core.knowledge import KnowledgePack
 
 

@@ -3,7 +3,6 @@ from __future__ import annotations
 import logging
 import queue
 import threading
-import time
 import tkinter as tk
 from tkinter import ttk
 from typing import TYPE_CHECKING
@@ -111,7 +110,8 @@ class StepInterrogate:
         self._progress_bar["maximum"] = total
 
         def _worker() -> None:
-            from core.interrogation import GuidedInterrogator, InterrogationSettings
+            from core.factory import build_interrogation_settings
+            from core.interrogation import GuidedInterrogator
             from core.knowledge import KnowledgePack
             import cv2
 
@@ -119,37 +119,18 @@ class StepInterrogate:
             guide_path = settings_config.get("guide_path") or self._view.knowledge_pack_path
             knowledge_pack = KnowledgePack.load(guide_path) if guide_path else None
             interrogator = GuidedInterrogator(
-                InterrogationSettings(
-                    host=self._app.prefs.get("ollama_url", "http://localhost:11434"),
-                    primary_vlm=self._app.prefs.get("ollama_model", "moondream"),
-                    fallback_vlms=[
-                        str(settings_config.get("preferred_vlm", self._app.prefs.get("preferred_fallback_vlm", "minicpm-v"))),
-                        "llava:7b",
-                    ],
-                    reasoner_model=str(
-                        settings_config.get(
-                            "text_reasoner_model",
-                            self._app.prefs.get("preferred_text_reasoner", "qwen3.5"),
-                        )
-                    ),
-                    profile=str(
-                        settings_config.get(
-                            "interrogation_profile",
-                            self._app.prefs.get("interrogation_profile", "balanced"),
-                        )
-                    ),
-                    fallback_mode=str(
-                        settings_config.get(
-                            "fallback_mode",
-                            self._app.prefs.get("interrogation_fallback_mode", "adaptive_auto"),
-                        )
-                    ),
-                    enable_tiling=bool(
-                        settings_config.get(
+                build_interrogation_settings(
+                    self._app.prefs,
+                    overrides={
+                        "preferred_vlm": settings_config.get("preferred_vlm"),
+                        "text_reasoner_model": settings_config.get("text_reasoner_model"),
+                        "profile": settings_config.get("interrogation_profile"),
+                        "fallback_mode": settings_config.get("fallback_mode"),
+                        "enable_tiling": settings_config.get(
                             "enable_tiled_fallback",
                             self._app.prefs.get("enable_tiled_fallback", True),
-                        )
-                    ),
+                        ),
+                    },
                 )
             )
 

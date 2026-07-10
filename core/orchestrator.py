@@ -376,7 +376,7 @@ class Orchestrator:
                     fallback_bbox_parents.discard(ex_lbl)
                     del masks[ex_lbl]
                     del bboxes[ex_lbl]
-                    result.layers = [l for l in result.layers if l.label != ex_lbl]
+                    result.layers = [layer for layer in result.layers if layer.label != ex_lbl]
                     # Merge children from evicted parent
                     extra = children_by_parent.get(ex_lbl, [])
                     existing_c = set(children_by_parent.get(parent.display_label, []))

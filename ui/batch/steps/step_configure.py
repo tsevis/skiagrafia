@@ -183,12 +183,12 @@ class StepConfigure:
             value=str(
                 guide_defaults.get(
                     "preferred_vlm",
-                    prefs.get("preferred_fallback_vlm", "minicpm-v"),
+                    prefs.get("preferred_fallback_vlm", "gemma4:e4b"),
                 )
             )
         )
         self._reasoner_var = tk.StringVar(
-            value=str(prefs.get("preferred_text_reasoner", "qwen3.5"))
+            value=str(prefs.get("preferred_text_reasoner", "gemma4:e4b"))
         )
         self._tiled_fallback_var = tk.BooleanVar(
             value=bool(
@@ -233,7 +233,7 @@ class StepConfigure:
         ttk.Combobox(
             row,
             textvariable=self._preferred_vlm_var,
-            values=["minicpm-v", "llava:7b", "moondream"],
+            values=["qwen2.5vl:3b", "gemma4:e4b", "minicpm-v", "llava:7b", "moondream"],
             state="readonly",
             width=18,
         ).pack(side=tk.RIGHT)
@@ -244,7 +244,7 @@ class StepConfigure:
         ttk.Combobox(
             row,
             textvariable=self._reasoner_var,
-            values=["qwen3.5", "gpt-oss:20b", "qwen3-coder:30b"],
+            values=["gemma4:e4b", "ilsp/llama-krikri-8b-instruct", "qwen2.5vl:3b"],
             state="readonly",
             width=18,
         ).pack(side=tk.RIGHT)
@@ -404,7 +404,7 @@ class StepConfigure:
                 domain_description=description_var.get().strip(),
                 object_specs=object_specs,
                 preferred_vlm=self._preferred_vlm_var.get(),
-                fallback_vlms=[self._preferred_vlm_var.get(), "llava:7b"],
+                fallback_vlms=[self._preferred_vlm_var.get(), "minicpm-v"],
                 enable_tiling=self._tiled_fallback_var.get(),
                 max_aliases_per_object=4,
                 notes_markdown=notes_text.get("1.0", tk.END).strip() + "\n",

@@ -406,7 +406,7 @@ class CanvasPanel:
         if result is None or not hasattr(result, "layers"):
             return
 
-        layers_with_svg = [l for l in result.layers if getattr(l, "svg_data", "")]
+        layers_with_svg = [layer for layer in result.layers if getattr(layer, "svg_data", "")]
         if layers_with_svg:
             mask_opacity = float(self._app.prefs.get("mask_overlay_opacity", 30)) / 100.0
             self._layer_photos.extend(render_layer_masks(
@@ -440,7 +440,7 @@ class CanvasPanel:
         if result is None or not hasattr(result, "layers"):
             return
 
-        layers_with_svg = [l for l in result.layers if getattr(l, "svg_data", "")]
+        layers_with_svg = [layer for layer in result.layers if getattr(layer, "svg_data", "")]
         if layers_with_svg:
             self._layer_photos.extend(render_layer_vectors(
                 self._canvas,
@@ -533,7 +533,6 @@ class CanvasPanel:
             colour = palette[idx % len(palette)]
             fill = (*colour, box_opacity)
             box_stroke = (*colour, min(255, box_opacity + 60))
-            label_stroke = (*colour, 230)
             if self._show_scan_heatmap.get():
                 draw.rectangle((x0, y0, x1, y1), fill=fill)
             if self._show_scan_boxes.get():

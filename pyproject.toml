@@ -22,6 +22,14 @@ dependencies = [
     "lxml",
     "transformers",
     "accelerate",
+    # Required by the Grounded-SAM-2 source packages (grounding_dino + sam2)
+    "supervision",
+    "addict",
+    "yapf",
+    "timm",
+    "pycocotools",
+    "hydra-core",
+    "iopath",
 ]
 
 [build-system]

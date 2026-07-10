@@ -6,7 +6,7 @@ from tkinter import ttk
 
 from ui.theme import get_palette, is_macos
 from ui.mode_switcher import ModeSwitcher
-from utils.preferences import load_preferences, save_preferences
+from utils.preferences import load_preferences
 
 logger = logging.getLogger(__name__)
 

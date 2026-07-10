@@ -3,7 +3,6 @@ from __future__ import annotations
 import io
 import logging
 from functools import lru_cache
-from pathlib import Path
 
 from PIL import Image, ImageDraw, ImageTk
 

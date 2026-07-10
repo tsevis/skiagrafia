@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import functools
 import logging
 import os
 import time
@@ -32,8 +33,11 @@ class BatchConfig(BaseModel):
     smoothing: int = 5
     length_threshold: float = 4.0
     vtracer_quality: str = "balanced"
+    vlm_backend: str = "ollama"  # "ollama" | "llamacpp"
     ollama_url: str = "http://localhost:11434"
-    ollama_model: str = "moondream"
+    ollama_model: str = "qwen2.5vl:3b"
+    llamacpp_url: str = "http://localhost:8080"
+    llamacpp_model: str = "Qwen3-VL-8B-Instruct"
     box_threshold: float = 0.35
     text_threshold: float = 0.25
     bilateral_d: int = 9
@@ -42,8 +46,8 @@ class BatchConfig(BaseModel):
     interrogation_profile: str = "balanced"
     fallback_mode: str = "adaptive_auto"
     preferred_vlm: str | None = None
-    fallback_vlms: list[str] = Field(default_factory=lambda: ["minicpm-v", "llava:7b"])
-    text_reasoner_model: str = "qwen3.5"
+    fallback_vlms: list[str] = Field(default_factory=lambda: ["gemma4:e4b", "minicpm-v"])
+    text_reasoner_model: str = "gemma4:e4b"
     enable_tiled_fallback: bool = True
     max_aliases_per_object: int = 4
 
@@ -79,9 +83,12 @@ def _process_single(
 
     # Build prefs-like dict from BatchConfig for the factory
     prefs_from_config: dict = {
+        "vlm_backend": config.vlm_backend,
         "ollama_url": config.ollama_url,
         "ollama_model": config.ollama_model,
-        "preferred_fallback_vlm": config.preferred_vlm or "minicpm-v",
+        "llamacpp_url": config.llamacpp_url,
+        "llamacpp_model": config.llamacpp_model,
+        "preferred_fallback_vlm": config.fallback_vlms[0] if config.fallback_vlms else "gemma4:e4b",
         "preferred_text_reasoner": config.text_reasoner_model,
         "interrogation_profile": config.interrogation_profile,
         "interrogation_fallback_mode": config.fallback_mode,
@@ -181,7 +188,7 @@ class BatchRunner:
                 _process_single, str(img_path), config_dict
             )
             future.add_done_callback(
-                lambda f, iid=image_id: self._on_complete(iid, f)
+                functools.partial(self._on_complete, image_id)
             )
             self._futures[image_id] = future
 

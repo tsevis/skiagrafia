@@ -11,7 +11,12 @@ from PIL import Image
 from pydantic import BaseModel, Field
 
 from core.knowledge import KnowledgePack, ObjectKnowledge
-from models.moondream_client import MAX_PARENTS, MoondreamClient
+from models.vlm_client import (
+    BACKEND_OLLAMA,
+    MAX_PARENTS,
+    BaseVLMClient,
+    create_vlm_client,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -52,7 +57,7 @@ class InterrogationCandidate(BaseModel):
     canonical_label: str
     display_label: str
     detector_phrases: list[str] = Field(default_factory=list)
-    source_model: str = "moondream"
+    source_model: str = "vlm"
     confidence: float = 0.5
     role: str = "parent"
     parent: str | None = None
@@ -72,6 +77,7 @@ class InterrogationSettings:
     primary_vlm: str
     fallback_vlms: list[str]
     reasoner_model: str
+    backend: str = BACKEND_OLLAMA  # "ollama" | "llamacpp"
     profile: str = "balanced"
     fallback_mode: str = "adaptive_auto"
     composition_first: bool = True
@@ -122,7 +128,7 @@ def rank_detector_phrases(
 class GuidedInterrogator:
     def __init__(self, settings: InterrogationSettings) -> None:
         self._settings = settings
-        self._clients: dict[str, MoondreamClient] = {}
+        self._clients: dict[str, BaseVLMClient] = {}
 
     def interrogate(
         self,
@@ -143,7 +149,7 @@ class GuidedInterrogator:
 
         stage = "primary"
         raw_responses: dict[str, str] = {}
-        candidates: list[InterrogationCandidate] = []
+        candidates = []
 
         if self._settings.composition_first:
             stage = "composition"
@@ -184,6 +190,8 @@ class GuidedInterrogator:
 
         if self._settings.fallback_mode != "moondream_only" and self._should_escalate(candidates):
             for model in self._settings.fallback_vlms:
+                if model == self._settings.primary_vlm:
+                    continue  # same model would just repeat the guided pass
                 stage = f"fallback:{model}"
                 fallback_candidates = self._run_vision_stage(
                     image=image,
@@ -251,10 +259,14 @@ class GuidedInterrogator:
             for label in labels
         ]
 
-    def _get_client(self, model: str) -> MoondreamClient:
+    def _get_client(self, model: str) -> BaseVLMClient:
         client = self._clients.get(model)
         if client is None:
-            client = MoondreamClient(host=self._settings.host, model=model)
+            client = create_vlm_client(
+                backend=self._settings.backend,
+                host=self._settings.host,
+                model=model,
+            )
             self._clients[model] = client
         return client
 
@@ -463,7 +475,7 @@ class GuidedInterrogator:
         scale = 1280 / max_edge
         resized = Image.fromarray(image).resize(
             (max(1, int(w * scale)), max(1, int(h * scale))),
-            Image.LANCZOS,
+            Image.Resampling.LANCZOS,
         )
         return np.array(resized)
 

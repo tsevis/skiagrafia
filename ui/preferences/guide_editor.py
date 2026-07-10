@@ -158,7 +158,7 @@ class GuideEditorTab:
         ttk.Combobox(
             row_vlm,
             textvariable=self._def_vlm_var,
-            values=["", "moondream", "moondream2", "minicpm-v", "llava:7b"],
+            values=["", "qwen2.5vl:3b", "gemma4:e4b", "minicpm-v", "llava:7b", "moondream"],
             width=18,
         ).pack(side=tk.LEFT)
 
