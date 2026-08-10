@@ -6,9 +6,10 @@ from __future__ import annotations
 
 import logging
 import os
-import sys
 from pathlib import Path
 from typing import TYPE_CHECKING
+
+from utils.cairo_support import configure_cairo_library_path
 
 if TYPE_CHECKING:
     import tkinter as tk
@@ -26,14 +27,7 @@ os.environ.setdefault("USE_TF", "0")
 os.environ.setdefault("USE_FLAX", "0")
 
 # Ensure Homebrew libcairo is discoverable by cairocffi/cairosvg on macOS.
-if sys.platform == "darwin":
-    _brew_lib = "/opt/homebrew/lib"
-    if os.path.isdir(_brew_lib):
-        _ld = os.environ.get("DYLD_FALLBACK_LIBRARY_PATH", "")
-        if _brew_lib not in _ld:
-            os.environ["DYLD_FALLBACK_LIBRARY_PATH"] = (
-                f"{_brew_lib}:{_ld}" if _ld else _brew_lib
-            )
+configure_cairo_library_path()
 
 from rich.logging import RichHandler
 

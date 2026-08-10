@@ -7,22 +7,20 @@ import tkinter as tk
 
 from PIL import Image, ImageTk
 
+from utils.cairo_support import load_cairosvg
+
 _cairosvg = None
 _cairosvg_checked = False
+
+logger = logging.getLogger(__name__)
 
 
 def _get_cairosvg():
     global _cairosvg, _cairosvg_checked
     if not _cairosvg_checked:
         _cairosvg_checked = True
-        try:
-            import cairosvg as _mod
-            _cairosvg = _mod
-        except OSError:
-            pass
+        _cairosvg = load_cairosvg(logger)
     return _cairosvg
-
-logger = logging.getLogger(__name__)
 
 # Per-layer colour palette (8 distinct colours).
 OVERLAY_PALETTE = [

@@ -6,6 +6,8 @@ from functools import lru_cache
 
 from PIL import Image, ImageDraw, ImageTk
 
+from utils.cairo_support import load_cairosvg
+
 logger = logging.getLogger(__name__)
 
 _cairosvg = None
@@ -17,10 +19,8 @@ def _get_cairosvg():
     global _cairosvg, _cairosvg_checked
     if not _cairosvg_checked:
         _cairosvg_checked = True
-        try:
-            import cairosvg as _mod
-            _cairosvg = _mod
-        except OSError:
+        _cairosvg = load_cairosvg(logger)
+        if _cairosvg is None:
             logger.warning(
                 "libcairo not found — SVG thumbnails will use placeholders. "
                 "Fix: brew install cairo"
