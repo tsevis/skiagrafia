@@ -29,7 +29,7 @@ os.environ.setdefault("USE_FLAX", "0")
 # Ensure Homebrew libcairo is discoverable by cairocffi/cairosvg on macOS.
 configure_cairo_library_path()
 
-from rich.logging import RichHandler
+from rich.logging import RichHandler  # noqa: E402 — must follow configure_cairo_library_path()
 
 
 def setup_logging() -> None:

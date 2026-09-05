@@ -34,4 +34,19 @@ dependencies = [
 
 [build-system]
 requires = ["setuptools>=68.0"]
-build-backend = "setuptools.backends._legacy:_Backend"
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools]
+# Flat layout: the launcher is a top-level module, not inside a package.
+py-modules = ["main"]
+
+[tool.setuptools.packages.find]
+# Declared explicitly — auto-discovery cannot tell the source packages apart
+# from output/scratch directories in a flat layout.
+include = ["core*", "models*", "processors*", "ui*", "utils*"]
+
+[tool.pytest.ini_options]
+# GUI tests construct real windows on the developer's desktop; they are
+# opt-in only. Run them deliberately with: pytest -m gui
+addopts = ["-m", "not gui"]
+markers = ["gui: opens real windows; excluded from the default run"]
