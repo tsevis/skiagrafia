@@ -50,3 +50,11 @@ include = ["core*", "models*", "processors*", "ui*", "utils*"]
 # opt-in only. Run them deliberately with: pytest -m gui
 addopts = ["-m", "not gui"]
 markers = ["gui: opens real windows; excluded from the default run"]
+# find_incomplete_batches deliberately opens a corrupt state.db to prove it
+# skips one. sqlitedict connects from a daemon writer thread, so the failure
+# also surfaces there, asynchronously -- pytest blames whichever test happens
+# to be running, which is why this cannot be scoped per-test. Matched on the
+# sqlite message so any other unhandled thread exception still fails loudly.
+filterwarnings = [
+    "ignore:(?s).*file is not a database.*:pytest.PytestUnhandledThreadExceptionWarning",
+]

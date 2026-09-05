@@ -187,9 +187,6 @@ class BatchRunner:
             future = self._executor.submit(
                 _process_single, str(img_path), config_dict
             )
-            future.add_done_callback(
-                functools.partial(self._on_complete, image_id)
-            )
             self._futures[image_id] = future
 
         logger.info(
@@ -197,6 +194,15 @@ class BatchRunner:
             len(self._futures),
             self._config.max_workers,
         )
+
+        # Callbacks are attached only once every future is tracked. A job that
+        # finishes while the loop is still submitting would otherwise fire
+        # _on_complete against a half-filled _futures -- clearing the last
+        # entry and reporting the whole batch finished before it had started.
+        for image_id, future in list(self._futures.items()):
+            future.add_done_callback(
+                functools.partial(self._on_complete, image_id)
+            )
 
     def _on_complete(self, image_id: str, future: Future) -> None:
         """Handle completion of a single image."""
@@ -223,7 +229,7 @@ class BatchRunner:
             )
             logger.error("Image %s failed: %s", image_id, exc, exc_info=True)
 
-        del self._futures[image_id]
+        self._futures.pop(image_id, None)
 
         progress = self._get_progress()
         if self._progress_cb:

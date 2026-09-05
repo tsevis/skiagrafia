@@ -64,7 +64,9 @@ class TestRotatingFileHandler:
         record_logger.setLevel(logging.DEBUG)
         record_logger.addHandler(handler)
         try:
-            for i in range(2000):
+            # ~90 bytes/record against a 256-byte cap: comfortably more
+            # rollovers than backupCount, without writing 2000 records.
+            for i in range(400):
                 record_logger.debug("padding record %04d %s", i, "y" * 60)
         finally:
             record_logger.removeHandler(handler)

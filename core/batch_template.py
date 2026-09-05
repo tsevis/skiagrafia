@@ -1,9 +1,28 @@
 from __future__ import annotations
 
 import datetime
+import logging
+import re
 from pathlib import Path
 
 from pydantic import BaseModel
+
+logger = logging.getLogger(__name__)
+
+# macOS caps a filename at 255 bytes; leave room for the .json suffix.
+MAX_TEMPLATE_SLUG_LEN = 120
+_UNSAFE_SLUG_CHARS = re.compile(r"[^a-z0-9._-]+")
+
+
+def _slugify(name: str) -> str:
+    """Reduce a template name to a safe, flat filename stem.
+
+    Path separators and traversal segments must not survive: the stem is
+    joined onto the templates directory and must stay inside it.
+    """
+    slug = _UNSAFE_SLUG_CHARS.sub("_", name.strip().lower())
+    slug = slug.strip("._")[:MAX_TEMPLATE_SLUG_LEN].strip("._")
+    return slug or "untitled"
 
 
 class BatchTemplate(BaseModel):
@@ -32,7 +51,7 @@ class BatchTemplate(BaseModel):
         d = Path.home() / ".config" / "skiagrafia" / "templates"
         d.mkdir(parents=True, exist_ok=True)
         self.created_at = datetime.datetime.now().isoformat()
-        path = d / f"{self.name.lower().replace(' ', '_')}.json"
+        path = d / f"{_slugify(self.name)}.json"
         path.write_text(self.model_dump_json(indent=2))
         return path
 
@@ -45,9 +64,13 @@ class BatchTemplate(BaseModel):
         d = Path.home() / ".config" / "skiagrafia" / "templates"
         if not d.exists():
             return []
-        return [
-            cls.load(p)
-            for p in sorted(
-                d.glob("*.json"), key=lambda p: p.stat().st_mtime, reverse=True
-            )
-        ]
+        templates: list[BatchTemplate] = []
+        for p in sorted(
+            d.glob("*.json"), key=lambda p: p.stat().st_mtime, reverse=True
+        ):
+            try:
+                templates.append(cls.load(p))
+            except Exception:
+                # One unreadable template must not hide every other one.
+                logger.warning("Skipping unreadable template %s", p, exc_info=True)
+        return templates

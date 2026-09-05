@@ -27,6 +27,11 @@ def remap_mask(
     x_end = min(x0 + w, canvas_shape[1])
     y_start = max(y0, 0)
     x_start = max(x0, 0)
+    # A crop lying entirely off the canvas -- past either edge, on either
+    # axis -- contributes nothing. Without this the clipped slice bounds
+    # cross over and numpy raises on the shape mismatch.
+    if y_end <= y_start or x_end <= x_start:
+        return full
     local_y = y_start - y0
     local_x = x_start - x0
     full[y_start:y_end, x_start:x_end] = mask_local[

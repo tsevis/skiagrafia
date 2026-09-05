@@ -3,6 +3,7 @@ from __future__ import annotations
 import logging
 import re
 import tempfile
+from xml.sax.saxutils import escape
 from pathlib import Path
 
 import cv2
@@ -91,7 +92,9 @@ def assemble_svg(
     ]
 
     for i, layer in enumerate(layers):
-        layer_id = layer.get("id", f"layer_{i}")
+        # Layer ids come from VLM-authored labels; escape before they are
+        # embedded as an attribute value or they can inject markup.
+        layer_id = escape(str(layer.get("id", f"layer_{i}")), {'"': "&quot;"})
         svg_data = layer.get("svg_data", "")
         dx = layer.get("dx", 0)
         dy = layer.get("dy", 0)
