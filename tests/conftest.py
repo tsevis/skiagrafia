@@ -22,3 +22,64 @@ def pytest_collection_modifyitems(
         fixtures = frozenset(getattr(item, "fixturenames", ()))
         if fixtures & GUI_FIXTURE_NAMES:
             item.add_marker("gui")
+
+# ── GUI fixtures ────────────────────────────────────────────────────────────
+# Requesting any of these auto-marks the test `gui` (see the hook above), so
+# it stays out of a plain `pytest` run. Run them deliberately: pytest -m gui
+
+
+@pytest.fixture
+def tk_root():
+    """A real Tk root window. Destroyed even if the test fails."""
+    import tkinter as tk
+
+    try:
+        root = tk.Tk()
+    except tk.TclError as exc:  # no display available
+        pytest.skip(f"Tk unavailable: {exc}")
+    root.geometry("1100x760")
+    root.update_idletasks()
+    try:
+        yield root
+    finally:
+        # Drop pending after() callbacks before teardown so a scheduled
+        # redraw cannot fire against half-destroyed widgets.
+        for after_id in root.tk.eval("after info").split():
+            try:
+                root.after_cancel(after_id)
+            except Exception:
+                pass
+        root.destroy()
+
+
+@pytest.fixture
+def stub_app(tk_root):
+    """Minimal stand-in for MainWindow.
+
+    The panels only ever reach for `root`, `prefs` and `switch_to_batch`
+    (verified by grepping ui/single), so a real MainWindow -- which would
+    build the top bar, mode switcher and Batch view too -- is unnecessary.
+    """
+    from types import SimpleNamespace
+
+    return SimpleNamespace(
+        root=tk_root,
+        prefs={},
+        switch_to_batch=lambda *a, **k: None,
+    )
+
+
+@pytest.fixture
+def single_view(tk_root, stub_app):
+    """A real three-panel SingleView, laid out and realised."""
+    import tkinter as tk
+    from tkinter import ttk
+
+    from ui.single.single_view import SingleView
+
+    container = ttk.Frame(tk_root)
+    container.pack(fill=tk.BOTH, expand=True)
+    view = SingleView(container, stub_app)
+    view.frame.pack(fill=tk.BOTH, expand=True)
+    tk_root.update()  # realise geometry so the canvas has a real size
+    return view
