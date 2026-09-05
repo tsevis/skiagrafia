@@ -420,3 +420,46 @@ class TestLeftPanelLabels:
         left.add_manual_label("chalice")
         tk_root.update()
         assert "chalice" in left.get_confirmed_labels()
+
+
+class TestLeftPanelOutputMode:
+    """get_svg_mode_label feeds the batch-template summary in the right panel."""
+
+    def test_both_modes_selected(self, single_view) -> None:
+        left = single_view.left_panel
+        left._mode_structural_svg_var.set(True)
+        left._mode_bitmap_var.set(True)
+        assert left.get_svg_mode_label() == "Structural SVG + bitmap"
+
+    def test_svg_only(self, single_view) -> None:
+        left = single_view.left_panel
+        left._mode_structural_svg_var.set(True)
+        left._mode_bitmap_var.set(False)
+        assert left.get_svg_mode_label() == "Structural SVG"
+
+    def test_bitmap_only(self, single_view) -> None:
+        left = single_view.left_panel
+        left._mode_structural_svg_var.set(False)
+        left._mode_bitmap_var.set(True)
+        assert left.get_svg_mode_label() == "Bitmap only"
+
+    def test_neither_falls_back_like_get_output_mode(self, single_view) -> None:
+        # _get_output_mode falls back to "vector" when nothing is ticked, so
+        # the human-readable label must not claim otherwise.
+        left = single_view.left_panel
+        left._mode_structural_svg_var.set(False)
+        left._mode_bitmap_var.set(False)
+        assert left._get_output_mode() == "vector"
+        assert left.get_svg_mode_label() == "Structural SVG"
+
+    def test_label_agrees_with_the_machine_readable_mode(
+        self, single_view
+    ) -> None:
+        left = single_view.left_panel
+        for svg in (True, False):
+            for bitmap in (True, False):
+                left._mode_structural_svg_var.set(svg)
+                left._mode_bitmap_var.set(bitmap)
+                mode = left._get_output_mode()
+                label = left.get_svg_mode_label()
+                assert ("bitmap" in mode) == ("bitmap" in label.lower())

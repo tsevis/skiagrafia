@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import sys
 import tkinter as tk
+import warnings
 from pathlib import Path
 
 import numpy as np
@@ -192,6 +193,55 @@ class TestThumbnails:
         assert len(right._layer_widgets) == 1
         assert right._thumb_refs, "padded crop should still yield a thumbnail"
 
+    def test_extreme_bbox_is_clamped_to_the_source(
+        self, single_view, tk_root, tmp_path, monkeypatch
+    ) -> None:
+        # Image.crop pads rather than clamps, so an unclamped bbox allocates a
+        # buffer the size of the bbox. Spy on the box actually handed to crop.
+        path = _write_image(tmp_path / "src.png")  # 120x90
+        single_view.left_panel._image_path = str(path)
+        boxes: list[tuple[int, int, int, int]] = []
+        original = Image.Image.crop
+
+        def _spy(self, box=None):  # noqa: ANN001, ANN202
+            boxes.append(box)
+            return original(self, box)
+
+        monkeypatch.setattr(Image.Image, "crop", _spy)
+        single_view.right_panel.update_layers(
+            [_layer("chalice", bbox=(-500, -500, 99999, 99999))]
+        )
+        tk_root.update()
+
+        assert boxes, "crop was never called"
+        x0, y0, x1, y1 = boxes[0]
+        assert x0 >= 0 and y0 >= 0
+        assert x1 <= 120 and y1 <= 90
+
+    def test_extreme_bbox_does_not_trip_the_decompression_guard(
+        self, single_view, tk_root, tmp_path
+    ) -> None:
+        path = _write_image(tmp_path / "src.png")
+        single_view.left_panel._image_path = str(path)
+        with warnings.catch_warnings():
+            warnings.simplefilter("error", Image.DecompressionBombWarning)
+            single_view.right_panel.update_layers(
+                [_layer("chalice", bbox=(-500, -500, 99999, 99999))]
+            )
+            tk_root.update()
+        assert single_view.right_panel._thumb_refs
+
+    def test_bbox_entirely_outside_the_image_is_survivable(
+        self, single_view, tk_root, tmp_path
+    ) -> None:
+        path = _write_image(tmp_path / "src.png")
+        single_view.left_panel._image_path = str(path)
+        single_view.right_panel.update_layers(
+            [_layer("chalice", bbox=(500, 500, 600, 600))]
+        )
+        tk_root.update()
+        assert len(single_view.right_panel._layer_widgets) == 1
+
     def test_missing_image_file_does_not_raise(
         self, single_view, tk_root, tmp_path
     ) -> None:
@@ -321,16 +371,6 @@ class TestScrolling:
 
 
 class TestCreateTemplate:
-    @pytest.mark.xfail(
-        strict=True,
-        reason=(
-            "right_panel.py:561 calls left.get_svg_mode_label(), which is not "
-            "defined on LeftPanel and never has been (the call dates to the "
-            "initial commit). _create_template builds and grab_set()s its "
-            "Toplevel first, then raises, leaving a modal dialog on screen "
-            "with no buttons. Remove this marker when the method is added."
-        ),
-    )
     def test_template_dialog_opens_fully(
         self, populated, single_view, tk_root, tmp_path, monkeypatch
     ) -> None:
@@ -351,3 +391,53 @@ class TestCreateTemplate:
             if child.winfo_class() == "TButton"
         ]
         assert len(buttons) == 2, "expected Save-only and Save-and-switch"
+
+    def test_saving_the_template_writes_it(
+        self, populated, single_view, tk_root, tmp_path, monkeypatch
+    ) -> None:
+        from core.batch_template import BatchTemplate
+
+        monkeypatch.setattr(Path, "home", lambda: tmp_path)
+        single_view.left_panel._image_path = str(_write_image(tmp_path / "s.png"))
+
+        before = set(tk_root.winfo_children())
+        populated._create_template()
+        tk_root.update()
+        dialog = next(w for w in tk_root.winfo_children() if w not in before)
+        save_only = next(
+            child
+            for frame in dialog.winfo_children()
+            for child in frame.winfo_children()
+            if child.winfo_class() == "TButton"
+            and "only" in str(child.cget("text")).lower()
+        )
+        save_only.invoke()
+        tk_root.update()
+
+        saved = BatchTemplate.list_all()
+        assert [t.name for t in saved] == ["s"]
+        assert saved[0].confirmed_children == {"chalice": ["stem", "base"]}
+
+    def test_save_and_switch_hands_off_to_batch_mode(
+        self, populated, single_view, tk_root, tmp_path, monkeypatch
+    ) -> None:
+        monkeypatch.setattr(Path, "home", lambda: tmp_path)
+        single_view.left_panel._image_path = str(_write_image(tmp_path / "s.png"))
+        switched: list[bool] = []
+        single_view.app.switch_to_batch = lambda: switched.append(True)
+
+        before = set(tk_root.winfo_children())
+        populated._create_template()
+        tk_root.update()
+        dialog = next(w for w in tk_root.winfo_children() if w not in before)
+        switch_btn = next(
+            child
+            for frame in dialog.winfo_children()
+            for child in frame.winfo_children()
+            if child.winfo_class() == "TButton"
+            and "switch" in str(child.cget("text")).lower()
+        )
+        switch_btn.invoke()
+        tk_root.update()
+
+        assert switched == [True]

@@ -276,7 +276,15 @@ class RightPanel:
 
         try:
             with Image.open(image_path) as source:
+                # Image.crop pads out-of-range boxes instead of clipping, so
+                # an oversized bbox allocates a buffer the size of the bbox
+                # rather than the image. The orchestrator widens boxes by
+                # BBOX_EXPAND_RATIO, so they can legitimately exceed bounds.
                 x0, y0, x1, y1 = bbox
+                x0 = max(0, min(source.width - 1, int(x0)))
+                y0 = max(0, min(source.height - 1, int(y0)))
+                x1 = max(x0 + 1, min(source.width, int(x1)))
+                y1 = max(y0 + 1, min(source.height, int(y1)))
                 crop = source.convert("RGB").crop((x0, y0, x1, y1))
                 crop.thumbnail((56, 48), Image.LANCZOS)
                 preview = Image.new("RGB", (56, 48), "#F3F1EC")

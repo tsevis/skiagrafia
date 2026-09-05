@@ -389,6 +389,20 @@ class LeftPanel(LabelsSectionMixin):
     def wants_structural_svg(self) -> bool:
         return self._mode_structural_svg_var.get()
 
+    def get_svg_mode_label(self) -> str:
+        """Human-readable output mode, for the batch-template summary line.
+
+        Mirrors _get_output_mode, fallback included: with neither box ticked
+        that method still yields "vector", so this must not claim otherwise.
+        """
+        structural = self._mode_structural_svg_var.get()
+        bitmap = self._mode_bitmap_var.get()
+        if structural and bitmap:
+            return "Structural SVG + bitmap"
+        if bitmap:
+            return "Bitmap only"
+        return "Structural SVG"
+
     def _build_parameter_row(
         self,
         parent: ttk.Widget,
