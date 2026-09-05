@@ -408,7 +408,11 @@ class LlamaCppVLMClient(BaseVLMClient):
             try:
                 detail = exc.read().decode("utf-8", errors="replace")[:500]
             except Exception:
-                pass
+                # Best-effort enrichment only; the HTTPError below is still
+                # reported and re-raised, but record why the body was lost.
+                logger.debug(
+                    "Could not read llama.cpp error body from %s", path, exc_info=True
+                )
             logger.error("llama.cpp HTTP %s from %s: %s", exc.code, path, detail)
             raise
         parsed = json.loads(body)

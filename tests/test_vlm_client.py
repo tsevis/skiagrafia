@@ -4,6 +4,8 @@ All tests are offline: transports are mocked, no server required.
 """
 from __future__ import annotations
 
+import io
+import logging
 import sys
 import urllib.error
 from pathlib import Path
@@ -203,3 +205,74 @@ class TestCreateClient:
         from models.moondream_client import MoondreamClient
 
         assert MoondreamClient is OllamaVLMClient
+
+
+class TestLlamaCppErrorBodyHandling:
+    """An unreadable HTTP error body must not hide the underlying failure."""
+
+    @staticmethod
+    def _client_with_failing_body(
+        monkeypatch: pytest.MonkeyPatch, body_error: Exception
+    ) -> LlamaCppVLMClient:
+        class BrokenBodyHTTPError(urllib.error.HTTPError):
+            def read(self, *args: object, **kwargs: object) -> bytes:
+                raise body_error
+
+        def fake_urlopen(*args: object, **kwargs: object) -> object:
+            raise BrokenBodyHTTPError(
+                "http://localhost:8080/completion", 500, "boom", {}, None  # type: ignore[arg-type]
+            )
+
+        monkeypatch.setattr(
+            "models.vlm_client.urllib.request.urlopen", fake_urlopen
+        )
+        return LlamaCppVLMClient(host="http://localhost:8080", model="qwen3-vl")
+
+    def test_http_error_still_raised_when_body_unreadable(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        client = self._client_with_failing_body(monkeypatch, OSError("socket closed"))
+        with pytest.raises(urllib.error.HTTPError):
+            client._request_json("/completion", payload={"prompt": "hi"})
+
+    def test_unreadable_body_is_logged_not_swallowed(
+        self, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        client = self._client_with_failing_body(monkeypatch, OSError("socket closed"))
+        with caplog.at_level(logging.DEBUG, logger="models.vlm_client"):
+            with pytest.raises(urllib.error.HTTPError):
+                client._request_json("/completion", payload={"prompt": "hi"})
+
+        # The failure itself is reported at ERROR ...
+        assert any(
+            r.levelno == logging.ERROR and "500" in r.getMessage()
+            for r in caplog.records
+        ), "HTTP failure was not reported"
+        # ... and the reason the body was lost is recoverable at DEBUG.
+        debug_records = [r for r in caplog.records if r.levelno == logging.DEBUG]
+        assert debug_records, "unreadable error body was silently discarded"
+        assert any(r.exc_info for r in debug_records), "no traceback retained"
+
+    def test_readable_body_is_included_in_error_log(
+        self, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        def fake_urlopen(*args: object, **kwargs: object) -> object:
+            raise urllib.error.HTTPError(
+                "http://localhost:8080/completion",
+                500,
+                "boom",
+                {},  # type: ignore[arg-type]
+                io.BytesIO(b"mmproj file not found"),
+            )
+
+        monkeypatch.setattr(
+            "models.vlm_client.urllib.request.urlopen", fake_urlopen
+        )
+        client = LlamaCppVLMClient(host="http://localhost:8080", model="qwen3-vl")
+        with caplog.at_level(logging.ERROR, logger="models.vlm_client"):
+            with pytest.raises(urllib.error.HTTPError):
+                client._request_json("/completion", payload={"prompt": "hi"})
+
+        assert any(
+            "mmproj file not found" in r.getMessage() for r in caplog.records
+        ), "server error detail was not surfaced"

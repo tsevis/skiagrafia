@@ -5,6 +5,7 @@ Entry point: TkinterDnD root window with rich logging.
 from __future__ import annotations
 
 import logging
+import logging.handlers
 import os
 from pathlib import Path
 from typing import TYPE_CHECKING
@@ -32,8 +33,29 @@ configure_cairo_library_path()
 from rich.logging import RichHandler  # noqa: E402 — must follow configure_cairo_library_path()
 
 
+# Log rotation — the file handler runs at DEBUG, so an unbounded file grows
+# without limit. Cap total on-disk history at LOG_BACKUP_COUNT + 1 files.
+LOG_MAX_BYTES = 2 * 1024 * 1024
+LOG_BACKUP_COUNT = 5
+
+# Third-party loggers that emit one record per HTTP frame or per draw call.
+# At DEBUG these drown out the pipeline's own records, so they are pinned to
+# WARNING; raise an individual one temporarily when debugging that layer.
+NOISY_LOGGERS = ("PIL", "urllib3", "httpcore", "httpx", "matplotlib")
+
+
+def build_file_handler(log_file: Path) -> logging.Handler:
+    """Create the size-rotating file handler for the debug log."""
+    return logging.handlers.RotatingFileHandler(
+        str(log_file),
+        maxBytes=LOG_MAX_BYTES,
+        backupCount=LOG_BACKUP_COUNT,
+        encoding="utf-8",
+    )
+
+
 def setup_logging() -> None:
-    """Configure logging with RichHandler + file output."""
+    """Configure logging with RichHandler + rotating file output."""
     log_dir = Path.home() / ".config" / "skiagrafia"
     log_dir.mkdir(parents=True, exist_ok=True)
     log_file = log_dir / "skiagrafia.log"
@@ -45,7 +67,7 @@ def setup_logging() -> None:
             show_path=False,
             markup=True,
         ),
-        logging.FileHandler(str(log_file), encoding="utf-8"),
+        build_file_handler(log_file),
     ]
 
     logging.basicConfig(
@@ -53,8 +75,8 @@ def setup_logging() -> None:
         format="%(name)s - %(message)s",
         handlers=handlers,
     )
-    logging.getLogger("PIL").setLevel(logging.WARNING)
-    logging.getLogger("urllib3").setLevel(logging.WARNING)
+    for name in NOISY_LOGGERS:
+        logging.getLogger(name).setLevel(logging.WARNING)
 
 
 def check_vlm_backend() -> None:
