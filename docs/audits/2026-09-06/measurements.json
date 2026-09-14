@@ -1,0 +1,1147 @@
+{
+  "hardware": {
+    "chip": "Apple M1 Ultra",
+    "unified_memory_gib": 128
+  },
+  "test_results": {
+    "unit_passed": 522,
+    "unit_seconds": 7.88,
+    "gui_passed": 230,
+    "gui_seconds": 31.43,
+    "ruff": "passed"
+  },
+  "method": {
+    "samples": {
+      "mac": {
+        "description": "Previously processed Mac desktop setup, monitor on horizontal computer case, keyboard and mouse",
+        "width": 500,
+        "height": 492
+      },
+      "groceries": {
+        "description": "Grounded-SAM-2 bundled groceries.jpg: four paper bags inside a car",
+        "width": 800,
+        "height": 534
+      }
+    },
+    "prompt": "Describe the whole foreground composition first, then name the main objects that define it. Prefer the dominant object or grouped objects over tiny details. If the exact specialist term is unknown, use short visual nouns based on shape, material, or purpose. Reply only as a comma-separated list of the main whole objects.",
+    "vlm_max_output_tokens": 200,
+    "vlm_temperature": 0,
+    "vlm_seed": 42,
+    "repeats_per_image": 2,
+    "llamacpp_context": 8192,
+    "llamacpp_parallel_slots": 1,
+    "llamacpp_reasoning": "off",
+    "llamacpp_qwen_projector": "mmproj-Qwen3VL-8B-Instruct-Q8_0.gguf",
+    "llamacpp_minicpm_projector": "mmproj-model-f16.gguf",
+    "comparison_limits": "Model/runtime configurations, not isolated architecture comparison. Two convenience samples, no annotated accuracy set. Second identical request benefits from image/prompt cache. Ollama first request includes load; llama.cpp startup is recorded separately. Image preprocessing differs by model. CV timings are small-sample measurements on MPS; SAM3 uses MLX. No inference requests run concurrently in these probes."
+  },
+  "vlm-ollama-results": [
+    {
+      "backend": "ollama",
+      "model": "moondream:latest",
+      "scene": "mac",
+      "repeat": 0,
+      "text": "",
+      "metrics": {
+        "total_duration": 2259221458,
+        "load_duration": 1612726000,
+        "prompt_eval_count": 802,
+        "prompt_eval_duration": 612449000,
+        "eval_count": 1,
+        "eval_duration": 1000,
+        "done_reason": "stop"
+      },
+      "seconds": 2.288,
+      "thinking_chars": 0
+    },
+    {
+      "backend": "ollama",
+      "model": "moondream:latest",
+      "scene": "mac",
+      "repeat": 1,
+      "text": "",
+      "metrics": {
+        "total_duration": 81472542,
+        "load_duration": 48176334,
+        "prompt_eval_count": 802,
+        "prompt_eval_duration": 5234000,
+        "eval_count": 1,
+        "eval_duration": 1000,
+        "done_reason": "stop"
+      },
+      "seconds": 0.085,
+      "thinking_chars": 0
+    },
+    {
+      "backend": "ollama",
+      "model": "moondream:latest",
+      "scene": "groceries",
+      "repeat": 0,
+      "text": "",
+      "metrics": {
+        "total_duration": 531964667,
+        "load_duration": 54060167,
+        "prompt_eval_count": 802,
+        "prompt_eval_duration": 422263000,
+        "eval_count": 1,
+        "eval_duration": 1000,
+        "done_reason": "stop"
+      },
+      "seconds": 0.538,
+      "thinking_chars": 0
+    },
+    {
+      "backend": "ollama",
+      "model": "moondream:latest",
+      "scene": "groceries",
+      "repeat": 1,
+      "text": "",
+      "metrics": {
+        "total_duration": 94400541,
+        "load_duration": 52498416,
+        "prompt_eval_count": 802,
+        "prompt_eval_duration": 5104000,
+        "eval_count": 1,
+        "eval_duration": 1000,
+        "done_reason": "stop"
+      },
+      "seconds": 0.101,
+      "thinking_chars": 0
+    },
+    {
+      "backend": "ollama",
+      "model": "qwen2.5vl:3b",
+      "scene": "mac",
+      "repeat": 0,
+      "text": "Desktop computer, keyboard, mouse",
+      "metrics": {
+        "total_duration": 6094246500,
+        "load_duration": 4000156458,
+        "prompt_eval_count": 1138,
+        "prompt_eval_duration": 2012572000,
+        "eval_count": 7,
+        "eval_duration": 55350000,
+        "done_reason": "stop"
+      },
+      "seconds": 6.099,
+      "thinking_chars": 0
+    },
+    {
+      "backend": "ollama",
+      "model": "qwen2.5vl:3b",
+      "scene": "mac",
+      "repeat": 1,
+      "text": "Desktop computer, keyboard, mouse",
+      "metrics": {
+        "total_duration": 242515334,
+        "load_duration": 150750584,
+        "prompt_eval_count": 1138,
+        "prompt_eval_duration": 12436000,
+        "eval_count": 7,
+        "eval_duration": 57820000,
+        "done_reason": "stop"
+      },
+      "seconds": 0.246,
+      "thinking_chars": 0
+    },
+    {
+      "backend": "ollama",
+      "model": "qwen2.5vl:3b",
+      "scene": "groceries",
+      "repeat": 0,
+      "text": "SUV trunk with grocery bags in rear cargo area",
+      "metrics": {
+        "total_duration": 2305190333,
+        "load_duration": 154599083,
+        "prompt_eval_count": 1162,
+        "prompt_eval_duration": 2021192000,
+        "eval_count": 11,
+        "eval_duration": 90353000,
+        "done_reason": "stop"
+      },
+      "seconds": 2.31,
+      "thinking_chars": 0
+    },
+    {
+      "backend": "ollama",
+      "model": "qwen2.5vl:3b",
+      "scene": "groceries",
+      "repeat": 1,
+      "text": "SUV trunk with grocery bags in rear cargo area",
+      "metrics": {
+        "total_duration": 307606375,
+        "load_duration": 161314916,
+        "prompt_eval_count": 1162,
+        "prompt_eval_duration": 16079999,
+        "eval_count": 11,
+        "eval_duration": 92229000,
+        "done_reason": "stop"
+      },
+      "seconds": 0.313,
+      "thinking_chars": 0
+    },
+    {
+      "backend": "ollama",
+      "model": "minicpm-v:latest",
+      "scene": "mac",
+      "repeat": 0,
+      "text": "computer monitor, keyboard, mouse, printer",
+      "metrics": {
+        "total_duration": 5734982458,
+        "load_duration": 4145730833,
+        "prompt_eval_count": 267,
+        "prompt_eval_duration": 1434426000,
+        "eval_count": 9,
+        "eval_duration": 93587000,
+        "done_reason": "stop"
+      },
+      "seconds": 5.739,
+      "thinking_chars": 0
+    },
+    {
+      "backend": "ollama",
+      "model": "minicpm-v:latest",
+      "scene": "mac",
+      "repeat": 1,
+      "text": "computer monitor, keyboard, mouse, printer",
+      "metrics": {
+        "total_duration": 304378833,
+        "load_duration": 131119708,
+        "prompt_eval_count": 267,
+        "prompt_eval_duration": 19878000,
+        "eval_count": 9,
+        "eval_duration": 93839000,
+        "done_reason": "stop"
+      },
+      "seconds": 0.309,
+      "thinking_chars": 0
+    },
+    {
+      "backend": "ollama",
+      "model": "minicpm-v:latest",
+      "scene": "groceries",
+      "repeat": 0,
+      "text": "back door open , trunk compartment , brown paper bags filled with groceries .",
+      "metrics": {
+        "total_duration": 1596519459,
+        "load_duration": 133061709,
+        "prompt_eval_count": 267,
+        "prompt_eval_duration": 1222770000,
+        "eval_count": 15,
+        "eval_duration": 163775000,
+        "done_reason": "stop"
+      },
+      "seconds": 1.601,
+      "thinking_chars": 0
+    },
+    {
+      "backend": "ollama",
+      "model": "minicpm-v:latest",
+      "scene": "groceries",
+      "repeat": 1,
+      "text": "back door open , trunk compartment , brown paper bags filled with groceries .",
+      "metrics": {
+        "total_duration": 391454292,
+        "load_duration": 133693959,
+        "prompt_eval_count": 267,
+        "prompt_eval_duration": 19933000,
+        "eval_count": 15,
+        "eval_duration": 160581000,
+        "done_reason": "stop"
+      },
+      "seconds": 0.396,
+      "thinking_chars": 0
+    },
+    {
+      "backend": "ollama",
+      "model": "gemma4:e4b",
+      "scene": "mac",
+      "repeat": 0,
+      "text": "",
+      "metrics": {
+        "total_duration": 11205875291,
+        "load_duration": 7590713541,
+        "prompt_eval_count": 180,
+        "prompt_eval_duration": 675833000,
+        "eval_count": 200,
+        "eval_duration": 2920781000,
+        "done_reason": "length"
+      },
+      "seconds": 11.209,
+      "thinking_chars": 807
+    },
+    {
+      "backend": "ollama",
+      "model": "gemma4:e4b",
+      "scene": "mac",
+      "repeat": 1,
+      "text": "",
+      "metrics": {
+        "total_duration": 3326460667,
+        "load_duration": 333627542,
+        "prompt_eval_count": 180,
+        "prompt_eval_duration": 56895000,
+        "eval_count": 200,
+        "eval_duration": 2915685000,
+        "done_reason": "length"
+      },
+      "seconds": 3.331,
+      "thinking_chars": 807
+    },
+    {
+      "backend": "ollama",
+      "model": "gemma4:e4b",
+      "scene": "groceries",
+      "repeat": 0,
+      "text": "",
+      "metrics": {
+        "total_duration": 3873822958,
+        "load_duration": 343988875,
+        "prompt_eval_count": 267,
+        "prompt_eval_duration": 595155000,
+        "eval_count": 200,
+        "eval_duration": 2903093000,
+        "done_reason": "length"
+      },
+      "seconds": 3.878,
+      "thinking_chars": 831
+    },
+    {
+      "backend": "ollama",
+      "model": "gemma4:e4b",
+      "scene": "groceries",
+      "repeat": 1,
+      "text": "",
+      "metrics": {
+        "total_duration": 3329331125,
+        "load_duration": 339369167,
+        "prompt_eval_count": 267,
+        "prompt_eval_duration": 54238000,
+        "eval_count": 200,
+        "eval_duration": 2904938000,
+        "done_reason": "length"
+      },
+      "seconds": 3.335,
+      "thinking_chars": 831
+    }
+  ],
+  "vlm-llamacpp-results": [
+    {
+      "backend": "llamacpp",
+      "model": "Qwen3-VL-8B Q4_K_M",
+      "scene": "mac",
+      "repeat": 0,
+      "text": "computer, keyboard, mouse",
+      "metrics": {
+        "cache_n": 0,
+        "prompt_n": 311,
+        "prompt_ms": 829.43,
+        "prompt_per_token_ms": 2.6669774919614144,
+        "prompt_per_second": 374.95629528712493,
+        "predicted_n": 6,
+        "predicted_ms": 77.989,
+        "predicted_per_token_ms": 12.998166666666668,
+        "predicted_per_second": 76.9339265793894
+      },
+      "usage": {
+        "completion_tokens": 6,
+        "prompt_tokens": 311,
+        "total_tokens": 317,
+        "prompt_tokens_details": {
+          "cached_tokens": 0
+        }
+      },
+      "finish_reason": "stop",
+      "seconds": 0.93
+    },
+    {
+      "backend": "llamacpp",
+      "model": "Qwen3-VL-8B Q4_K_M",
+      "scene": "mac",
+      "repeat": 1,
+      "text": "computer, keyboard, mouse",
+      "metrics": {
+        "cache_n": 310,
+        "prompt_n": 1,
+        "prompt_ms": 15.71,
+        "prompt_per_token_ms": 15.71,
+        "prompt_per_second": 63.653723742838956,
+        "predicted_n": 6,
+        "predicted_ms": 77.038,
+        "predicted_per_token_ms": 12.839666666666666,
+        "predicted_per_second": 77.8836418390924
+      },
+      "usage": {
+        "completion_tokens": 6,
+        "prompt_tokens": 311,
+        "total_tokens": 317,
+        "prompt_tokens_details": {
+          "cached_tokens": 310
+        }
+      },
+      "finish_reason": "stop",
+      "seconds": 0.114
+    },
+    {
+      "backend": "llamacpp",
+      "model": "Qwen3-VL-8B Q4_K_M",
+      "scene": "groceries",
+      "repeat": 0,
+      "text": "car, paper bags, cargo area",
+      "metrics": {
+        "cache_n": 65,
+        "prompt_n": 431,
+        "prompt_ms": 1150.929,
+        "prompt_per_token_ms": 2.6703689095127614,
+        "prompt_per_second": 374.4800939067483,
+        "predicted_n": 8,
+        "predicted_ms": 110.528,
+        "predicted_per_token_ms": 13.816,
+        "predicted_per_second": 72.37984944991314
+      },
+      "usage": {
+        "completion_tokens": 8,
+        "prompt_tokens": 496,
+        "total_tokens": 504,
+        "prompt_tokens_details": {
+          "cached_tokens": 65
+        }
+      },
+      "finish_reason": "stop",
+      "seconds": 1.304
+    },
+    {
+      "backend": "llamacpp",
+      "model": "Qwen3-VL-8B Q4_K_M",
+      "scene": "groceries",
+      "repeat": 1,
+      "text": "car, paper bags, cargo area",
+      "metrics": {
+        "cache_n": 495,
+        "prompt_n": 1,
+        "prompt_ms": 15.843,
+        "prompt_per_token_ms": 15.843,
+        "prompt_per_second": 63.119358707315534,
+        "predicted_n": 8,
+        "predicted_ms": 108.657,
+        "predicted_per_token_ms": 13.582125,
+        "predicted_per_second": 73.62618147013077
+      },
+      "usage": {
+        "completion_tokens": 8,
+        "prompt_tokens": 496,
+        "total_tokens": 504,
+        "prompt_tokens_details": {
+          "cached_tokens": 495
+        }
+      },
+      "finish_reason": "stop",
+      "seconds": 0.161
+    },
+    {
+      "backend": "llamacpp",
+      "model": "MiniCPM-V-4.6 Q4_K_M",
+      "scene": "mac",
+      "repeat": 0,
+      "text": "computer monitor, keyboard, mouse, computer base, screen displaying colorful abstract and text-based graphics, main objects are computer system components, including monitor and keyboard, with action! text visible on screen.",
+      "metrics": {
+        "cache_n": 0,
+        "prompt_n": 275,
+        "prompt_ms": 526.052,
+        "prompt_per_token_ms": 1.9129163636363637,
+        "prompt_per_second": 522.7620083185692,
+        "predicted_n": 40,
+        "predicted_ms": 210.661,
+        "predicted_per_token_ms": 5.266525,
+        "predicted_per_second": 189.87852521349467
+      },
+      "usage": {
+        "completion_tokens": 40,
+        "prompt_tokens": 275,
+        "total_tokens": 315,
+        "prompt_tokens_details": {
+          "cached_tokens": 0
+        }
+      },
+      "finish_reason": "stop",
+      "seconds": 0.798
+    },
+    {
+      "backend": "llamacpp",
+      "model": "MiniCPM-V-4.6 Q4_K_M",
+      "scene": "mac",
+      "repeat": 1,
+      "text": "computer monitor, keyboard, mouse, computer base, screen displaying colorful abstract and text-based graphics, main objects are computer system components, including monitor and keyboard, with action! text visible on screen.",
+      "metrics": {
+        "cache_n": 271,
+        "prompt_n": 4,
+        "prompt_ms": 14.175,
+        "prompt_per_token_ms": 3.54375,
+        "prompt_per_second": 282.1869488536155,
+        "predicted_n": 40,
+        "predicted_ms": 215.32,
+        "predicted_per_token_ms": 5.383,
+        "predicted_per_second": 185.7700167193015
+      },
+      "usage": {
+        "completion_tokens": 40,
+        "prompt_tokens": 275,
+        "total_tokens": 315,
+        "prompt_tokens_details": {
+          "cached_tokens": 271
+        }
+      },
+      "finish_reason": "stop",
+      "seconds": 0.291
+    },
+    {
+      "backend": "llamacpp",
+      "model": "MiniCPM-V-4.6 Q4_K_M",
+      "scene": "groceries",
+      "repeat": 0,
+      "text": "paper bags, car trunk, grocery items, vehicle rear space, shopping supplies, car trunk contents, storage space, shopping bags, food items, vehicle cargo, back of car, retail goods, transportation storage, consumer goods, packaging materials, outdoor setting, car trunk open, shopping bags, grocery bags, food containers, vehicle rear, storage area, shopping bags with goods, car trunk contents, shopping bags filled, grocery bags, car trunk, shopping bags with produce, shopping bags with bread, car trunk, shopping bags with vegetables, shopping bags with fruits, shopping bags with bread and vegetables, car trunk, shopping bags with groceries, shopping bags with food, shopping bags with vegetables and fruits, shopping bags with bread and greens, shopping bags with groceries, shopping bags with food items, shopping bags with produce, shopping bags with groceries and vegetables, shopping bags with food and groceries, shopping bags with bread and vegetables, shopping bags with groceries and produce, shopping bags with food and groceries, shopping bags with",
+      "metrics": {
+        "cache_n": 0,
+        "prompt_n": 275,
+        "prompt_ms": 500.001,
+        "prompt_per_token_ms": 1.8181854545454545,
+        "prompt_per_second": 549.9989000022,
+        "predicted_n": 200,
+        "predicted_ms": 1623.877,
+        "predicted_per_token_ms": 8.119385,
+        "predicted_per_second": 123.16203751885149
+      },
+      "usage": {
+        "completion_tokens": 200,
+        "prompt_tokens": 275,
+        "total_tokens": 475,
+        "prompt_tokens_details": {
+          "cached_tokens": 0
+        }
+      },
+      "finish_reason": "length",
+      "seconds": 2.203
+    },
+    {
+      "backend": "llamacpp",
+      "model": "MiniCPM-V-4.6 Q4_K_M",
+      "scene": "groceries",
+      "repeat": 1,
+      "text": "paper bags, car trunk, grocery items, vehicle rear space, shopping supplies, car trunk contents, storage space, shopping bags, food items, vehicle cargo, back of car, retail goods, transportation storage, consumer goods, packaging materials, outdoor setting, car trunk open, shopping bags, grocery bags, food containers, vehicle rear, storage area, shopping bags with goods, car trunk contents, shopping bags filled, grocery bags, car trunk, shopping bags with produce, shopping bags with bread, car trunk, shopping bags with vegetables, shopping bags with fruits, shopping bags with bread and vegetables, car trunk, shopping bags with groceries, shopping bags with food, shopping bags with vegetables and fruits, shopping bags with bread and greens, shopping bags with groceries, shopping bags with food items, shopping bags with produce, shopping bags with groceries and vegetables, shopping bags with food and groceries, shopping bags with bread and vegetables, shopping bags with groceries and produce, shopping bags with food and groceries, shopping bags with",
+      "metrics": {
+        "cache_n": 271,
+        "prompt_n": 4,
+        "prompt_ms": 17.883,
+        "prompt_per_token_ms": 4.47075,
+        "prompt_per_second": 223.6761169826092,
+        "predicted_n": 200,
+        "predicted_ms": 1832.338,
+        "predicted_per_token_ms": 9.16169,
+        "predicted_per_second": 109.15016770923269
+      },
+      "usage": {
+        "completion_tokens": 200,
+        "prompt_tokens": 275,
+        "total_tokens": 475,
+        "prompt_tokens_details": {
+          "cached_tokens": 271
+        }
+      },
+      "finish_reason": "length",
+      "seconds": 1.924
+    }
+  ],
+  "fallback-results": [
+    {
+      "model": "gemma4:e4b",
+      "scene": "mac",
+      "think": false,
+      "seconds": 4.76,
+      "text": "Computer setup, Monitor, Keyboard, Mouse",
+      "thinking_chars": 0,
+      "load_seconds": 4.038515792,
+      "done_reason": "stop",
+      "eval_count": 9
+    },
+    {
+      "model": "gemma4:e4b",
+      "scene": "groceries",
+      "think": false,
+      "seconds": 1.104,
+      "text": "Car rear hatch, car bumper, trunk interior",
+      "thinking_chars": 0,
+      "load_seconds": 0.360221583,
+      "done_reason": "stop",
+      "eval_count": 10
+    },
+    {
+      "model": "moondream:latest",
+      "scene": "mac",
+      "think": null,
+      "seconds": 2.529,
+      "text": "urn, mouse",
+      "thinking_chars": 0,
+      "load_seconds": 1.904546542,
+      "done_reason": "stop",
+      "eval_count": 4
+    },
+    {
+      "model": "moondream:latest",
+      "scene": "groceries",
+      "think": null,
+      "seconds": 0.541,
+      "text": "ids, bags",
+      "thinking_chars": 0,
+      "load_seconds": 0.06591575,
+      "done_reason": "stop",
+      "eval_count": 4
+    }
+  ],
+  "cv-results": [
+    {
+      "name": "dino_monitor_cold",
+      "seconds": 6.531,
+      "ok": true,
+      "result": {
+        "label": "computer monitor",
+        "bbox": [
+          84,
+          10,
+          372,
+          329
+        ],
+        "confidence": 0.8591836094856262
+      }
+    },
+    {
+      "name": "dino_monitor_warm",
+      "seconds": 2.029,
+      "ok": true,
+      "result": {
+        "label": "computer monitor",
+        "bbox": [
+          84,
+          10,
+          372,
+          329
+        ],
+        "confidence": 0.8591836094856262
+      }
+    },
+    {
+      "name": "dino_keyboard_warm",
+      "seconds": 2.338,
+      "ok": true,
+      "result": {
+        "label": "keyboard",
+        "bbox": [
+          10,
+          374,
+          442,
+          450
+        ],
+        "confidence": 0.8650681376457214
+      }
+    },
+    {
+      "name": "dino_mouse_warm",
+      "seconds": 2.193,
+      "ok": true,
+      "result": {
+        "label": "computer mouse",
+        "bbox": [
+          315,
+          436,
+          421,
+          477
+        ],
+        "confidence": 0.7243974804878235
+      }
+    },
+    {
+      "name": "sam_large_cold",
+      "seconds": 5.354,
+      "ok": true,
+      "shape": [
+        492,
+        500
+      ],
+      "nonzero": 81083
+    },
+    {
+      "name": "sam_large_warm",
+      "seconds": 0.737,
+      "ok": true,
+      "shape": [
+        492,
+        500
+      ],
+      "nonzero": 81083
+    },
+    {
+      "name": "vitmatte_cold",
+      "seconds": 1.135,
+      "ok": true,
+      "shape": [
+        492,
+        500
+      ],
+      "nonzero": 83313
+    },
+    {
+      "name": "vitmatte_warm",
+      "seconds": 0.351,
+      "ok": true,
+      "shape": [
+        492,
+        500
+      ],
+      "nonzero": 83313
+    },
+    {
+      "name": "vector_trace",
+      "seconds": 0.006,
+      "ok": true
+    },
+    {
+      "name": "sam_tiny_load",
+      "seconds": 0.471,
+      "ok": true
+    },
+    {
+      "name": "sam_tiny_encode_0",
+      "seconds": 0.305,
+      "ok": true
+    },
+    {
+      "name": "sam_tiny_decode_0",
+      "seconds": 0.016,
+      "ok": true,
+      "shape": [
+        492,
+        500
+      ],
+      "nonzero": 81162
+    },
+    {
+      "name": "sam_tiny_encode_1",
+      "seconds": 0.134,
+      "ok": true
+    },
+    {
+      "name": "sam_tiny_decode_1",
+      "seconds": 0.139,
+      "ok": true,
+      "shape": [
+        492,
+        500
+      ],
+      "nonzero": 81162
+    },
+    {
+      "name": "sam_small_load",
+      "seconds": 0.811,
+      "ok": true
+    },
+    {
+      "name": "sam_small_encode_0",
+      "seconds": 0.372,
+      "ok": true
+    },
+    {
+      "name": "sam_small_decode_0",
+      "seconds": 0.248,
+      "ok": true,
+      "shape": [
+        492,
+        500
+      ],
+      "nonzero": 82300
+    },
+    {
+      "name": "sam_small_encode_1",
+      "seconds": 0.232,
+      "ok": true
+    },
+    {
+      "name": "sam_small_decode_1",
+      "seconds": 0.164,
+      "ok": true,
+      "shape": [
+        492,
+        500
+      ],
+      "nonzero": 82300
+    },
+    {
+      "name": "sam_base_plus_load",
+      "seconds": 1.083,
+      "ok": true
+    },
+    {
+      "name": "sam_base_plus_encode_0",
+      "seconds": 0.816,
+      "ok": true
+    },
+    {
+      "name": "sam_base_plus_decode_0",
+      "seconds": 0.148,
+      "ok": true,
+      "shape": [
+        492,
+        500
+      ],
+      "nonzero": 80466
+    },
+    {
+      "name": "sam_base_plus_encode_1",
+      "seconds": 0.367,
+      "ok": true
+    },
+    {
+      "name": "sam_base_plus_decode_1",
+      "seconds": 0.11,
+      "ok": true,
+      "shape": [
+        492,
+        500
+      ],
+      "nonzero": 80466
+    }
+  ],
+  "sam3-results": [
+    {
+      "scene": "mac",
+      "label": "computer monitor",
+      "seconds": 0.656,
+      "scores": [
+        0.9434223175048828
+      ],
+      "boxes": [
+        [
+          86.47148132324219,
+          11.396293640136719,
+          369.9691162109375,
+          303.1612854003906
+        ]
+      ],
+      "mask_shape": [
+        1,
+        1,
+        492,
+        500
+      ]
+    },
+    {
+      "scene": "mac",
+      "label": "keyboard",
+      "seconds": 0.123,
+      "scores": [
+        0.9226364493370056
+      ],
+      "boxes": [
+        [
+          11.99677562713623,
+          374.7972412109375,
+          444.0813293457031,
+          449.52838134765625
+        ]
+      ],
+      "mask_shape": [
+        1,
+        1,
+        492,
+        500
+      ]
+    },
+    {
+      "scene": "mac",
+      "label": "computer mouse",
+      "seconds": 0.11,
+      "scores": [
+        0.9408591389656067,
+        0.5164576768875122
+      ],
+      "boxes": [
+        [
+          316.6508483886719,
+          438.92523193359375,
+          420.1375427246094,
+          476.266845703125
+        ],
+        [
+          60.93907165527344,
+          319.5304260253906,
+          103.70421600341797,
+          341.81158447265625
+        ]
+      ],
+      "mask_shape": [
+        2,
+        1,
+        492,
+        500
+      ]
+    },
+    {
+      "scene": "groceries",
+      "label": "paper bag",
+      "seconds": 0.132,
+      "scores": [
+        0.8980438113212585,
+        0.9056366682052612,
+        0.893263578414917,
+        0.9034404158592224
+      ],
+      "boxes": [
+        [
+          505.2777404785156,
+          176.1205596923828,
+          583.7800903320312,
+          339.28314208984375
+        ],
+        [
+          366.63330078125,
+          198.80374145507812,
+          446.0638122558594,
+          341.4704895019531
+        ],
+        [
+          581.5889282226562,
+          173.90365600585938,
+          641.7356567382812,
+          339.689453125
+        ],
+        [
+          438.57635498046875,
+          179.22589111328125,
+          509.9294128417969,
+          340.8040466308594
+        ]
+      ],
+      "mask_shape": [
+        4,
+        1,
+        534,
+        800
+      ]
+    }
+  ],
+  "pipeline-results": {
+    "image_path": "local Mac sample",
+    "width": 500,
+    "height": 492,
+    "svg_path": "temporary audit export (verified XML and render)",
+    "tiff_path": "temporary audit folder (9 verified RGBA TIFFs)",
+    "error": null,
+    "layers": [
+      {
+        "label": "desktop computer",
+        "role": "parent",
+        "bbox": [
+          84,
+          10,
+          372,
+          331
+        ]
+      },
+      {
+        "label": "buttons",
+        "role": "child",
+        "bbox": [
+          11,
+          374,
+          442,
+          449
+        ]
+      },
+      {
+        "label": "panels",
+        "role": "child",
+        "bbox": [
+          120,
+          45,
+          335,
+          202
+        ]
+      },
+      {
+        "label": "keyboard",
+        "role": "parent",
+        "bbox": [
+          10,
+          374,
+          442,
+          450
+        ]
+      },
+      {
+        "label": "mouse button",
+        "role": "child",
+        "bbox": [
+          315,
+          436,
+          421,
+          477
+        ]
+      },
+      {
+        "label": "mouse",
+        "role": "parent",
+        "bbox": [
+          316,
+          437,
+          420,
+          476
+        ]
+      },
+      {
+        "label": "buttons",
+        "role": "child",
+        "bbox": [
+          11,
+          374,
+          442,
+          449
+        ]
+      }
+    ],
+    "seconds": 31.777,
+    "duplicate_svg_ids": {
+      "buttons": 2
+    }
+  },
+  "sam3-setup": {
+    "load_seconds": 0.666,
+    "mac_encode_seconds": 0.624,
+    "groceries_encode_seconds": 0.789,
+    "confidence_threshold": 0.5,
+    "resolution": 1008
+  },
+  "llamacpp-startup-seconds": {
+    "Qwen3-VL-8B Q4_K_M": 2.055,
+    "MiniCPM-V-4.6 Q4_K_M": 2.522
+  },
+  "gemma-12b-followup": {
+    "server_startup_seconds": 5.074,
+    "reasoning": "off",
+    "context": 8192,
+    "slots": 1,
+    "projector": "mmproj-gemma-4-12B-it-Q8_0.gguf",
+    "rows": [
+      {
+        "backend": "llamacpp",
+        "model": "Gemma-4-12B Q4_K_M",
+        "scene": "mac",
+        "repeat": 0,
+        "text": "All-in-one computer, keyboard, mouse",
+        "metrics": {
+          "cache_n": 0,
+          "prompt_n": 177,
+          "prompt_ms": 792.465,
+          "prompt_per_token_ms": 4.477203389830509,
+          "prompt_per_second": 223.35371278226796,
+          "predicted_n": 11,
+          "predicted_ms": 274.673,
+          "predicted_per_token_ms": 24.97027272727273,
+          "predicted_per_second": 40.0476202611833
+        },
+        "usage": {
+          "completion_tokens": 11,
+          "prompt_tokens": 177,
+          "total_tokens": 188,
+          "prompt_tokens_details": {
+            "cached_tokens": 0
+          }
+        },
+        "finish_reason": "stop",
+        "seconds": 1.091
+      },
+      {
+        "backend": "llamacpp",
+        "model": "Gemma-4-12B Q4_K_M",
+        "scene": "mac",
+        "repeat": 1,
+        "text": "All-in-one computer, keyboard, mouse",
+        "metrics": {
+          "cache_n": 172,
+          "prompt_n": 5,
+          "prompt_ms": 103.383,
+          "prompt_per_token_ms": 20.6766,
+          "prompt_per_second": 48.363850923265915,
+          "predicted_n": 11,
+          "predicted_ms": 264.539,
+          "predicted_per_token_ms": 24.049,
+          "predicted_per_second": 41.5817705517901
+        },
+        "usage": {
+          "completion_tokens": 11,
+          "prompt_tokens": 177,
+          "total_tokens": 188,
+          "prompt_tokens_details": {
+            "cached_tokens": 172
+          }
+        },
+        "finish_reason": "stop",
+        "seconds": 0.385
+      },
+      {
+        "backend": "llamacpp",
+        "model": "Gemma-4-12B Q4_K_M",
+        "scene": "groceries",
+        "repeat": 0,
+        "text": "open trunk, car, paper bags, groceries",
+        "metrics": {
+          "cache_n": 1,
+          "prompt_n": 263,
+          "prompt_ms": 916.288,
+          "prompt_per_token_ms": 3.483984790874525,
+          "prompt_per_second": 287.0276594258574,
+          "predicted_n": 10,
+          "predicted_ms": 240.686,
+          "predicted_per_token_ms": 24.0686,
+          "predicted_per_second": 41.54790889374538
+        },
+        "usage": {
+          "completion_tokens": 10,
+          "prompt_tokens": 264,
+          "total_tokens": 274,
+          "prompt_tokens_details": {
+            "cached_tokens": 1
+          }
+        },
+        "finish_reason": "stop",
+        "seconds": 1.214
+      },
+      {
+        "backend": "llamacpp",
+        "model": "Gemma-4-12B Q4_K_M",
+        "scene": "groceries",
+        "repeat": 1,
+        "text": "open trunk, car, paper bags, groceries",
+        "metrics": {
+          "cache_n": 259,
+          "prompt_n": 5,
+          "prompt_ms": 109.525,
+          "prompt_per_token_ms": 21.905,
+          "prompt_per_second": 45.65167769915544,
+          "predicted_n": 10,
+          "predicted_ms": 238.979,
+          "predicted_per_token_ms": 23.8979,
+          "predicted_per_second": 41.844680913385695
+        },
+        "usage": {
+          "completion_tokens": 10,
+          "prompt_tokens": 264,
+          "total_tokens": 274,
+          "prompt_tokens_details": {
+            "cached_tokens": 259
+          }
+        },
+        "finish_reason": "stop",
+        "seconds": 0.382
+      }
+    ],
+    "note": "Same two images, composition prompt, temperature 0, seed 42 and 200-token cap as original comparison. Follow-up run after user asked about upgrading Gemma. Production configuration unchanged."
+  }
+}

@@ -522,7 +522,7 @@ class TestProcessBasicFlow:
 
 
 class TestProcessConfirmedFallback:
-    def test_confirmed_label_falls_back_to_full_image_bbox(self, tmp_path: Path) -> None:
+    def test_unlocated_confirmed_label_reports_warning_without_inventing_mask(self, tmp_path: Path) -> None:
         image_path = _write_image(tmp_path / "img.png")
         candidates = [_candidate("mystery object", source_model="confirmed")]
         detector = FakeDetector(boxes={"mystery object": None})
@@ -532,8 +532,9 @@ class TestProcessConfirmedFallback:
         result = orch.process(image_path)
 
         assert result.error is None
-        assert len(result.layers) == 1
-        assert result.layers[0].bbox == (0, 0, IMG_SIZE, IMG_SIZE)
+        assert result.layers == []
+        assert "Could not locate" in result.warnings[0]
+        assert result.svg_path is None
 
     def test_non_confirmed_label_without_detection_is_skipped(self, tmp_path: Path) -> None:
         image_path = _write_image(tmp_path / "img.png")

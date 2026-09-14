@@ -6,7 +6,7 @@ from pathlib import Path
 from tkinter import ttk
 from typing import TYPE_CHECKING
 
-from PIL import Image, ImageTk
+from PIL import Image, ImageOps, ImageTk
 
 from ui.theme import get_layer_colour, is_macos
 
@@ -113,8 +113,9 @@ class RightPanel:
         self._name_entry.pack(fill=tk.X, pady=(0, 4))
 
         # Opacity slider
-        ttk.Label(self._controls_frame, text="Opacity").pack(anchor=tk.W)
+        ttk.Label(self._controls_frame, text="Preview opacity").pack(anchor=tk.W)
         self._opacity_var = tk.IntVar(value=100)
+        self._opacity_var.trace_add("write", self._on_preview_opacity)
         self._build_numeric_control(
             self._controls_frame,
             "Opacity",
@@ -137,6 +138,9 @@ class RightPanel:
         # Buttons
         btn_frame = ttk.Frame(self._controls_frame)
         btn_frame.pack(fill=tk.X, pady=(4, 0))
+        ttk.Button(btn_frame, text="Apply name and edge edits", command=lambda: self._edit_layer(False)).pack(fill=tk.X, pady=1)
+        self._edit_status = ttk.Label(self._controls_frame, text="", wraplength=240)
+        self._edit_status.pack(fill=tk.X)
         ttk.Button(
             btn_frame, text="Re-segment", command=self._resegment_layer
         ).pack(fill=tk.X, pady=1)
@@ -276,6 +280,7 @@ class RightPanel:
 
         try:
             with Image.open(image_path) as source:
+                source = ImageOps.exif_transpose(source)
                 # Image.crop pads out-of-range boxes instead of clipping, so
                 # an oversized bbox allocates a buffer the size of the bbox
                 # rather than the image. The orchestrator widens boxes by
@@ -349,22 +354,96 @@ class RightPanel:
 
         # Update canvas active layer
         self._view.canvas_panel.set_active_layer(layer.get("label", ""))
+        self._view.canvas_panel.refresh_overlays()
+
+    def _on_preview_opacity(self, *_):
+        result = getattr(self._view, "_last_result", None)
+        if result and self._selected_index is not None and self._selected_index < len(result.layers):
+            result.layers[self._selected_index].preview_opacity = self._opacity_var.get() / 100
+        self._view.canvas_panel.refresh_overlays()
 
     def _on_visibility_change(self) -> None:
         """Handle layer visibility toggle."""
         self._view.canvas_panel.refresh_overlays()
 
     def _resegment_layer(self) -> None:
-        """Re-run SAM for the selected layer."""
-        if self._selected_index is None:
+        """Re-run the box segmenter and update the actual exported layer."""
+        self._edit_layer(True)
+
+    def _edit_layer(self, resegment: bool) -> None:
+        import queue
+        import threading
+        result = getattr(self._view, "_last_result", None)
+        if self._selected_index is None or result is None or self._selected_index >= len(result.layers):
             return
-        logger.info("Re-segmenting layer %d", self._selected_index)
+        index = self._selected_index
+        if getattr(result.layers[index], "mask", None) is None:
+            return
+        updated = result.model_copy(deep=True)
+        layer = updated.layers[index]
+        name = self._name_var.get().strip() or layer.label
+        edge = self._edge_var.get()
+        prefs = dict(self._app.prefs)
+        answers = queue.Queue()
+        self._edit_status.config(text="Updating layer…")
+
+        def work():
+            try:
+                from core.factory import build_capabilities
+                from core.layer_editing import replace_layer_mask
+                from core.orchestrator import _clip_mask_to_bbox
+                from processors.mask_ops import edge_refine
+                from processors.source_image import load_source_image, detection_image
+                image, alpha_limit, icc_profile = load_source_image(updated.image_path)
+                caps = build_capabilities(prefs)
+                try:
+                    mask = caps.segmenter.segment(detection_image(image, alpha_limit), layer.bbox, name, prefer_full_box=True) if resegment else layer.mask
+                    mask = edge_refine(_clip_mask_to_bbox(mask, layer.bbox), iterations=edge)
+                    layer.label = name
+                    for child in updated.layers:
+                        if child.parent_id == layer.layer_id:
+                            child.parent_label = name
+                    replace_layer_mask(updated, layer.layer_id, mask, image, caps, alpha_limit, icc_profile)
+                finally:
+                    caps.segmenter.clear_cache()
+                answers.put((True, updated))
+            except Exception as exc:
+                logger.exception("Layer update failed")
+                answers.put((False, str(exc)))
+
+        def poll():
+            try:
+                ok, value = answers.get_nowait()
+            except queue.Empty:
+                self._root.after(100, poll)
+                return
+            if ok and getattr(self._view, "_last_result", None) is result:
+                self._view.on_processing_complete(value)
+                self._select_layer(index)
+                self._edit_status.config(text="Layer and exports updated")
+            elif not ok:
+                self._edit_status.config(text=f"Update failed: {value}")
+
+        threading.Thread(target=work, daemon=True).start()
+        self._root.after(100, poll)
 
     def _delete_layer(self) -> None:
         """Delete the selected layer."""
         if self._selected_index is None:
             return
-        del self._layers[self._selected_index]
+        deleted = self._layers[self._selected_index]
+        result = getattr(self._view, "_last_result", None)
+        if result is not None and deleted.get("layer_id"):
+            from core.layer_editing import save_layer_outputs
+            removed = deleted["layer_id"]
+            result.layers = [layer for layer in result.layers if layer.layer_id != removed and layer.parent_id != removed]
+            result.tiff_files = [path for path in result.tiff_files if f"_{removed}" not in Path(path).name]
+            from processors.source_image import load_source_image
+            image, _, icc_profile = load_source_image(result.image_path)
+            save_layer_outputs(result, image, icc_profile)
+            self._view.on_processing_complete(result)
+        else:
+            del self._layers[self._selected_index]
         self._selected_index = None
         self._controls_frame.pack_forget()
         self._render_layers()
@@ -494,24 +573,23 @@ class RightPanel:
             if result and structural_svg_var.get():
                 _copy_if_exists(getattr(result, "svg_path", None), "Structural SVG")
 
-            if result and hasattr(result, "tiff_path") and result.tiff_path and tiff_var.get():
-                tiff_dir = Path(result.tiff_path)
-                if tiff_dir.is_dir():
-                    for f in tiff_dir.glob("*.tiff"):
-                        tiff_dst = out_dir / f.name
-                        if f.resolve() == tiff_dst.resolve():
-                            exported.append(f"TIFF → {f.name}")
-                        else:
-                            shutil.copy2(f, tiff_dst)
-                            exported.append(f"TIFF → {f.name}")
-                elif tiff_dir.is_file():
-                    tiff_dst = out_dir / tiff_dir.name
-                    if tiff_dir.resolve() == tiff_dst.resolve():
-                        exported.append(f"TIFF → {tiff_dir.name}")
-                    else:
-                        import shutil
-                        shutil.copy2(tiff_dir, tiff_dst)
-                        exported.append(f"TIFF → {tiff_dir.name}")
+            if result and (tiff_var.get() or png_var.get()):
+                from PIL import Image
+                files = getattr(result, "tiff_files", [])
+                if not files and getattr(result, "tiff_path", None):
+                    legacy = Path(result.tiff_path)
+                    files = [str(legacy)] if legacy.is_file() else [str(p) for p in legacy.glob(f"{stem}_*.tiff")]
+                for file in files:
+                    source = Path(file)
+                    if not source.is_file():
+                        continue
+                    if tiff_var.get():
+                        _copy_if_exists(str(source), "TIFF")
+                    if png_var.get():
+                        with Image.open(source) as rgba:
+                            target = out_dir / f"{source.stem}.png"
+                            rgba.save(target, format="PNG")
+                            exported.append(f"PNG → {target.name}")
 
             if pdf_var.get() and first_svg_content:
                 pdf_path = write_pdf(first_svg_content, out_dir / f"{stem}.pdf")
