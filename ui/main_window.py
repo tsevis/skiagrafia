@@ -253,6 +253,8 @@ class MainWindow:
             activeforeground=p["entry_fg"],
         )
 
-    def switch_to_batch(self) -> None:
+    def switch_to_batch(self, template: object | None = None) -> None:
         """Switch to batch mode programmatically (from single mode template)."""
         self._show_mode("batch")
+        if template is not None and self._batch_view is not None:
+            self._batch_view.load_template(template)

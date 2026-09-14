@@ -652,8 +652,8 @@ class RightPanel:
         )
         ttk.Label(dialog, text=summary, foreground="gray").pack(padx=12, pady=4)
 
-        def _save_and_switch() -> None:
-            template = BatchTemplate(
+        def _template() -> BatchTemplate:
+            return BatchTemplate(
                 name=name_var.get(),
                 source_image=left._image_path or "",
                 confirmed_labels=labels,
@@ -665,25 +665,29 @@ class RightPanel:
                 smoothing=params.get("smoothing", 5),
                 length_threshold=params.get("length_threshold", 4.0),
                 vtracer_quality="balanced",
+                selection_request=left.get_selection_request(),
+                guide_path=left.get_guide_path(),
+                guide_name=left.get_guide_name(),
             )
+
+        def _save_and_switch() -> None:
+            template = _template()
             template.save()
             dialog.destroy()
-            self._app.switch_to_batch()
+            # Keep the hand-off compatible with embedders that still expose
+            # the earlier no-argument switch callback.
+            import inspect
+
+            switch = self._app.switch_to_batch
+            try:
+                inspect.signature(switch).bind(template)
+            except TypeError:
+                switch()
+            else:
+                switch(template)
 
         def _save_only() -> None:
-            template = BatchTemplate(
-                name=name_var.get(),
-                source_image=left._image_path or "",
-                confirmed_labels=labels,
-                confirmed_children=children_map,
-                output_mode=params.get("output_mode", "vector+bitmap").lower().replace(" ", ""),
-                recursion_depth=params.get("recursion_depth", 2),
-                corner_threshold=params.get("corner_threshold", 60),
-                speckle=params.get("speckle", 8),
-                smoothing=params.get("smoothing", 5),
-                length_threshold=params.get("length_threshold", 4.0),
-                vtracer_quality="balanced",
-            )
+            template = _template()
             template.save()
             dialog.destroy()
 
