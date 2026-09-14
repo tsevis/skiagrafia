@@ -303,13 +303,16 @@ class LeftPanel(LabelsSectionMixin):
         ]
 
         prompt = self._object_prompt_var.get().strip()
-        prefs = dict(self._app.prefs, object_prompt=prompt,
+        prefs = dict(self._app.prefs,
                      quality_profile=self._quality_var.get(), discover_parts=self._parts_var.get(),
                      interrogation_profile={"fast": "fast", "detailed": "deep"}.get(self._quality_var.get(), "balanced"))
         if self._scan_prompt is not None and prompt != self._scan_prompt:
             active_labels = []  # A changed request needs fresh interpretation.
         confirmed = active_labels if active_labels or self._scan_prompt == prompt else None
-        overrides = {"selections": {item["label"]: item.get("selection", "all") for item in self._labels}}
+        overrides = {
+            "selection_request": prompt,
+            "selections": {item["label"]: item.get("selection", "all") for item in self._labels},
+        }
         corner, length, speckle = self._corner_var.get(), self._length_var.get(), self._speckle_var.get()
         output_mode = self._get_output_mode()
         image_path = self._image_path
@@ -390,6 +393,17 @@ class LeftPanel(LabelsSectionMixin):
     def get_confirmed_labels(self) -> list[str]:
         """Return list of active (non-toggled-off) labels."""
         return [lbl.get("canonical_label", lbl["label"]) for lbl in self._labels]
+
+    def get_selection_request(self) -> str:
+        """Return the explicit request used for the current Single session."""
+        return self._object_prompt_var.get().strip()
+
+    def get_guide_path(self) -> str | None:
+        """Return the optional Domain Guide reference for a Batch template."""
+        return self._knowledge_pack_path
+
+    def get_guide_name(self) -> str | None:
+        return self._knowledge_pack_name
 
     def _get_output_mode(self) -> str:
         """Build output mode string from checkbox state."""

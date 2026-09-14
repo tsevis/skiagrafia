@@ -107,6 +107,28 @@ class TestBatchViewConstruction:
             tk_root.update()
         assert all(v is not None for v in batch_view._step_views)
 
+    def test_approved_labels_are_intersected_with_each_images_candidates(
+        self, batch_view
+    ) -> None:
+        batch_view.confirmed_labels = ["iMac", "iPhone"]
+        batch_view.interrogation_records = {
+            "/input/one.jpg": [
+                {"canonical_label": "iMac", "selection": "largest"},
+                {"canonical_label": "Apple logo", "selection": "all"},
+            ],
+            "/input/two.jpg": [
+                {"canonical_label": "iPhone", "selection": "all"},
+            ],
+        }
+
+        labels_one, selections_one = batch_view.labels_for_image("/input/one.jpg")
+        labels_two, selections_two = batch_view.labels_for_image("/input/two.jpg")
+
+        assert labels_one == ["iMac"]
+        assert selections_one == {"iMac": "largest"}
+        assert labels_two == ["iPhone"]
+        assert selections_two == {"iPhone": "all"}
+
 
 # ── Navigation ──────────────────────────────────────────────────────────────
 
@@ -418,6 +440,22 @@ class TestStepTriage:
         tk_root.update()
         assert batch_view.current_step == 3
 
+    def test_triage_shows_request_and_domain_guide_context(
+        self, batch_view, tk_root
+    ) -> None:
+        batch_view.selection_request = "Select Apple products; exclude captions."
+        batch_view.run_settings = SimpleNamespace(
+            selection_request=batch_view.selection_request,
+            guide_name="Apple — The First 50 Years",
+        )
+        batch_view.go_to_step(3)
+        step = batch_view._step_views[3]
+        step.populate(self._tags())
+        tk_root.update()
+
+        assert "Select Apple products" in step._request_label.cget("text")
+        assert "Apple — The First 50 Years" in step._guide_label.cget("text")
+
 
 # ── Step 5: Progress ────────────────────────────────────────────────────────
 
@@ -529,6 +567,68 @@ class TestStepConfigure:
         batch_view.go_to_step(1)
         config = batch_view._step_views[1].get_config()
         assert batch_view.interrogation_settings == config
+
+    def test_multiline_selection_request_is_committed_to_config(
+        self, batch_view, tk_root
+    ) -> None:
+        batch_view.go_to_step(1)
+        step = batch_view._step_views[1]
+        step._set_selection_request("Select products.\nExclude captions.")
+
+        assert step.get_config()["selection_request"] == "Select products.\nExclude captions."
+
+    def test_request_edit_clears_existing_interrogation_and_triage(
+        self, batch_view, tk_root
+    ) -> None:
+        batch_view.go_to_step(1)
+        step = batch_view._step_views[1]
+        batch_view.run_settings = SimpleNamespace(selection_request="Original request")
+        batch_view.selection_request = "Original request"
+        batch_view.interrogation_records = {"/input/a.jpg": [{"canonical_label": "iMac"}]}
+        batch_view.confirmed_labels = ["iMac"]
+        step._set_selection_request("Changed request")
+        tk_root.update()
+
+        assert batch_view.interrogation_stale is True
+        assert batch_view.interrogation_records == {}
+        assert batch_view.confirmed_labels == []
+
+    def test_template_and_previous_run_restore_selection_request(
+        self, batch_view, tk_root
+    ) -> None:
+        from core.batch_session import BatchRunSettings
+        from core.batch_template import BatchTemplate
+
+        template = BatchTemplate(
+            name="Apple", source_image="", confirmed_labels=[], confirmed_children={},
+            output_mode="vector", recursion_depth=2, corner_threshold=60,
+            speckle=8, smoothing=5, length_threshold=4.0, vtracer_quality="balanced",
+            selection_request="Template request",
+        )
+        batch_view.load_template(template)
+        batch_view.go_to_step(1)
+        tk_root.update()
+        assert batch_view._step_views[1].get_selection_request() == "Template request"
+
+        batch_view.load_run_settings(
+            BatchRunSettings(
+                input_folder="", output_directory="/tmp/out",
+                selection_request="Restored run request",
+                guide_name="Apple — The First 50 Years",
+                interrogation_settings={
+                    "output_mode": "vector",
+                    "recursion_depth": 3,
+                    "vtracer_quality": "maximum",
+                },
+            )
+        )
+        batch_view.go_to_step(1)
+        tk_root.update()
+        restored = batch_view._step_views[1]
+        assert restored.get_selection_request() == "Restored run request"
+        assert restored.get_config()["output_mode"] == "vector"
+        assert restored.get_config()["recursion_depth"] == 3
+        assert restored.get_config()["vtracer_quality"] == "maximum"
 
     def test_output_mode_falls_back_to_vector(self, batch_view, tk_root) -> None:
         batch_view.go_to_step(1)

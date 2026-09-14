@@ -659,20 +659,45 @@ class PreferencesWindow:
 
         for item in self._templates_tree.get_children():
             self._templates_tree.delete(item)
+        self._template_paths: dict[str, Path] = {}
 
-        for t in BatchTemplate.list_all():
+        for path, t in BatchTemplate.list_all_with_paths():
             n_labels = len(t.confirmed_labels)
-            self._templates_tree.insert(
+            item = self._templates_tree.insert(
                 "",
                 tk.END,
                 values=(t.name, n_labels, t.output_mode, t.created_at[:19]),
             )
+            self._template_paths[item] = path
 
     def _load_template(self) -> None:
-        logger.info("Loading template")
+        selected = self._templates_tree.selection()
+        if not selected:
+            return
+        path = self._template_paths.get(selected[0])
+        if path is None:
+            return
+        from core.batch_template import BatchTemplate
+
+        self._app.switch_to_batch(BatchTemplate.load(path))
+        self._win.destroy()
 
     def _delete_template(self) -> None:
-        logger.info("Deleting template")
+        selected = self._templates_tree.selection()
+        if not selected:
+            return
+        path = self._template_paths.get(selected[0])
+        if path is None:
+            return
+        from tkinter import messagebox
+
+        if messagebox.askyesno(
+            "Delete batch template?",
+            f"Delete the saved template ‘{path.stem}’?",
+            parent=self._win,
+        ):
+            path.unlink(missing_ok=True)
+            self._load_templates()
 
     def _reveal_templates(self) -> None:
         templates_dir = Path.home() / ".config" / "skiagrafia" / "templates"

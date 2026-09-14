@@ -42,6 +42,21 @@ class StepTriage:
             foreground="gray",
         ).pack(anchor=tk.W, pady=(0, 12))
 
+        # This context is deliberately visible at the human approval gate:
+        # a label is meaningful only in relation to the request and guide
+        # that created it.
+        context = ttk.LabelFrame(self.frame, text="Analysis context", padding=8)
+        context.pack(fill=tk.X, pady=(0, 12))
+        self._request_label = ttk.Label(
+            context,
+            text="Selection request: —",
+            justify=tk.LEFT,
+            wraplength=540,
+        )
+        self._request_label.pack(anchor=tk.W)
+        self._guide_label = ttk.Label(context, text="Domain Guide: —", foreground="gray")
+        self._guide_label.pack(anchor=tk.W, pady=(4, 0))
+
         # Cards container (scrollable)
         canvas = tk.Canvas(self.frame, highlightthickness=0)
         scrollbar = ttk.Scrollbar(self.frame, orient=tk.VERTICAL, command=canvas.yview)
@@ -90,8 +105,8 @@ class StepTriage:
                 lambda: self._confirm_btn.config(text="Confirm Labels & Continue"),
             )
             return
-        # Store confirmed labels on the view for the Progress step
-        self._view.confirmed_labels = confirmed
+        # Persist the human gate alongside the immutable interrogation record.
+        self._view.store_triage_decision(confirmed)
         self._view.go_next()
 
     def populate(self, tags: dict[str, dict]) -> None:
@@ -102,8 +117,26 @@ class StepTriage:
         self._tag_data = dict(tags)
         self._card_frames.clear()
 
+        run = self._view.run_settings
+        request = (
+            getattr(run, "selection_request", "")
+            or self._view.selection_request
+            or "No selection request was supplied."
+        )
+        guide_name = (
+            getattr(run, "guide_name", None)
+            or self._view.knowledge_pack_name
+            or "No Domain Guide"
+        )
+        self._request_label.config(text=f"Selection request: {request}")
+        self._guide_label.config(text=f"Domain Guide: {guide_name}")
+
         parents = {k: v for k, v in tags.items() if v.get("role") == "parent"}
         children = {k: v for k, v in tags.items() if v.get("role") == "child"}
+        suggested = {
+            str(value).lower()
+            for value in getattr(self._view.template, "confirmed_labels", [])
+        }
 
         for parent_label, parent_data in parents.items():
             display_label = parent_data.get("label", parent_label)
@@ -114,7 +147,8 @@ class StepTriage:
             self._card_frames[parent_label] = card
 
             # Include/skip toggle
-            include_var = tk.BooleanVar(value=True)
+            canonical = str(parent_data.get("canonical_label", parent_label)).lower()
+            include_var = tk.BooleanVar(value=not suggested or canonical in suggested)
             self._include_vars[parent_label] = include_var
 
             header = ttk.Frame(card)
@@ -126,6 +160,13 @@ class StepTriage:
                 variable=include_var,
                 command=lambda pl=parent_label: self._on_toggle(pl),
             ).pack(side=tk.LEFT)
+
+            image_count = int(parent_data.get("image_count", 0))
+            ttk.Label(
+                header,
+                text=f"Seen in {image_count} image{'s' if image_count != 1 else ''}",
+                foreground="gray",
+            ).pack(side=tk.LEFT, padx=(10, 0))
 
             # Child tag pills
             child_frame = ttk.Frame(card)
