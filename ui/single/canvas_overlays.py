@@ -136,6 +136,17 @@ def render_layer_masks(
 
     photos: list[ImageTk.PhotoImage] = []
     for i, layer in enumerate(layers):
+        layer_opacity = opacity * getattr(layer, "preview_opacity", 1.0)
+        mask = getattr(layer, "mask", None)
+        if mask is not None:
+            matte = Image.fromarray(mask).resize((render_w, render_h), Image.Resampling.LANCZOS)
+            matte = matte.point(lambda value: round(value * layer_opacity))
+            overlay = Image.new("RGBA", (render_w, render_h), OVERLAY_PALETTE[i % len(OVERLAY_PALETTE)])
+            overlay.putalpha(matte)
+            photo = ImageTk.PhotoImage(overlay)
+            canvas.create_image(pan_x, pan_y, anchor=tk.NW, image=photo, tags=("overlay",))
+            photos.append(photo)
+            continue
         svg_data = getattr(layer, "svg_data", "")
         if not svg_data:
             continue
@@ -147,7 +158,7 @@ def render_layer_masks(
 
         svg_str = _build_layer_svg(
             inner, source_width, source_height, render_w, render_h,
-            fill_opacity=opacity,
+            fill_opacity=layer_opacity,
         )
         photo = _render_svg_to_photo(svg_str.encode("utf-8"), render_w, render_h)
         if photo is None:

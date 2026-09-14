@@ -114,6 +114,9 @@ class SingleView:
             for layer in result.layers:
                 layers_data.append({
                     "label": layer.label,
+                    "layer_id": getattr(layer, "layer_id", ""),
+                    "parent_id": getattr(layer, "parent_id", None),
+                    "alpha_path": getattr(layer, "alpha_path", None),
                     "role": layer.role,
                     "parent_label": layer.parent_label,
                     "bbox": layer.bbox,
