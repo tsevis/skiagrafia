@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import functools
+import json
+import sys
 import logging
 import os
 import time
@@ -50,6 +52,15 @@ class BatchConfig(BaseModel):
     text_reasoner_model: str = "gemma4:e4b"
     enable_tiled_fallback: bool = True
     max_aliases_per_object: int = 4
+    models_directory: str = ""
+    segmentation_backend: str = "auto"
+    sam3_confidence: float = 0.5
+    local_primary_model: str = "Qwen3-VL-8B-Instruct"
+    local_fallback_model: str = "gemma-4-12B-it"
+    quality_profile: str = "balanced"
+    preserve_path_detail: bool = True
+    object_prompt: str = ""
+    discover_parts: bool = True
 
     def model_post_init(self, __context: object) -> None:
         if not self.batch_id:
@@ -79,10 +90,18 @@ def _process_single(
     Rebuilds model clients from scratch in each worker process (model weights
     cannot be shared across process boundaries).
     """
-    config = BatchConfig.model_validate(config_dict)
+    orchestrator = _worker_orchestrator(json.dumps(config_dict, sort_keys=True))
+    return orchestrator.process(image_path, config_dict.get("confirmed_labels"))
+
+
+@functools.lru_cache(maxsize=1)
+def _worker_orchestrator(config_json: str):
+    """Keep model weights resident for successive images in this worker."""
+    config = BatchConfig.model_validate_json(config_json)
 
     # Build prefs-like dict from BatchConfig for the factory
     prefs_from_config: dict = {
+        **config.model_dump(),
         "vlm_backend": config.vlm_backend,
         "ollama_url": config.ollama_url,
         "ollama_model": config.ollama_model,
@@ -105,9 +124,11 @@ def _process_single(
         length_threshold=config.length_threshold,
         filter_speckle=config.speckle,
         knowledge_pack_path=config.guide_path,
+        interrogation_overrides={"preferred_vlm": config.preferred_vlm},
     )
     orchestrator = Orchestrator(
         capabilities=caps,
+        quality=config.quality_profile,
         output_dir=Path(config.output_dir) / config.batch_id,
         output_mode=config.output_mode,
         bilateral_d=config.bilateral_d,
@@ -115,7 +136,7 @@ def _process_single(
         text_threshold=config.text_threshold,
         knowledge_pack=build_knowledge_pack(config.guide_path),
     )
-    return orchestrator.process(image_path, config.confirmed_labels)
+    return orchestrator
 
 
 class BatchRunner:
@@ -173,9 +194,10 @@ class BatchRunner:
         self._start_time = time.time()
         config_dict = self._config.model_dump()
 
-        self._executor = ProcessPoolExecutor(
-            max_workers=self._config.max_workers
-        )
+        # The model stages share one GPU; parallel model replicas multiply
+        # memory and contend for Metal. Reuse one warm worker on this path.
+        workers = 1 if sys.platform == "darwin" or self._config.vlm_backend == "local" else self._config.max_workers
+        self._executor = ProcessPoolExecutor(max_workers=workers)
 
         for img_path in self._image_paths:
             image_id = img_path.stem
@@ -192,7 +214,7 @@ class BatchRunner:
         logger.info(
             "Batch started: %d images, %d workers",
             len(self._futures),
-            self._config.max_workers,
+            workers,
         )
 
         # Callbacks are attached only once every future is tracked. A job that

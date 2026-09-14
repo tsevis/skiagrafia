@@ -36,6 +36,8 @@ class PreferencesWindow:
         self._notebook = ttk.Notebook(self._win)
         self._notebook.pack(fill=tk.BOTH, expand=True, padx=8, pady=(8, 0))
 
+        self._scroll_canvases = {}
+        self._win.bind("<MouseWheel>", self._scroll_active_tab)
         self._build_general_tab()
         self._build_models_tab()
         self._build_pipeline_tab()
@@ -52,6 +54,26 @@ class PreferencesWindow:
         ttk.Button(btn_frame, text="Save", command=self._save, default="active").pack(
             side=tk.RIGHT
         )
+
+    def _scroll_active_tab(self, event):
+        canvas = self._scroll_canvases.get(self._notebook.select())
+        if canvas is not None:
+            canvas.yview_scroll(-1 * (event.delta // 120 or event.delta), "units")
+
+    def _scrollable_tab(self, title):
+        outer = ttk.Frame(self._notebook)
+        self._notebook.add(outer, text=title)
+        canvas = tk.Canvas(outer, highlightthickness=0)
+        scrollbar = ttk.Scrollbar(outer, orient=tk.VERTICAL, command=canvas.yview)
+        scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
+        canvas.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+        canvas.configure(yscrollcommand=scrollbar.set)
+        content = ttk.Frame(canvas, padding=12)
+        window = canvas.create_window((0, 0), window=content, anchor=tk.NW)
+        content.bind("<Configure>", lambda _: canvas.configure(scrollregion=canvas.bbox("all")))
+        canvas.bind("<Configure>", lambda event: canvas.itemconfigure(window, width=event.width))
+        self._scroll_canvases[str(outer)] = canvas
+        return content
 
     # ── Tab 1: General ─────────────────────────────────────────
 
@@ -105,8 +127,7 @@ class PreferencesWindow:
     # ── Tab 2: Models & VLM backends ───────────────────────────
 
     def _build_models_tab(self) -> None:
-        tab = ttk.Frame(self._notebook, padding=12)
-        self._notebook.add(tab, text="  Models  ")
+        tab = self._scrollable_tab("  Models  ")
 
         # Backend selection
         backend_row = ttk.Frame(tab)
@@ -118,11 +139,19 @@ class PreferencesWindow:
         ttk.Combobox(
             backend_row,
             textvariable=self._backend_var,
-            values=["ollama", "llamacpp"],
+            values=["local", "ollama", "llamacpp"],
             state="readonly",
             width=18,
         ).pack(side=tk.LEFT)
 
+        ttk.Label(tab, text="Local mode starts the installed models automatically.", foreground="gray").pack(anchor=tk.W)
+        self._local_primary_var = tk.StringVar(value=self._prefs.get("local_primary_model", "Qwen3-VL-8B-Instruct"))
+        self._local_fallback_var = tk.StringVar(value=self._prefs.get("local_fallback_model", "gemma-4-12B-it"))
+        for title, variable in [("Local primary", self._local_primary_var), ("Local fallback / reasoner", self._local_fallback_var)]:
+            row = ttk.Frame(tab)
+            row.pack(fill=tk.X, pady=2)
+            ttk.Label(row, text=title, width=24).pack(side=tk.LEFT)
+            ttk.Combobox(row, textvariable=variable, values=["Qwen3-VL-8B-Instruct", "gemma-4-12B-it"], state="readonly", width=28).pack(side=tk.LEFT)
         # Ollama settings
         ttk.Label(tab, text="Ollama server URL").pack(anchor=tk.W, pady=(4, 2))
         self._ollama_url_var = tk.StringVar(
@@ -143,7 +172,7 @@ class PreferencesWindow:
             width=20,
         ).pack(anchor=tk.W, pady=(0, 4))
 
-        ttk.Label(tab, text="Preferred fallback VLM").pack(anchor=tk.W, pady=(4, 2))
+        ttk.Label(tab, text="Ollama fallback VLM").pack(anchor=tk.W, pady=(4, 2))
         self._fallback_vlm_var = tk.StringVar(
             value=self._prefs.get("preferred_fallback_vlm", "gemma4:e4b")
         )
@@ -155,7 +184,7 @@ class PreferencesWindow:
             width=20,
         ).pack(anchor=tk.W, pady=(0, 4))
 
-        ttk.Label(tab, text="Text reasoner").pack(anchor=tk.W, pady=(4, 2))
+        ttk.Label(tab, text="Ollama text reasoner").pack(anchor=tk.W, pady=(4, 2))
         self._reasoner_var = tk.StringVar(
             value=self._prefs.get("preferred_text_reasoner", "gemma4:e4b")
         )
@@ -297,6 +326,16 @@ class PreferencesWindow:
         from models.vlm_client import create_vlm_client
 
         backend = self._backend_var.get()
+        if backend == "local":
+            from models.local_vlm import resolve_local_model, server_binary, LOCAL_PRIMARY, LOCAL_FALLBACK
+            try:
+                server_binary()
+                resolve_local_model(LOCAL_PRIMARY)
+                resolve_local_model(LOCAL_FALLBACK)
+                self._test_result.config(text="✓ Local files ready", foreground="green")
+            except (OSError, ValueError) as exc:
+                self._test_result.config(text=str(exc), foreground="red")
+            return
         if backend == "llamacpp":
             host = self._llamacpp_url_var.get()
             model = self._llamacpp_model_var.get()
@@ -324,9 +363,22 @@ class PreferencesWindow:
     # ── Tab 3: Pipeline ────────────────────────────────────────
 
     def _build_pipeline_tab(self) -> None:
-        tab = ttk.Frame(self._notebook, padding=12)
-        self._notebook.add(tab, text="  Pipeline  ")
+        tab = self._scrollable_tab("  Pipeline  ")
 
+        self._segmentation_var = tk.StringVar(value=self._prefs.get("segmentation_backend", "auto"))
+        self._quality_var = tk.StringVar(value=self._prefs.get("quality_profile", "balanced"))
+        self._path_detail_var = tk.BooleanVar(value=self._prefs.get("preserve_path_detail", True))
+        self._sam3_confidence_var = tk.DoubleVar(value=self._prefs.get("sam3_confidence", .5))
+        for title, variable, options in [
+            ("Segmentation", self._segmentation_var, ["auto", "mlx-sam3", "sam2"]),
+            ("Output quality", self._quality_var, ["fast", "balanced", "detailed"]),
+        ]:
+            row = ttk.Frame(tab)
+            row.pack(fill=tk.X, pady=2)
+            ttk.Label(row, text=title, width=24).pack(side=tk.LEFT)
+            ttk.Combobox(row, textvariable=variable, values=options, state="readonly").pack(side=tk.LEFT)
+        ttk.Checkbutton(tab, text="Preserve fine paths (no speckle removal, ≤1 px tracing length)", variable=self._path_detail_var).pack(anchor=tk.W)
+        ttk.Label(tab, text="Fast: binary alpha · Balanced: object matte · Detailed: full-resolution edges", foreground="gray").pack(anchor=tk.W)
         self._sam_box_var = tk.DoubleVar(
             value=self._prefs.get("sam_box_threshold", 0.35)
         )
@@ -367,7 +419,7 @@ class PreferencesWindow:
             ("VTracer corner threshold", self._vt_corner_var, 30, 90, False),
             ("VTracer speckle", self._vt_speckle_var, 2, 20, False),
             ("VTracer length threshold", self._vt_length_var, 2.0, 8.0, True),
-            ("Bilateral filter d", self._bilateral_var, 3, 15, False),
+            ("SAM 3 confidence", self._sam3_confidence_var, 0.1, 0.9, True),
         ]
 
         for label_text, var, from_, to_, is_float in sliders:
@@ -644,7 +696,13 @@ class PreferencesWindow:
             models_dir_val = ""
 
         prefs = {
-            "output_directory": self._output_dir_var.get(),
+            **self._prefs,
+            "local_primary_model": self._local_primary_var.get(),
+            "local_fallback_model": self._local_fallback_var.get(),
+            "segmentation_backend": self._segmentation_var.get(),
+            "quality_profile": self._quality_var.get(),
+            "preserve_path_detail": self._path_detail_var.get(),
+            "sam3_confidence": self._sam3_confidence_var.get(),            "output_directory": self._output_dir_var.get(),
             "default_mode": self._mode_var.get(),
             "save_session_on_quit": self._save_session_var.get(),
             "show_notifications": self._notifications_var.get(),

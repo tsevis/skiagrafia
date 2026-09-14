@@ -91,6 +91,23 @@ def check_setup(prefs: dict[str, Any]) -> SetupStatus:
 
     # 2. VLM backend
     backend = str(prefs.get("vlm_backend", "ollama"))
+    if backend == "local":
+        from models.local_vlm import resolve_local_model, server_binary, LOCAL_PRIMARY, LOCAL_FALLBACK
+        for model in dict.fromkeys([prefs.get("local_primary_model", LOCAL_PRIMARY), prefs.get("local_fallback_model", LOCAL_FALLBACK)]):
+            try:
+                binary = server_binary()
+                weights, projector = resolve_local_model(model)
+                detail = f"{weights.name} + {projector.name}; {binary}"
+                ready = True
+            except (OSError, ValueError) as exc:
+                ready, detail = False, str(exc)
+            items.append(SetupItem(name=f"Local {model}", kind="backend", status="ready" if ready else "missing", detail=detail))
+        sam3_root = get_models_dir(prefs) / "mlx_sam3"
+        if prefs.get("segmentation_backend") in {"auto", "mlx-sam3"}:
+            present = (sam3_root / "sam3-mod-weights/model.safetensors").is_file()
+            items.append(SetupItem(name="MLX SAM 3", kind="backend", status="ready" if present else "missing",
+                                   required=False, detail=str(sam3_root)))
+        return SetupStatus(items=items)
     if backend == "llamacpp":
         from models.vlm_client import DEFAULT_LLAMACPP_URL, LlamaCppVLMClient
 

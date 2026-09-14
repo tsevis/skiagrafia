@@ -155,12 +155,17 @@ class StepProgress:
         )
         output_dir.mkdir(parents=True, exist_ok=True)
 
+        quality = {"draft": "fast", "maximum": "detailed", "balanced": "balanced"}.get(
+            config.get("vtracer_quality"), self._app.prefs.get("quality_profile", "balanced"))
+        prefs = dict(self._app.prefs, quality_profile=quality)
         caps = build_capabilities(
-            self._app.prefs,
+            prefs,
             knowledge_pack_path=config.get("guide_path"),
+            interrogation_overrides=self._view.interrogation_settings,
         )
         orchestrator = Orchestrator(
             capabilities=caps,
+            quality=quality,
             output_dir=output_dir,
             output_mode=config.get("output_mode", "vector+bitmap"),
             bilateral_d=int(self._app.prefs.get("bilateral_filter_d", 9)),
