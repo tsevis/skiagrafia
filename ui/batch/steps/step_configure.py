@@ -179,16 +179,20 @@ class StepConfigure:
         self._profile_var = tk.StringVar(
             value=str(prefs.get("interrogation_profile", "balanced"))
         )
+        from core.factory import build_interrogation_settings
+        model_settings = build_interrogation_settings(prefs)
+        model_options = (["Qwen3-VL-8B-Instruct", "gemma-4-12B-it"] if model_settings.backend == "local"
+                         else ["qwen2.5vl:3b", "gemma4:e4b", "minicpm-v", "llava:7b", "moondream"])
         self._preferred_vlm_var = tk.StringVar(
             value=str(
                 guide_defaults.get(
                     "preferred_vlm",
-                    prefs.get("preferred_fallback_vlm", "gemma4:e4b"),
+                    model_settings.primary_vlm,
                 )
             )
         )
         self._reasoner_var = tk.StringVar(
-            value=str(prefs.get("preferred_text_reasoner", "gemma4:e4b"))
+            value=model_settings.reasoner_model
         )
         self._tiled_fallback_var = tk.BooleanVar(
             value=bool(
@@ -233,7 +237,7 @@ class StepConfigure:
         ttk.Combobox(
             row,
             textvariable=self._preferred_vlm_var,
-            values=["qwen2.5vl:3b", "gemma4:e4b", "minicpm-v", "llava:7b", "moondream"],
+            values=model_options,
             state="readonly",
             width=18,
         ).pack(side=tk.RIGHT)
@@ -244,7 +248,7 @@ class StepConfigure:
         ttk.Combobox(
             row,
             textvariable=self._reasoner_var,
-            values=["gemma4:e4b", "ilsp/llama-krikri-8b-instruct", "qwen2.5vl:3b"],
+            values=model_options,
             state="readonly",
             width=18,
         ).pack(side=tk.RIGHT)

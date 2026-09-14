@@ -139,13 +139,16 @@ def _ensure_gsam_on_path(gsam_root: Path) -> None:
 class DetectionResult(BaseModel):
     """Bounding box detection from GroundingDINO."""
 
+    model_config = ConfigDict(arbitrary_types_allowed=True)
+    mask: NDArray[np.uint8] | None = None
+    source: str = "groundingdino"
     label: str
     bbox: tuple[int, int, int, int]  # (x0, y0, x1, y1)
     confidence: float
 
 
 class SegmentationResult(BaseModel):
-    """Segmentation mask from SAM 2.1 HQ."""
+    """Segmentation mask from SAM 2.1."""
     model_config = ConfigDict(arbitrary_types_allowed=True)
 
     label: str
@@ -154,7 +157,7 @@ class SegmentationResult(BaseModel):
 
 
 class GroundedSAM:
-    """GroundingDINO + SAM 2.1 HQ wrapper for text-guided segmentation.
+    """GroundingDINO + SAM 2.1 wrapper for text-guided segmentation.
 
     Models are loaded once and kept resident in memory for performance.
 
@@ -180,6 +183,7 @@ class GroundedSAM:
         self._dino_model: object | None = None
         self._sam_predictor: object | None = None
         self._masks_cache: dict[str, NDArray[np.uint8]] = {}
+        self._encoded_image = None
 
     def _load_dino(self) -> None:
         """Load GroundingDINO model weights (lazy, once)."""
@@ -213,6 +217,7 @@ class GroundedSAM:
         if self._sam_predictor is not None:
             return
         try:
+            _ensure_gsam_on_path(self._gsam_root or model_path("groundingdino_swint_ogc.pth").parent.parent)
             from sam2.build_sam import build_sam2
             from sam2.sam2_image_predictor import SAM2ImagePredictor
 
@@ -229,14 +234,14 @@ class GroundedSAM:
             logger.error("Failed to load SAM 2.1", exc_info=True)
             raise
 
-    def detect_box(
+    def detect_instances(
         self,
         image: NDArray[np.uint8],
         label: str,
         box_threshold: float = 0.35,
         text_threshold: float = 0.25,
         skip_synonyms: bool = False,
-    ) -> DetectionResult | None:
+    ) -> list[DetectionResult]:
         """Run GroundingDINO to get bounding box for a text label.
 
         Parameters
@@ -288,27 +293,31 @@ class GroundedSAM:
                 if len(boxes) > 0:
                     break
 
-        if len(boxes) == 0:
-            logger.warning("No detection for label '%s'", label)
-            return None
-
-        # Take highest confidence detection
-        best_idx = logits.argmax().item()
-        box = boxes[best_idx]
         h, w = image.shape[:2]
+        detections = []
+        for idx in logits.argsort(descending=True).tolist():
+            cx, cy, bw, bh = boxes[idx].tolist()
+            bbox = (
+                max(0, int((cx - bw / 2) * w)), max(0, int((cy - bh / 2) * h)),
+                min(w, int(np.ceil((cx + bw / 2) * w))), min(h, int(np.ceil((cy + bh / 2) * h))),
+            )
+            if bbox[2] <= bbox[0] or bbox[3] <= bbox[1]:
+                continue
+            # Duplicate proposals are common; suppress near-identical boxes only.
+            if any(self._box_iou(bbox, d.bbox) > 0.85 for d in detections):
+                continue
+            detections.append(DetectionResult(label=label, bbox=bbox, confidence=float(logits[idx])))
+        return detections
 
-        # Convert from normalized [cx, cy, w, h] to absolute [x0, y0, x1, y1]
-        cx, cy, bw, bh = box.tolist()
-        x0 = int((cx - bw / 2) * w)
-        y0 = int((cy - bh / 2) * h)
-        x1 = int((cx + bw / 2) * w)
-        y1 = int((cy + bh / 2) * h)
+    @staticmethod
+    def _box_iou(a, b):
+        inter = max(0, min(a[2], b[2]) - max(a[0], b[0])) * max(0, min(a[3], b[3]) - max(a[1], b[1]))
+        union = (a[2]-a[0])*(a[3]-a[1]) + (b[2]-b[0])*(b[3]-b[1]) - inter
+        return inter / union if union else 0.0
 
-        return DetectionResult(
-            label=label,
-            bbox=(x0, y0, x1, y1),
-            confidence=float(logits[best_idx]),
-        )
+    def detect_box(self, image, label, box_threshold=0.35, text_threshold=0.25, skip_synonyms=False):
+        results = self.detect_instances(image, label, box_threshold, text_threshold, skip_synonyms)
+        return max(results, key=lambda d: d.confidence) if results else None
 
     def segment(
         self,
@@ -317,7 +326,7 @@ class GroundedSAM:
         label: str = "",
         prefer_full_box: bool = False,
     ) -> NDArray[np.uint8]:
-        """Run SAM 2.1 HQ segmentation within a bounding box.
+        """Run SAM 2.1 segmentation within a bounding box.
 
         Parameters
         ----------
@@ -332,7 +341,13 @@ class GroundedSAM:
         """
         self._load_sam()
 
-        self._sam_predictor.set_image(image)
+        if self._encoded_image is not image:
+            self._sam_predictor.set_image(image)
+            self._encoded_image = image
+            self._masks_cache.clear()
+        cache_key = f"{label}_{bbox}_{prefer_full_box}"
+        if cache_key in self._masks_cache:
+            return self._masks_cache[cache_key].copy()
 
         box_array = np.array(bbox, dtype=np.float32)
 
@@ -359,7 +374,6 @@ class GroundedSAM:
             prefer_full_box,
         )
 
-        cache_key = f"{label}_{bbox}"
         self._masks_cache[cache_key] = mask
         return mask
 
@@ -400,3 +414,6 @@ class GroundedSAM:
     def clear_cache(self) -> None:
         """Clear cached masks (call between images)."""
         self._masks_cache.clear()
+        self._encoded_image = None
+        if self._sam_predictor is not None:
+            self._sam_predictor.reset_predictor()

@@ -24,11 +24,12 @@ class VitMatteRefiner:
         the backward-compat model_path() shim when None.
     """
 
-    def __init__(self, model_dir: Path | None = None) -> None:
+    def __init__(self, model_dir: Path | None = None, quality: str = "balanced") -> None:
         self._model_dir = model_dir
         self._model: object | None = None
         self._processor: object | None = None
         self._max_side = 1536
+        self._quality = quality
 
     def _load(self) -> None:
         """Load VitMatte model weights from local directory (lazy, once)."""
@@ -90,88 +91,70 @@ class VitMatteRefiner:
         trimap[bg_inv < 127] = 0  # definite background
         return trimap
 
-    def predict(
-        self,
-        image: NDArray[np.uint8],
-        mask: NDArray[np.uint8],
-    ) -> NDArray[np.uint8]:
-        """Predict alpha matte from image and coarse binary mask.
-
-        Args:
-            image: RGB image (H, W, 3) uint8.
-            mask: Binary mask (H, W) uint8, 0 or 255.
-
-        Returns:
-            Alpha matte (H, W) uint8, 0-255 with soft edges.
-        """
-        self._load()
+    def _infer(self, image, trimap):
         from PIL import Image
 
-        orig_h, orig_w = image.shape[:2]
-        working_image = image
-        working_mask = mask
-        scale = min(1.0, self._max_side / max(orig_h, orig_w))
-        if scale < 1.0:
-            target_size = (
-                max(1, int(orig_w * scale)),
-                max(1, int(orig_h * scale)),
-            )
-            working_image = cv2.resize(
-                image,
-                target_size,
-                interpolation=cv2.INTER_AREA,
-            )
-            working_mask = cv2.resize(
-                mask,
-                target_size,
-                interpolation=cv2.INTER_NEAREST,
-            )
-            logger.info(
-                "VitMatte downscaling from %sx%s to %sx%s for memory safety",
-                orig_w,
-                orig_h,
-                target_size[0],
-                target_size[1],
-            )
-
-        trimap = self._create_trimap(working_mask)
-
-        pil_image = Image.fromarray(working_image)
-        pil_trimap = Image.fromarray(trimap)
-
-        inputs = self._processor(
-            images=pil_image, trimaps=pil_trimap, return_tensors="pt"
-        )
+        self._load()
+        inputs = self._processor(images=Image.fromarray(image), trimaps=Image.fromarray(trimap), return_tensors="pt")
         inputs = {k: v.to(DEVICE) for k, v in inputs.items()}
+        with torch.inference_mode():
+            alpha = self._model(**inputs).alphas.squeeze().cpu().numpy()
+        h, w = image.shape[:2]
+        if alpha.shape[0] >= h and alpha.shape[1] >= w:
+            alpha = alpha[:h, :w]  # processor pads on right/bottom
+        elif alpha.shape != (h, w):
+            alpha = cv2.resize(alpha, (w, h), interpolation=cv2.INTER_LINEAR)
+        return np.nan_to_num(alpha, nan=0.0).clip(0, 1)
 
-        with torch.no_grad():
-            outputs = self._model(**inputs)
+    def predict(self, image, mask):
+        """Matte the object ROI; detailed mode refines boundary tiles at native resolution.
 
-        alpha = outputs.alphas.squeeze().cpu().numpy()
-        alpha_np = (alpha * 255).clip(0, 255).astype(np.uint8)
-
-        # VitMatte processor may pad/resize — crop back to original dimensions.
-        work_h, work_w = working_image.shape[:2]
-        if alpha_np.shape != (work_h, work_w):
-            alpha_np = cv2.resize(
-                alpha_np[:work_h, :work_w] if alpha_np.shape[0] >= work_h else alpha_np,
-                (work_w, work_h),
-                interpolation=cv2.INTER_LINEAR,
-            )
-        if scale < 1.0:
-            alpha_np = cv2.resize(
-                alpha_np,
-                (orig_w, orig_h),
-                interpolation=cv2.INTER_LINEAR,
-            )
-
-        logger.info(
-            "VitMatte: alpha range [%d, %d], shape %s",
-            alpha_np.min(),
-            alpha_np.max(),
-            alpha_np.shape,
-        )
-        return alpha_np
+        Known foreground/background are enforced after inference and resizing.
+        Only unknown boundary pixels can change. Empty masks do not load a model.
+        """
+        if mask.shape != image.shape[:2] or mask.ndim != 2:
+            raise ValueError("Mask and image dimensions must match")
+        mask = (mask > 127).astype(np.uint8) * 255
+        if not mask.any() or np.all(mask):
+            return mask
+        h, w = mask.shape
+        ys, xs = np.nonzero(mask)
+        radius = int(np.clip(round(min(xs.max()-xs.min()+1, ys.max()-ys.min()+1) * 0.012), 2, 16))
+        trimap = self._create_trimap(mask, 2*radius+1, 2*radius+1)
+        pad = max(32, radius * 3)
+        x0, x1 = max(0, xs.min()-pad), min(w, xs.max()+pad+1)
+        y0, y1 = max(0, ys.min()-pad), min(h, ys.max()+pad+1)
+        crop = image[y0:y1, x0:x1]
+        tri = trimap[y0:y1, x0:x1]
+        ch, cw = tri.shape
+        if self._quality == "detailed" and max(ch, cw) > self._max_side:
+            # Halo provides context; central regions cover each pixel once, so
+            # no averaging can dilute the known opaque/transparent regions.
+            alpha = mask[y0:y1, x0:x1].astype(np.float32) / 255
+            tile, halo = 768, 96
+            for top in range(0, ch, tile):
+                for left in range(0, cw, tile):
+                    bottom, right = min(ch, top+tile), min(cw, left+tile)
+                    if not np.any(tri[top:bottom, left:right] == 128):
+                        continue
+                    ty, tx = max(0, top-halo), max(0, left-halo)
+                    by, rx = min(ch, bottom+halo), min(cw, right+halo)
+                    predicted = self._infer(crop[ty:by, tx:rx], tri[ty:by, tx:rx])
+                    alpha[top:bottom, left:right] = predicted[top-ty:bottom-ty, left-tx:right-tx]
+        else:
+            scale = min(1.0, self._max_side / max(ch, cw))
+            if scale < 1:
+                size = (max(1, round(cw*scale)), max(1, round(ch*scale)))
+                predicted = self._infer(cv2.resize(crop, size, interpolation=cv2.INTER_AREA),
+                                        cv2.resize(tri, size, interpolation=cv2.INTER_NEAREST))
+                alpha = cv2.resize(predicted, (cw, ch), interpolation=cv2.INTER_LINEAR)
+            else:
+                alpha = self._infer(crop, tri)
+        output = np.zeros((h, w), dtype=np.uint8)
+        output[y0:y1, x0:x1] = np.rint(alpha * 255).clip(0, 255).astype(np.uint8)
+        output[trimap == 0] = 0
+        output[trimap == 255] = 255
+        return output
 
     def predict_rgba(
         self,

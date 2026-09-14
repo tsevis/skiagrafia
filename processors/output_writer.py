@@ -24,6 +24,8 @@ def write_tiff(
     image: NDArray[np.uint8],
     output_path: Path,
     alpha: NDArray[np.uint8] | None = None,
+    *,
+    icc_profile: bytes | None = None,
 ) -> Path:
     """Write image as TIFF with optional alpha channel (4-channel RGBA)."""
     output_path.parent.mkdir(parents=True, exist_ok=True)
@@ -40,7 +42,8 @@ def write_tiff(
         else:
             pil_img = Image.fromarray(image, mode="RGB")
 
-    pil_img.save(str(output_path), format="TIFF", compression="tiff_lzw")
+    pil_img.save(str(output_path), format="TIFF", compression="tiff_lzw",
+                 **({"icc_profile": icc_profile} if icc_profile else {}))
     logger.info("TIFF written: %s (%.1f KB)", output_path, output_path.stat().st_size / 1024)
     return output_path
 

@@ -33,7 +33,8 @@ logger = logging.getLogger(__name__)
 # Backend identifiers (stored in preferences under "vlm_backend")
 BACKEND_OLLAMA = "ollama"
 BACKEND_LLAMACPP = "llamacpp"
-VALID_BACKENDS = (BACKEND_OLLAMA, BACKEND_LLAMACPP)
+BACKEND_LOCAL = "local"
+VALID_BACKENDS = (BACKEND_OLLAMA, BACKEND_LLAMACPP, BACKEND_LOCAL)
 
 DEFAULT_OLLAMA_URL = "http://localhost:11434"
 DEFAULT_LLAMACPP_URL = "http://localhost:8080"
@@ -246,26 +247,13 @@ class BaseVLMClient:
 
         Runs two prompt strategies and merges results for better coverage.
         """
-        prompts = [
-            (
-                f"What are the visible parts and components of this {parent_label}? "
-                "List specific physical parts like buttons, knobs, panels, handles. "
-                "Reply ONLY as a comma-separated list. No numbering."
-            ),
-            (
-                f"Name the distinct physical sub-parts of the '{parent_label}' visible in this image. "
-                "Focus on parts that have clear outlines: controls, hardware, structural elements. "
-                "Reply ONLY as a comma-separated list. No numbering, no explanation."
-            ),
-        ]
-
-        all_raw: list[str] = []
-        for prompt in prompts:
-            response = self.query_vision(image, prompt)
-            raw = _split_children_response(response)
-            all_raw.extend(raw)
-            if len(_dedupe(all_raw, MAX_CHILDREN)) >= 4:
-                break
+        prompt = (
+            f"This is a crop of one {parent_label}. Name only its clearly visible physical sub-parts. "
+            "Exclude separate neighboring objects, printed pictures, and parts hidden from view. "
+            "Do not guess typical parts. Reply with a comma-separated list, or NONE if none are visible."
+        )
+        response = self.query_vision(image, prompt)
+        all_raw = [] if response.strip().lower() in {"none", "none.", "[]"} else _split_children_response(response)
 
         children = _dedupe(all_raw, MAX_CHILDREN)
         logger.info("%s children of '%s': %s", self._model, parent_label, children)
@@ -323,7 +311,7 @@ class OllamaVLMClient(BaseVLMClient):
         import ollama
 
         super().__init__(host=host, model=model)
-        self._client = ollama.Client(host=host)
+        self._client = ollama.Client(host=host, timeout=120.0)
 
     def health_check(self) -> bool:
         """Check if Ollama is reachable and the model is available."""
@@ -352,7 +340,8 @@ class OllamaVLMClient(BaseVLMClient):
         response = self._client.chat(
             model=self._model,
             messages=[message],
-            options={"num_predict": num_predict},
+            options={"num_predict": num_predict, "temperature": 0, "seed": 42},
+            **({"think": False} if self._model.startswith(("gemma4", "qwen3")) else {}),
         )
         return (response.message.content or "").strip()
 
@@ -413,7 +402,8 @@ class LlamaCppVLMClient(BaseVLMClient):
                 logger.debug(
                     "Could not read llama.cpp error body from %s", path, exc_info=True
                 )
-            logger.error("llama.cpp HTTP %s from %s: %s", exc.code, path, detail)
+            log = logger.debug if path == "/health" else logger.error
+            log("llama.cpp HTTP %s from %s: %s", exc.code, path, detail)
             raise
         parsed = json.loads(body)
         if not isinstance(parsed, dict):
@@ -478,11 +468,15 @@ class LlamaCppVLMClient(BaseVLMClient):
             "model": self._model,
             "messages": [{"role": "user", "content": content}],
             "max_tokens": num_predict,
+            "temperature": 0,
+            "seed": 42,
         }
         response = self._request_json("/v1/chat/completions", payload)
         choices = response.get("choices") or []
         if not choices:
             raise ValueError(f"llama.cpp returned no choices: {response}")
+        if choices[0].get("finish_reason") == "length":
+            raise ValueError("VLM output exceeded its token budget; incomplete labels rejected")
         message = choices[0].get("message") or {}
         text = message.get("content")
         if not isinstance(text, str):
@@ -500,6 +494,9 @@ def create_vlm_client(
     Unknown backend values fall back to Ollama with a warning so a corrupt
     preferences file can never make interrogation unavailable.
     """
+    if backend == BACKEND_LOCAL:
+        from models.local_vlm import ManagedVLMClient
+        return ManagedVLMClient(model=model)
     if backend == BACKEND_LLAMACPP:
         return LlamaCppVLMClient(host=host, model=model)
     if backend != BACKEND_OLLAMA:

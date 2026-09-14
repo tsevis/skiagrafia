@@ -113,7 +113,7 @@ class StepInterrogate:
             from core.factory import build_interrogation_settings
             from core.interrogation import GuidedInterrogator
             from core.knowledge import KnowledgePack
-            import cv2
+            from processors.source_image import load_source_image, detection_image
 
             settings_config = getattr(self._view, "interrogation_settings", {}) or {}
             guide_path = settings_config.get("guide_path") or self._view.knowledge_pack_path
@@ -136,8 +136,8 @@ class StepInterrogate:
 
             for i, path in enumerate(image_paths):
                 try:
-                    image = cv2.imread(path)
-                    image = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
+                    rgb, alpha, _ = load_source_image(path)
+                    image = detection_image(rgb, alpha)
                     detected = interrogator.interrogate(
                         image,
                         confirmed_labels=confirmed_labels,

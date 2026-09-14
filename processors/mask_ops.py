@@ -37,31 +37,20 @@ def refine_mask(
     morph_kernel_size: int = 3,
     min_contour_area: int = 64,
 ) -> NDArray[np.uint8]:
-    """Apply bilateral filter, morphological closing, and speckle removal.
+    """Remove isolated components by pixel area without changing topology.
 
-    Step 8 of the pipeline.
+    Legacy smoothing arguments remain accepted. Binary masks must not be
+    blurred or closed implicitly: those operations destroy holes and wires.
     """
-    # Bilateral filter for edge-preserving smoothing
-    smoothed = cv2.bilateralFilter(
-        mask, d=bilateral_d, sigmaColor=sigma_color, sigmaSpace=sigma_space
-    )
-
-    # Morphological closing to fill small gaps
-    kernel = cv2.getStructuringElement(
-        cv2.MORPH_RECT, (morph_kernel_size, morph_kernel_size)
-    )
-    closed = cv2.morphologyEx(smoothed, cv2.MORPH_CLOSE, kernel)
-
-    # Remove small contours (speckles)
-    contours, _ = cv2.findContours(
-        closed, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE
-    )
-    cleaned = closed.copy()
-    for contour in contours:
-        if cv2.contourArea(contour) < min_contour_area:
-            cv2.drawContours(cleaned, [contour], -1, 0, -1)
-
-    return cleaned
+    if mask.ndim != 2:
+        raise ValueError("Expected a two-dimensional mask")
+    binary = (mask > 127).astype(np.uint8)
+    if min_contour_area <= 1:
+        return binary * 255
+    count, labels, stats, _ = cv2.connectedComponentsWithStats(binary, connectivity=8)
+    keep = np.zeros(count, dtype=np.uint8)
+    keep[1:] = (stats[1:, cv2.CC_STAT_AREA] >= min_contour_area).astype(np.uint8) * 255
+    return keep[labels]
 
 
 def edge_refine(

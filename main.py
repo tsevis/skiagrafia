@@ -160,7 +160,8 @@ def main() -> None:
         root = tk.Tk()
 
     # Check VLM backend + first-run setup in background (don't block UI startup)
-    root.after(500, check_vlm_backend)
+    import threading
+    root.after(500, lambda: threading.Thread(target=check_vlm_backend, daemon=True).start())
     root.after(900, check_first_run, root)
 
     from ui.main_window import MainWindow

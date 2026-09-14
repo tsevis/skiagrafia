@@ -7,31 +7,36 @@ Steps 10-12 = Stylization branch (only when stylizer is provided).
 The Orchestrator no longer imports or instantiates concrete model clients.
 It receives a CapabilitySet via constructor injection.
 
-All inference is local-only; no network calls.
+All inference runs locally. VLM clients communicate with local services.
 """
 from __future__ import annotations
 
 import logging
+import re
 from pathlib import Path
 from typing import Callable
 
 import cv2
 import numpy as np
 from numpy.typing import NDArray
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, Field
 
 from core.contracts import CapabilitySet
 from core.interrogation import InterrogationCandidate
 from core.knowledge import KnowledgePack
+from core.layer_editing import body_alpha
 from models.grounded_sam import DetectionResult
-from processors.mask_ops import boolean_subtract, mask_coverage, refine_mask
+from processors.mask_ops import refine_mask
 from processors.vectorizer import assemble_svg
 from processors.output_writer import write_svg, write_tiff
+from processors.source_image import load_source_image, detection_image
 from utils.coord_math import tight_bbox
 
 logger = logging.getLogger(__name__)
 
 MIN_CHILD_COVERAGE_PCT = 0.5
+# Parts are model suggestions, so use a stricter SAM 3 acceptance threshold.
+MIN_SAM3_PART_SCORE = 0.65
 MAX_CHILD_PARENT_IOU = 0.85
 MAX_CHILD_CHILD_IOU = 0.80
 MIN_PARENT_COVERAGE_PCT = 0.5
@@ -57,10 +62,10 @@ def _safe_filename_label(label: str) -> str:
 
 STRUCTURAL_STEPS = [
     "Loading image",
-    "Moondream interrogation",
-    "GroundingDINO detection",
-    "SAM 2.1 — parent mask",
-    "SAM 2.1 — child masks",
+    "Object recognition",
+    "Instance detection",
+    "Object masks",
+    "Component masks",
     "Coordinate remapping",
     "VitMatte alpha refinement",
     "Mask refinement",
@@ -73,6 +78,14 @@ PIPELINE_STEPS = STRUCTURAL_STEPS
 class LayerResult(BaseModel):
     model_config = ConfigDict(arbitrary_types_allowed=True)
 
+    layer_id: str = ""
+    parent_id: str | None = None
+    confidence: float | None = None
+    source: str = ""
+    alpha_path: str | None = None
+    mask: NDArray[np.uint8] | None = Field(default=None, exclude=True)
+    alpha: NDArray[np.uint8] | None = Field(default=None, exclude=True)
+    preview_opacity: float = Field(default=1.0, exclude=True)
     label: str
     role: str
     parent_label: str | None = None
@@ -90,6 +103,8 @@ class PipelineResult(BaseModel):
     svg_path: str | None = None
     tiff_path: str | None = None
     error: str | None = None
+    warnings: list[str] = Field(default_factory=list)
+    tiff_files: list[str] = Field(default_factory=list)
 
 
 def _mask_iou(a: NDArray[np.uint8], b: NDArray[np.uint8]) -> float:
@@ -206,6 +221,7 @@ class Orchestrator:
         text_threshold: float = 0.25,
         progress_callback: Callable[[int, str], None] | None = None,
         knowledge_pack: KnowledgePack | None = None,
+        quality: str = "balanced",
     ) -> None:
         # Capability injection
         self._interrogator = capabilities.interrogator
@@ -222,6 +238,7 @@ class Orchestrator:
         self._text_threshold = text_threshold
         self._progress = progress_callback or (lambda step, msg: None)
         self._knowledge_pack = knowledge_pack
+        self._quality = quality
 
     def _report(self, step: int, msg: str | None = None) -> None:
         text = msg or PIPELINE_STEPS[step]
@@ -253,6 +270,8 @@ class Orchestrator:
             result.error = str(exc)
             logger.error("Pipeline failed for %s: %s", image_path, exc, exc_info=True)
 
+        finally:
+            self._segmenter.clear_cache()
         return result
 
     # ─────────────────────────────────────────────────────────────────────
@@ -269,243 +288,196 @@ class Orchestrator:
 
         # STEP 0 — Load
         self._report(0)
-        image = cv2.imread(str(image_path))
-        if image is None:
-            raise FileNotFoundError(f"Cannot read image: {image_path}")
-        image = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
+        source_rgb, source_alpha, source_icc = load_source_image(image_path)
+        image = detection_image(source_rgb, source_alpha)
         h, w = image.shape[:2]
         result.width, result.height = w, h
         manual_lookup = self._build_manual_lookup(manual_detections)
 
-        # STEP 1 — Moondream
         self._report(1)
         parents, children_by_parent = self._interrogate(image, confirmed_labels)
-
         masks: dict[str, NDArray[np.uint8]] = {}
-        bboxes: dict[str, tuple[int, int, int, int]] = {}
-        svg_layers: list[dict] = []
-        accepted_parents: list[str] = []
-        fallback_bbox_parents: set[str] = set()  # parents that used full-image bbox fallback
+        accepted = []
 
+        # Detect all parents before cropping parts: reuse one full-image encoding.
         for parent in parents:
-            # STEP 2 — GroundingDINO
-            self._report(2, f"GroundingDINO: {parent.display_label}")
-            det_result, is_manual = self._detect_candidate_ex(image, parent, manual_lookup)
-            used_fallback_bbox = False
-            if det_result is None:
-                if parent.source_model == "confirmed":
-                    # User-confirmed label: fall back to full image bbox
-                    logger.info(
-                        "No detection for confirmed label '%s', using full image bbox",
-                        parent.display_label,
-                    )
-                    det_result = DetectionResult(
-                        label=parent.display_label,
-                        bbox=(0, 0, w, h),
-                        confidence=0.5,
-                    )
-                    used_fallback_bbox = True
-                else:
-                    logger.warning("No detection for '%s', skipping", parent.display_label)
-                    continue
-
-            # STEP 3 — SAM parent
-            self._report(3, f"SAM 2.1 — {parent.display_label}")
-            parent_mask = self._segmenter.segment(
-                image, det_result.bbox, parent.display_label,
-                prefer_full_box=is_manual,
-            )
-            if is_manual:
-                parent_mask = _clip_mask_to_bbox(parent_mask, det_result.bbox)
-            coverage = mask_coverage(parent_mask)
-            min_coverage = (
-                MIN_CONFIRMED_COVERAGE_PCT
-                if parent.source_model == "confirmed"
-                else MIN_PARENT_COVERAGE_PCT
-            )
-            if coverage < min_coverage:
-                logger.warning(
-                    "Mask for '%s' too small (%.1f%% < %.1f%%), skipping",
-                    parent.display_label, coverage, min_coverage,
-                )
+            self._report(2, f"Finding instances: {parent.display_label}")
+            detections = self._detect_instances(image, parent, manual_lookup)
+            if not detections:
+                result.warnings.append(f"Could not locate '{parent.display_label}'. Draw a box to select it manually.")
                 continue
-
-            # IoU dedup — merge duplicate detections of the same physical
-            # object.  Three complementary checks, any one triggers merge:
-            #   1. Mask pixel IoU > 0.50
-            #   2. Smaller mask ≥75% contained inside the larger mask
-            #   3. Detection bounding-box IoU > 0.60
-            # Check (2) catches the common "urn"/"vase" vs "guitar" case
-            # where SAM segments the same area but the IoU is low because
-            # one mask is a strict subset of the other.
-            skip = False
-            # Convert tight_bbox (y0,x0,y1,x1) to (x0,y0,x1,y1) for comparison
-            det_bbox_xyxy = det_result.bbox  # already (x0,y0,x1,y1)
-            for ex_lbl in list(accepted_parents):
-                m_iou = _mask_iou(parent_mask, masks[ex_lbl])
-                m_contain = _mask_containment(parent_mask, masks[ex_lbl])
-                # Convert stored tight_bbox (y0,x0,y1,x1) → (x0,y0,x1,y1)
-                ey0, ex0, ey1, ex1 = bboxes[ex_lbl]
-                ex_bbox_xyxy = (ex0, ey0, ex1, ey1)
-                b_iou = _bbox_iou(det_bbox_xyxy, ex_bbox_xyxy)
-                logger.info(
-                    "Dedup check '%s' vs '%s': mask_iou=%.3f, containment=%.3f, "
-                    "bbox_iou=%.3f | det_bbox=%s, ex_bbox=%s",
-                    parent.display_label, ex_lbl, m_iou, m_contain, b_iou,
-                    det_bbox_xyxy, ex_bbox_xyxy,
-                )
-                is_dup = (
-                    m_iou > PARENT_IOU_MERGE
-                    or m_contain > PARENT_CONTAINMENT_MERGE
-                    or b_iou > BBOX_IOU_MERGE
-                )
-                if not is_dup:
+            for detection, is_manual in detections:
+                if len(accepted) >= 64:
+                    result.warnings.append("Stopped at 64 object instances; narrow the prompt or process a crop.")
+                    break
+                self._report(3, f"Object mask: {parent.display_label}")
+                mask = self._detection_mask(image, detection, parent.display_label, is_manual)
+                mask[source_alpha == 0] = 0
+                # Keep small legitimate objects; reject only empty/tiny noise.
+                if np.count_nonzero(mask) < 8:
+                    result.warnings.append(f"Empty or tiny mask for '{parent.display_label}'.")
                     continue
-                logger.info(
-                    "Dedup '%s' vs '%s': mask_iou=%.2f, containment=%.2f, bbox_iou=%.2f",
-                    parent.display_label, ex_lbl, m_iou, m_contain, b_iou,
-                )
-                ex_is_fallback = ex_lbl in fallback_bbox_parents
-                if ex_is_fallback and not used_fallback_bbox:
-                    # Current has a real detection — evict the fallback entry
-                    logger.info(
-                        "Replacing fallback-bbox '%s' with properly-detected '%s'",
-                        ex_lbl, parent.display_label,
-                    )
-                    accepted_parents.remove(ex_lbl)
-                    fallback_bbox_parents.discard(ex_lbl)
-                    del masks[ex_lbl]
-                    del bboxes[ex_lbl]
-                    result.layers = [layer for layer in result.layers if layer.label != ex_lbl]
-                    # Merge children from evicted parent
-                    extra = children_by_parent.get(ex_lbl, [])
-                    existing_c = set(children_by_parent.get(parent.display_label, []))
-                    children_by_parent.setdefault(parent.display_label, []).extend(
-                        [c for c in extra if c not in existing_c]
-                    )
-                else:
-                    # Existing wins (both proper, or current is fallback)
-                    logger.info(
-                        "Keeping '%s', dropping duplicate '%s'",
-                        ex_lbl, parent.display_label,
-                    )
+                # Containment and overlapping boxes alone do not imply duplication.
+                duplicate = next((entry for entry in accepted if _mask_iou(mask, masks[entry[0].layer_id]) > 0.9), None)
+                if duplicate:
+                    existing_label = duplicate[1].display_label
                     extra = children_by_parent.get(parent.display_label, [])
-                    existing_c = set(children_by_parent.get(ex_lbl, []))
-                    children_by_parent.setdefault(ex_lbl, []).extend(
-                        [c for c in extra if c not in existing_c]
-                    )
-                    skip = True
-                break
-            if skip:
-                continue
+                    children_by_parent[existing_label] = list(dict.fromkeys(children_by_parent.get(existing_label, []) + extra))
+                    continue
+                layer_id = self._layer_id(len(accepted) + 1, parent.display_label)
+                layer = LayerResult(
+                    layer_id=layer_id, label=parent.display_label, role="parent", bbox=detection.bbox,
+                    confidence=detection.confidence, source="manual" if is_manual else detection.source,
+                )
+                masks[layer_id] = refine_mask(mask, min_contour_area=0)
+                accepted.append((layer, parent))
 
-            if used_fallback_bbox:
-                fallback_bbox_parents.add(parent.display_label)
-
-            masks[parent.display_label] = parent_mask
-            bboxes[parent.display_label] = tight_bbox(parent_mask)
-            accepted_parents.append(parent.display_label)
-            result.layers.append(
-                LayerResult(label=parent.display_label, role="parent", bbox=det_result.bbox)
-            )
-
-            # STEP 4 — Children
-            children = children_by_parent.get(parent.display_label, [])
-            if children:
-                self._report(4, f"SAM 2.1 — {len(children)} children of '{parent.display_label}'")
-                body_mask = parent_mask.copy()
-                accepted_child_masks: list[tuple[str, NDArray[np.uint8]]] = []
-                for child_label in children:
-                    child_det = self._detect_candidate(
-                        image,
-                        self._child_candidate(parent, child_label),
-                        None,
-                    )
-                    if child_det is None:
+        # Each part is named, detected and segmented inside its parent's crop.
+        query_parts = getattr(self._interrogator, "discover_parts", None)
+        part_limit = getattr(self._interrogator, "part_query_limit", 0)
+        for parent_index, (layer, parent) in enumerate(accepted):
+            result.layers.append(layer)
+            parent_mask = masks[layer.layer_id]
+            y0, x0, y1, x1 = tight_bbox(parent_mask, padding=0)
+            crop, dx, dy = _crop_to_bbox(image, (x0, y0, x1, y1), padding=8)
+            parts = children_by_parent.get(parent.display_label, [])
+            if not parts and callable(query_parts) and parent_index < part_limit:
+                self._report(4, f"Inspecting visible parts: {parent.display_label}")
+                parts = query_parts(crop, parent, self._knowledge_pack)
+            child_masks = []
+            for part in parts:
+                candidate = self._child_candidate(parent, part)
+                for detection, _ in self._detect_instances(crop, candidate, None):
+                    if detection.source == "mlx-sam3" and detection.confidence < MIN_SAM3_PART_SCORE:
+                        logger.info("Excluded tentative part %s (SAM 3 score %.3f)", part, detection.confidence)
                         continue
-                    if not _bbox_overlaps(child_det.bbox, det_result.bbox, h, w):
+                    local = self._detection_mask(crop, detection, part)
+                    mask = np.zeros((h, w), dtype=np.uint8)
+                    mask[dy:dy + crop.shape[0], dx:dx + crop.shape[1]] = local
+                    area = np.count_nonzero(mask)
+                    if area < 8:
                         continue
-                    child_mask = self._segmenter.segment(image, child_det.bbox, child_label)
-                    if mask_coverage(child_mask) < MIN_CHILD_COVERAGE_PCT:
+                    intersection = cv2.bitwise_and(mask, parent_mask)
+                    if np.count_nonzero(intersection) / area < 0.90:
                         continue
-
-                    # Reject child if its mask is too similar to the parent
-                    # (GroundingDINO couldn't isolate the sub-part)
-                    parent_iou = _mask_iou(child_mask, parent_mask)
-                    if parent_iou > MAX_CHILD_PARENT_IOU:
-                        logger.info(
-                            "Child '%s' mask too similar to parent '%s' "
-                            "(iou=%.2f > %.2f), skipping",
-                            child_label, parent.display_label,
-                            parent_iou, MAX_CHILD_PARENT_IOU,
-                        )
+                    mask = intersection
+                    if _mask_iou(mask, parent_mask) > MAX_CHILD_PARENT_IOU:
                         continue
-
-                    # Reject child if its mask duplicates an already-accepted child
-                    child_dup = False
-                    for ex_child_label, ex_child_mask in accepted_child_masks:
-                        if _mask_iou(child_mask, ex_child_mask) > MAX_CHILD_CHILD_IOU:
-                            logger.info(
-                                "Child '%s' duplicates '%s' (iou > %.2f), skipping",
-                                child_label, ex_child_label, MAX_CHILD_CHILD_IOU,
-                            )
-                            child_dup = True
-                            break
-                    if child_dup:
+                    if any(_mask_iou(mask, other) > MAX_CHILD_CHILD_IOU for other in child_masks):
                         continue
+                    child_masks.append(mask)
+                    child_id = f"{layer.layer_id}-part-{len(child_masks):03d}"
+                    bx0, by0, bx1, by1 = detection.bbox
+                    masks[child_id] = refine_mask(mask, min_contour_area=0)
+                    result.layers.append(LayerResult(
+                        layer_id=child_id, label=part, role="child", parent_label=layer.label,
+                        parent_id=layer.layer_id, bbox=(bx0 + dx, by0 + dy, bx1 + dx, by1 + dy),
+                        confidence=detection.confidence, source=detection.source,
+                    ))
 
-                    accepted_child_masks.append((child_label, child_mask))
-                    masks[child_label] = child_mask
-                    body_mask = boolean_subtract(body_mask, child_mask)
-                    result.layers.append(
-                        LayerResult(label=child_label, role="child", parent_label=parent.display_label, bbox=child_det.bbox)
-                    )
-                masks[f"{parent.display_label}_body"] = body_mask
-
-        self._report(5)  # coordinate remapping (logged)
-
-        # STEP 6 — VitMatte
+        self._report(5, "Object and part coordinates resolved")
+        alphas = {}
         if "bitmap" in self._output_mode:
             self._report(6)
-            for label, mask in masks.items():
-                alpha = self._alpha_refiner.predict(image, mask)
-                tiff_path = self._output_dir / f"{image_path.stem}_{_safe_filename_label(label)}.tiff"
-                write_tiff(image, tiff_path, alpha)
-                if result.tiff_path is None:
-                    result.tiff_path = str(tiff_path.parent)
+            for layer in result.layers:
+                mask = masks[layer.layer_id]
+                alpha = mask.copy() if self._quality == "fast" else self._alpha_refiner.predict(image, mask)
+                alpha = np.minimum(alpha, source_alpha)
+                if layer.parent_id:
+                    alpha = np.minimum(alpha, alphas[layer.parent_id])
+                alphas[layer.layer_id] = alpha
+                layer.alpha = alpha
+                path = self._output_dir / f"{image_path.stem}_{layer.layer_id}.tiff"
+                write_tiff(source_rgb, path, alpha, icc_profile=source_icc)
+                layer.alpha_path = str(path)
+                result.tiff_files.append(str(path))
+            # Bodies use subtraction of the actual child mattes, not a second
+            # independent matting pass that could grow over the child again.
+            for layer, _ in accepted:
+                children = [c for c in result.layers if c.parent_id == layer.layer_id]
+                if children:
+                    body = body_alpha(alphas[layer.layer_id], [alphas[c.layer_id] for c in children])
+                    path = self._output_dir / f"{image_path.stem}_{layer.layer_id}-body.tiff"
+                    write_tiff(source_rgb, path, body, icc_profile=source_icc)
+                    result.tiff_files.append(str(path))
+            if result.tiff_files:
+                result.tiff_path = str(self._output_dir)
         else:
-            self._report(6, "VitMatte skipped (vector-only mode)")
+            self._report(6, "Alpha export skipped (vector mode)")
 
-        # STEP 7 — Refinement
-        self._report(7)
-        refined: dict[str, NDArray[np.uint8]] = {
-            lbl: refine_mask(msk, bilateral_d=self._bilateral_d)
-            for lbl, msk in masks.items()
-        }
-
-        # STEP 8 — VTracer
+        self._report(7, "Preserving holes and fine mask details")
         self._report(8)
+        svg_layers = []
         for layer in result.layers:
-            if layer.label not in refined:
-                continue
-            svg_data = self._vectorizer.trace(refined[layer.label])
-            layer.svg_data = svg_data
-            svg_layers.append({"id": _safe_filename_label(layer.label).replace(" ", "_"), "svg_data": svg_data, "dx": layer.dx, "dy": layer.dy})
-
-        # STEP 9 — Structural SVG export
+            layer.mask = masks[layer.layer_id]
+            layer.svg_data = self._vectorizer.trace(layer.mask)
+            svg_layers.append({"id": layer.layer_id, "label": layer.label, "parent_id": layer.parent_id or "",
+                               "svg_data": layer.svg_data, "dx": 0, "dy": 0})
         self._report(9)
         if svg_layers:
-            full_svg = assemble_svg(w, h, svg_layers)
-            svg_path = self._output_dir / f"{image_path.stem}.svg"
-            write_svg(full_svg, svg_path)
-            result.svg_path = str(svg_path)
-
-        self._segmenter.clear_cache()
-        logger.info("Structural branch complete: %s", image_path.name)
+            path = self._output_dir / f"{image_path.stem}.svg"
+            write_svg(assemble_svg(w, h, svg_layers), path)
+            result.svg_path = str(path)
+        else:
+            result.warnings.append("No usable object masks were found. Review the prompt or draw a box.")
+        result.warnings.extend(getattr(self._detector, "warnings", []))
         return result
 
+    @staticmethod
+    def _layer_id(index: int, label: str) -> str:
+        slug = re.sub(r"[^a-z0-9]+", "-", label.lower()).strip("-")[:40] or "object"
+        return f"object-{index:03d}-{slug}"
+
+    def _detect_instances(self, image, candidate, manual_lookup):
+        manual = []
+        while manual_lookup:
+            bbox = self._consume_manual_bbox(manual_lookup, candidate)
+            if bbox is None:
+                break
+            h, w = image.shape[:2]
+            x0, y0, x1, y1 = bbox
+            bbox = max(0, x0), max(0, y0), min(w, x1), min(h, y1)
+            if bbox[2] > bbox[0] and bbox[3] > bbox[1]:
+                manual.append((DetectionResult(label=candidate.display_label, bbox=bbox, confidence=1.0, source="manual"), True))
+        if manual:
+            return manual
+        detect_many = getattr(self._detector, "detect_instances", None)
+        if candidate.role == "child" and self._quality != "detailed":
+            detect_many = getattr(self._detector, "detect_part_instances", detect_many)
+        for phrase in candidate.detector_phrases or [candidate.display_label]:
+            if callable(detect_many):
+                detections = detect_many(image, phrase, self._box_threshold, self._text_threshold)
+            else:
+                detection = self._detector.detect_box(image, phrase, self._box_threshold, self._text_threshold)
+                detections = [detection] if detection else []
+            # Never pass invalid coordinates into a predictor.
+            h, w = image.shape[:2]
+            valid = []
+            for detection in detections:
+                x0, y0, x1, y1 = detection.bbox
+                bbox = max(0, x0), max(0, y0), min(w, x1), min(h, y1)
+                if bbox[2] > bbox[0] and bbox[3] > bbox[1]:
+                    valid.append(detection.model_copy(update={"bbox": bbox}))
+            if valid:
+                selection = candidate.selection
+                if selection in {"leftmost", "rightmost"}:
+                    valid = [sorted(valid, key=lambda d: (d.bbox[0] + d.bbox[2]) / 2)[0 if selection == "leftmost" else -1]]
+                elif selection in {"largest", "smallest"}:
+                    valid = [sorted(valid, key=lambda d: np.count_nonzero(d.mask) if d.mask is not None else _bbox_area(d.bbox))[0 if selection == "smallest" else -1]]
+                return [(detection, False) for detection in valid]
+        return []
+
+    def _detection_mask(self, image, detection, label, manual=False):
+        mask = detection.mask
+        if mask is None or manual:
+            mask = self._segmenter.segment(image, detection.bbox, label, prefer_full_box=manual)
+        if mask.shape != image.shape[:2]:
+            raise ValueError(f"Mask dimensions do not match the image for {label}")
+        mask = (mask > 127).astype(np.uint8) * 255
+        return _clip_mask_to_bbox(mask, detection.bbox) if manual else mask
+
     # ─────────────────────────────────────────────────────────────────────
-    # Moondream helper
+    # Interrogation helper
     # ─────────────────────────────────────────────────────────────────────
 
     def _interrogate(

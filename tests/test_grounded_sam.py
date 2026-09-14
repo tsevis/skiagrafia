@@ -46,6 +46,9 @@ class FakeSamPredictor:
         self.predict_calls: list[dict] = []
         self._masks = masks
 
+    def reset_predictor(self):
+        pass
+
     def set_image(self, image: NDArray) -> None:
         self.set_image_calls.append(image)
 
@@ -338,7 +341,7 @@ class TestDetectBox:
 
         result = gsam.detect_box(_tiny_image(64), "widget", skip_synonyms=True)
         # Second box (index 1, cx=cy=0.5, w=h=0.4 of a 64px image) wins.
-        assert result.bbox == (int(0.3 * 64), int(0.3 * 64), int(0.7 * 64), int(0.7 * 64))
+        assert result.bbox == (19, 19, 45, 45)  # include the fractional right/bottom edge
 
     def test_appends_period_to_caption_when_missing(
         self, monkeypatch: pytest.MonkeyPatch
@@ -433,7 +436,7 @@ class TestSegment:
         gsam._sam_predictor = FakeSamPredictor()
         bbox = (1, 1, 10, 10)
         mask = gsam.segment(_tiny_image(), bbox, label="cross")
-        cache_key = f"cross_{bbox}"
+        cache_key = f"cross_{bbox}_False"
         assert cache_key in gsam._masks_cache
         assert np.array_equal(gsam._masks_cache[cache_key], mask)
 

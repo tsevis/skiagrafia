@@ -91,10 +91,18 @@ def assemble_svg(
         f'width="{width}" height="{height}">',
     ]
 
+    used_ids: set[str] = set()
     for i, layer in enumerate(layers):
         # Layer ids come from VLM-authored labels; escape before they are
         # embedded as an attribute value or they can inject markup.
-        layer_id = escape(str(layer.get("id", f"layer_{i}")), {'"': "&quot;"})
+        raw_id = str(layer.get("id", f"layer_{i}"))
+        unique_id = raw_id
+        suffix = 2
+        while unique_id in used_ids:
+            unique_id = f"{raw_id}_{suffix}"
+            suffix += 1
+        used_ids.add(unique_id)
+        layer_id = escape(unique_id, {'"': "&quot;"})
         svg_data = layer.get("svg_data", "")
         dx = layer.get("dx", 0)
         dy = layer.get("dy", 0)
@@ -107,6 +115,8 @@ def assemble_svg(
         else:
             parts.append(f'  <g id="{layer_id}" fill="{fill}">')
 
+        if layer.get("label"):
+            parts.append(f"    <title>{escape(str(layer['label']))}</title>")
         # Extract just the path data from VTracer output
         # VTracer wraps in full SVG — extract inner content
         inner = _strip_vtracer_fills(_extract_svg_content(svg_data))
@@ -126,20 +136,22 @@ class VTracerVectorizer:
         length_threshold: float = 4.0,
         splice_threshold: int = 45,
         filter_speckle: int = 8,
+        preserve_detail: bool = False,
     ) -> None:
         self._corner = corner_threshold
         self._length = length_threshold
         self._splice = splice_threshold
         self._speckle = filter_speckle
+        self._preserve_detail = preserve_detail
 
     def trace(self, mask: NDArray[np.uint8]) -> str:
         """Trace a binary mask to SVG path data (Vectorizer protocol)."""
         return trace_mask(
             mask,
             corner_threshold=self._corner,
-            length_threshold=self._length,
+            length_threshold=min(self._length, 1.0) if self._preserve_detail else self._length,
             splice_threshold=self._splice,
-            filter_speckle=self._speckle,
+            filter_speckle=0 if self._preserve_detail else self._speckle,
         )
 
 

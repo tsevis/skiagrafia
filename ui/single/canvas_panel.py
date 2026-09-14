@@ -6,7 +6,7 @@ from pathlib import Path
 from tkinter import ttk
 from typing import TYPE_CHECKING
 
-from PIL import Image, ImageTk
+from PIL import Image, ImageOps, ImageTk
 
 from ui.single.canvas_drawing import CanvasDrawingMixin
 from ui.single.canvas_events import CanvasEventsMixin
@@ -80,6 +80,7 @@ class CanvasPanel(CanvasDrawingMixin, CanvasEventsMixin):
         modes = [
             ("Original", "original"),
             ("Masks", "masks"),
+            ("Alpha", "alpha"),
             ("Vectors", "vectors"),
             ("Composite", "composite"),
         ]
@@ -206,7 +207,7 @@ class CanvasPanel(CanvasDrawingMixin, CanvasEventsMixin):
     def load_image(self, path: str) -> None:
         """Load an image file onto the canvas."""
         try:
-            self._source_image = Image.open(path).convert("RGB")
+            self._source_image = ImageOps.exif_transpose(Image.open(path)).convert("RGB")
             self._source_size = self._source_image.size
 
             p = Path(path)

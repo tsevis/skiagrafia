@@ -61,6 +61,7 @@ class InterrogationCandidate(BaseModel):
     confidence: float = 0.5
     role: str = "parent"
     parent: str | None = None
+    selection: str = "all"
 
 
 class InterrogationResult(BaseModel):
@@ -83,6 +84,9 @@ class InterrogationSettings:
     composition_first: bool = True
     enable_tiling: bool = True
     max_aliases_per_object: int = 4
+    user_prompt: str = ""
+    discover_parts: bool = True
+    selections: dict[str, str] | None = None
 
 
 def parse_label_candidates(raw: str, limit: int = MAX_PARENTS) -> list[str]:
@@ -136,13 +140,13 @@ class GuidedInterrogator:
         confirmed_labels: list[str] | None = None,
         knowledge_pack: KnowledgePack | None = None,
     ) -> InterrogationResult:
-        if confirmed_labels:
+        if confirmed_labels is not None:
             candidates = self._candidates_from_confirmed_labels(
                 confirmed_labels, knowledge_pack
             )
             return InterrogationResult(
                 candidates=candidates,
-                children_by_parent=self._children_map(candidates, knowledge_pack, image),
+                children_by_parent=self._known_parts(candidates, knowledge_pack),
                 escalation_stage="confirmed",
                 confidence_summary="user-confirmed labels",
             )
@@ -188,7 +192,7 @@ class GuidedInterrogator:
             )
             candidates = self._merge_candidates(candidates, guided)
 
-        if self._settings.fallback_mode != "moondream_only" and self._should_escalate(candidates):
+        if self._settings.fallback_mode != "moondream_only" and (self._should_escalate(candidates) or self._settings.profile == "deep"):
             for model in self._settings.fallback_vlms:
                 if model == self._settings.primary_vlm:
                     continue  # same model would just repeat the guided pass
@@ -218,13 +222,13 @@ class GuidedInterrogator:
 
         candidates = self._reason_and_rank(candidates, knowledge_pack, raw_responses, stage)
         confidence_summary = (
-            "high-confidence results"
+            "object proposals; detection still required"
             if not self._should_escalate(candidates)
-            else "low-confidence results"
+            else "uncertain object proposals; review required"
         )
         return InterrogationResult(
             candidates=candidates,
-            children_by_parent=self._children_map(candidates, knowledge_pack, image),
+            children_by_parent=self._known_parts(candidates, knowledge_pack),
             raw_responses=raw_responses,
             escalation_stage=stage,
             confidence_summary=confidence_summary,
@@ -248,8 +252,24 @@ class GuidedInterrogator:
             return []
 
         raw_responses[f"{prompt_style}:{model}"] = response
-        labels = parse_label_candidates(response)
-        return [
+        selections = {}
+        if self._settings.user_prompt:
+            try:
+                content = response.strip().removeprefix("```json").removeprefix("```").removesuffix("```").strip()
+                objects = json.loads(content)["objects"]
+                labels = []
+                for obj in objects[:MAX_PARENTS]:
+                    label = obj["label"].strip().lower()
+                    selection = obj.get("selection", "all")
+                    if label and selection in {"all", "leftmost", "rightmost", "largest", "smallest"}:
+                        labels.append(label)
+                        selections[label] = selection
+            except (ValueError, KeyError, TypeError, AttributeError):
+                logger.warning("Rejected incomplete or malformed object request response")
+                return []
+        else:
+            labels = parse_label_candidates(response)
+        candidates = [
             self._candidate_from_label(
                 label=label,
                 knowledge=knowledge_pack.find_object(label) if knowledge_pack else None,
@@ -258,6 +278,9 @@ class GuidedInterrogator:
             )
             for label in labels
         ]
+        for candidate in candidates:
+            candidate.selection = selections.get(candidate.display_label, "all")
+        return candidates
 
     def _get_client(self, model: str) -> BaseVLMClient:
         client = self._clients.get(model)
@@ -275,6 +298,16 @@ class GuidedInterrogator:
         knowledge_pack: KnowledgePack | None,
         prompt_style: str,
     ) -> str:
+        if self._settings.user_prompt:
+            return (
+                "Select the visible objects requested by the user. Exclude everything they ask to omit. "
+                "Use short concrete noun phrases retaining color/material attributes. "
+                "Do not include counts in labels. Separate distinct object types; repeated instances share a label. "
+                "For left/right/largest/smallest requests use selection leftmost/rightmost/largest/smallest; otherwise all. "
+                'Return ONLY JSON: {"objects":[{"label":"object name","selection":"all"}]}. '
+                'Return {"objects":[]} when nothing requested is visible. '
+                f"User request: {json.dumps(self._settings.user_prompt)}"
+            )
         domain_prefix = ""
         if knowledge_pack and knowledge_pack.domain.name:
             domain_prefix = (
@@ -295,8 +328,8 @@ class GuidedInterrogator:
         if prompt_style == "composition":
             return (
                 f"{domain_prefix}{domain_desc}{exemplars}"
-                "Describe the whole foreground composition first, then name the main objects that define it. "
-                "Prefer the dominant object or grouped objects over tiny details. "
+                "Name each separate visible foreground object type. Do not merge touching or stacked objects into a group. "
+                "Include small recognizable objects. Exclude scenery and empty spaces. "
                 "If the exact specialist term is unknown, use short visual nouns based on shape, material, or purpose. "
                 "Reply only as a comma-separated list of the main whole objects."
             )
@@ -346,6 +379,8 @@ class GuidedInterrogator:
                     confidence=1.0,
                 )
             )
+        for candidate in candidates:
+            candidate.selection = (self._settings.selections or {}).get(candidate.display_label, "all")
         return candidates
 
     def _candidate_from_label(
@@ -406,8 +441,6 @@ class GuidedInterrogator:
             return True
         if all(c.display_label.lower() in _VAGUE_TERMS for c in candidates):
             return True
-        if len(candidates) < 2:
-            return True
         return False
 
     def _merge_candidates(
@@ -425,6 +458,22 @@ class GuidedInterrogator:
                     dict.fromkeys(existing.detector_phrases + candidate.detector_phrases)
                 )
         return list(merged.values())
+
+    @property
+    def part_query_limit(self) -> int:
+        return self._max_child_query_parents() if self._settings.discover_parts else 0
+
+    def _known_parts(self, candidates, knowledge_pack):
+        if not self._settings.discover_parts or knowledge_pack is None:
+            return {}
+        return {c.display_label: obj.parts for c in candidates
+                if (obj := knowledge_pack.find_object(c.canonical_label)) and obj.parts}
+
+    def discover_parts(self, image, candidate, knowledge_pack=None) -> list[str]:
+        """Called only after localization, on an individual object's crop."""
+        if not self._settings.discover_parts:
+            return []
+        return self._children_map([candidate], knowledge_pack, self._prepare_image(image)).get(candidate.display_label, [])
 
     def _children_map(
         self,
@@ -600,5 +649,8 @@ class GuidedInterrogator:
                 existing_candidate.detector_phrases = [
                     str(p).strip() for p in phrases if str(p).strip()
                 ][: self._settings.max_aliases_per_object]
-            ranked.append(existing_candidate)
+            if existing_candidate not in ranked:
+                ranked.append(existing_candidate)
+        if ranked:
+            ranked.extend(candidate for candidate in existing if candidate not in ranked)
         return ranked

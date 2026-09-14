@@ -46,6 +46,9 @@ class CanvasDrawingMixin:
         self._layer_photos = []
         self._overlay_photo = None
 
+        if mode == "alpha":
+            self._draw_alpha_preview(display_w, display_h)
+            return
         # Always draw the original image as the background layer
         self._draw_original_layer(display_w, display_h, mode)
 
@@ -54,12 +57,43 @@ class CanvasDrawingMixin:
         if mode in {"vectors", "composite"}:
             self._draw_vector_overlay(display_w, display_h)
 
+    def _visible_result_layers(self):
+        result = getattr(self._view, "_last_result", None)
+        layers = getattr(result, "layers", [])
+        panel = getattr(self._view, "_right_panel", None)
+        visibility = getattr(panel, "_visibility", {})
+        return [layer for i, layer in enumerate(layers)
+                if i not in visibility or visibility[i].get()]
+
+    def _draw_alpha_preview(self, display_w, display_h):
+        import numpy as np
+        if self._source_image is None:
+            return
+        layers = self._visible_result_layers()
+        panel = getattr(self._view, "_right_panel", None)
+        selected = getattr(panel, "_selected_index", None)
+        result = getattr(self._view, "_last_result", None)
+        if selected is not None and result and selected < len(result.layers):
+            layers = [result.layers[selected]]
+        else:
+            layers = [layer for layer in layers if layer.role == "parent"]
+        mattes = [np.rint((layer.alpha if getattr(layer, "alpha", None) is not None else layer.mask)
+                           * getattr(layer, "preview_opacity", 1.0)).astype(np.uint8)
+                  for layer in layers if getattr(layer, "mask", None) is not None]
+        if not mattes:
+            return
+        alpha = Image.fromarray(np.maximum.reduce(mattes))
+        cutout = self._source_image.convert("RGBA")
+        cutout.putalpha(alpha)
+        self._photo_image = ImageTk.PhotoImage(cutout.resize((display_w, display_h), Image.Resampling.LANCZOS))
+        self._canvas.create_image(self._pan_x, self._pan_y, anchor=tk.NW, image=self._photo_image)
+
     def _draw_mask_overlays(self) -> None:
         result = getattr(self._view, "_last_result", None)
         if result is None or not hasattr(result, "layers"):
             return
 
-        layers_with_svg = [layer for layer in result.layers if getattr(layer, "svg_data", "")]
+        layers_with_svg = [layer for layer in self._visible_result_layers() if getattr(layer, "svg_data", "")]
         if layers_with_svg:
             mask_opacity = float(self._app.prefs.get("mask_overlay_opacity", 30)) / 100.0
             self._layer_photos.extend(render_layer_masks(
@@ -93,7 +127,7 @@ class CanvasDrawingMixin:
         if result is None or not hasattr(result, "layers"):
             return
 
-        layers_with_svg = [layer for layer in result.layers if getattr(layer, "svg_data", "")]
+        layers_with_svg = [layer for layer in self._visible_result_layers() if getattr(layer, "svg_data", "")]
         if layers_with_svg:
             self._layer_photos.extend(render_layer_vectors(
                 self._canvas,

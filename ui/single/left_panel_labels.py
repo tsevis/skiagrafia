@@ -13,7 +13,6 @@ import threading
 import tkinter as tk
 from tkinter import ttk
 
-from ui.single.scan_dedup import dedup_scan_detections
 from ui.theme import is_macos, TAG_COLOURS
 
 logger = logging.getLogger(__name__)
@@ -35,10 +34,19 @@ class LabelsSectionMixin:
 
         self._labels_container = ttk.Frame(section)
 
+        ttk.Label(section, text="What should be selected?").pack(anchor=tk.W, pady=(4, 0))
+        self._object_prompt_var = tk.StringVar(value=self._app.prefs.get("object_prompt", ""))
+        ttk.Entry(section, textvariable=self._object_prompt_var).pack(fill=tk.X)
+        ttk.Label(section, text="e.g. All paper bags, exclude the car", foreground="gray").pack(anchor=tk.W)
+        self._quality_var = tk.StringVar(value=self._app.prefs.get("quality_profile", "balanced"))
+        ttk.Combobox(section, textvariable=self._quality_var, values=["fast", "balanced", "detailed"], state="readonly").pack(fill=tk.X, pady=(4, 0))
+        self._parts_var = tk.BooleanVar(value=self._app.prefs.get("discover_parts", True))
+        ttk.Checkbutton(section, text="Find visible components", variable=self._parts_var).pack(anchor=tk.W)
+        self._scan_prompt = None
         # Scan button
         self._scan_btn = ttk.Button(
             section,
-            text="Scan with Moondream",
+            text="Scan objects",
             command=self._scan_labels,
         )
         self._scan_btn.pack(fill=tk.X, pady=(4, 0))
@@ -73,25 +81,34 @@ class LabelsSectionMixin:
         add_btn.pack(fill=tk.X, pady=(2, 0))
 
     def _scan_labels(self) -> None:
-        """Run Moondream interrogation in background thread."""
-        if not self._image_path:
+        """Run object recognition in background thread."""
+        if not self._image_path or getattr(self, "_work_in_progress", False):
             return
 
+        self._work_in_progress = True
+        self._scan_image_path = self._image_path
+        self._process_btn.config(state="disabled")
+        self._scan_prompt = self._object_prompt_var.get().strip()
         self._scan_btn.config(state="disabled")
         self._scan_progress.pack(fill=tk.X, pady=(2, 0))
         self._scan_progress.start(20)
         self._box_opacity_frame.pack_forget()
         self._scan_status.pack_forget()
 
+        prompt = self._object_prompt_var.get().strip()
+        prefs = dict(self._app.prefs, object_prompt=prompt,
+                     interrogation_profile={"fast": "fast", "detailed": "deep"}.get(self._quality_var.get(), "balanced"))
+        image_path = self._image_path
+
         def _worker() -> None:
             try:
                 from core.factory import build_interrogation_settings
                 from core.interrogation import GuidedInterrogator
                 from core.knowledge import KnowledgePack
-                import cv2
+                from processors.source_image import load_source_image, detection_image
 
-                image = cv2.imread(self._image_path)
-                image = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
+                rgb, alpha, _ = load_source_image(image_path)
+                image = detection_image(rgb, alpha)
                 knowledge_pack = (
                     KnowledgePack.load(self._knowledge_pack_path)
                     if self._knowledge_pack_path
@@ -99,7 +116,7 @@ class LabelsSectionMixin:
                 )
                 interrogator = GuidedInterrogator(
                     build_interrogation_settings(
-                        self._app.prefs,
+                        prefs,
                         kp_defaults=self._knowledge_pack_defaults,
                     )
                 )
@@ -111,41 +128,39 @@ class LabelsSectionMixin:
                         "role": candidate.role,
                         "confidence": candidate.confidence,
                         "source_model": candidate.source_model,
+                        "selection": candidate.selection,
                     }
                     for candidate in detected.candidates
                 ]
                 self._progress_queue.put(("labels", label_dicts))
                 preview_detections: list[dict] = []
                 try:
-                    from models.grounded_sam import GroundedSAM
+                    from core.factory import build_detector
+                    from core.orchestrator import Orchestrator
 
-                    detector = GroundedSAM()
-                    parent_candidates = [
-                        candidate for candidate in detected.candidates if candidate.role == "parent"
-                    ][:4]
-                    for candidate in parent_candidates:
-                        detection = None
-                        for phrase in (candidate.detector_phrases or [candidate.display_label])[:2]:
-                            detection = detector.detect_box(image, phrase, skip_synonyms=True)
-                            if detection is not None:
-                                break
-                        if detection is None:
-                            continue
-                        preview_detections.append(
-                            {
-                                "label": candidate.display_label,
-                                "role": candidate.role,
-                                "bbox": detection.bbox,
-                                "confidence": candidate.confidence,
-                            }
-                        )
+                    detector = build_detector(prefs)
+                    # Use the same selection/instance policy as final processing.
+                    from core.contracts import CapabilitySet
+                    from processors.vectorizer import VTracerVectorizer
+                    from models.vitmatte_refiner import VitMatteRefiner
+                    scan = Orchestrator(CapabilitySet(interrogator=interrogator, detector=detector,
+                        segmenter=detector, alpha_refiner=VitMatteRefiner(), vectorizer=VTracerVectorizer()),
+                        box_threshold=float(prefs.get("sam_box_threshold", .35)),
+                        text_threshold=float(prefs.get("sam_text_threshold", .25)))
+                    for candidate in detected.candidates:
+                        for detection, _ in scan._detect_instances(image, candidate, None):
+                            preview_detections.append({
+                                "label": candidate.display_label, "role": candidate.role,
+                                "bbox": detection.bbox, "confidence": detection.confidence,
+                                "source_model": detection.source,
+                            })
                     detector.clear_cache()
-                    preview_detections = dedup_scan_detections(preview_detections)
+
                 except Exception:
                     logger.info("Scan preview detections unavailable", exc_info=True)
                 self._progress_queue.put(("scan_preview", preview_detections))
             except Exception as exc:
-                logger.error("Moondream scan failed: %s", exc, exc_info=True)
+                logger.error("Object scan failed: %s", exc, exc_info=True)
                 self._progress_queue.put(("error", str(exc)))
 
         threading.Thread(target=_worker, daemon=True).start()
@@ -158,6 +173,9 @@ class LabelsSectionMixin:
             if msg_type == "labels":
                 # Show labels immediately but keep progress bar spinning
                 # until box detections are ready
+                if self._image_path != getattr(self, "_scan_image_path", self._image_path):
+                    self._root.after(50, self._poll_scan_queue)
+                    return
                 self._labels = data
                 self._render_label_pills()
                 self._view.on_labels_updated(data)
@@ -170,18 +188,10 @@ class LabelsSectionMixin:
                 self._scan_progress.pack_forget()
                 self._scan_status.pack_forget()
                 self._scan_btn.config(state="normal", text="Re-scan")
-                # Remove labels that were dropped by scan dedup
-                kept_labels = {d.get("label", "").lower() for d in data}
-                if kept_labels and self._labels:
-                    before = len(self._labels)
-                    self._labels = [
-                        lbl for lbl in self._labels
-                        if lbl.get("label", "").lower() in kept_labels
-                        or lbl.get("role") != "parent"
-                    ]
-                    if len(self._labels) < before:
-                        self._render_label_pills()
-                        self._view.on_labels_updated(self._labels)
+                self._process_btn.config(state="normal")
+                self._work_in_progress = False
+                if self._image_path != getattr(self, "_scan_image_path", self._image_path):
+                    return
                 self._view.on_scan_preview_ready(data)
                 if data:
                     self._box_opacity_frame.pack(fill=tk.X, pady=(4, 0))
@@ -191,6 +201,8 @@ class LabelsSectionMixin:
                 self._scan_progress.pack_forget()
                 self._scan_status.pack_forget()
                 self._scan_btn.config(state="normal", text="Re-scan")
+                self._process_btn.config(state="normal")
+                self._work_in_progress = False
                 self._labels_hint.config(text=f"Scan failed: {data}", foreground="red")
         except queue.Empty:
             self._root.after(100, self._poll_scan_queue)
