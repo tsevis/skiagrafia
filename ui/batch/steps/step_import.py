@@ -112,6 +112,13 @@ class StepImport:
         self._recent_list.column("status", width=80)
         self._recent_list.column("date", width=120)
         self._recent_list.pack(fill=tk.X)
+        self._recent_paths: dict[str, Path] = {}
+        self._recent_list.bind("<Double-1>", self._load_selected_run)
+        ttk.Button(
+            self.frame,
+            text="Load selected run into Configure",
+            command=self._load_selected_run,
+        ).pack(anchor=tk.W, pady=(6, 0))
 
         self._scan_recent_batches()
 
@@ -174,6 +181,56 @@ class StepImport:
                 tk.END,
                 values=(batch_dir.name, "Incomplete", ""),
             )
+
+        # Immutable run settings make completed and historical batches useful
+        # starting points, not merely status entries.
+        try:
+            from core.batch_session import load_run_settings
+
+            run_files = sorted(
+                output_dir.glob("*/run.json"),
+                key=lambda path: path.stat().st_mtime,
+                reverse=True,
+            )
+            for run_file in run_files[:5]:
+                try:
+                    settings = load_run_settings(run_file)
+                except Exception:
+                    logger.warning("Skipping unreadable batch run %s", run_file, exc_info=True)
+                    continue
+                item = self._recent_list.insert(
+                    "",
+                    tk.END,
+                    values=(
+                        Path(settings.input_folder).name or settings.batch_id,
+                        "Saved run",
+                        settings.created_at[:19],
+                    ),
+                )
+                self._recent_paths[item] = run_file
+        except OSError:
+            logger.warning("Could not scan recent batch runs", exc_info=True)
+
+    def _load_selected_run(self, _event: object = None) -> None:
+        selected = self._recent_list.selection()
+        if not selected:
+            return
+        run_path = self._recent_paths.get(selected[0])
+        if run_path is None:
+            return
+        from core.batch_session import load_run_settings
+
+        try:
+            settings = load_run_settings(run_path)
+        except Exception:
+            logger.warning("Could not load batch run %s", run_path, exc_info=True)
+            return
+        # Folder discovery runs first, then the historical context takes
+        # precedence so request and guide metadata are restored faithfully.
+        if settings.input_folder and Path(settings.input_folder).is_dir():
+            self._set_folder(settings.input_folder)
+        self._view.load_run_settings(settings)
+        self._view.go_to_step(1)
 
     def _update_knowledge_pack(self, folder: Path) -> None:
         pack = load_knowledge_pack(folder)

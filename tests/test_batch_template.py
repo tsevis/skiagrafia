@@ -64,7 +64,13 @@ class TestSave:
         assert template.created_at != ""
 
     def test_save_round_trips_via_load(self, fake_home: Path) -> None:
-        template = _make_template(name="Round Trip", preferred_vlm="minicpm-v")
+        template = _make_template(
+            name="Round Trip",
+            preferred_vlm="minicpm-v",
+            selection_request="Select computers only.\nExclude captions.",
+            guide_path="/guides/apple.toml",
+            guide_name="Apple — The First 50 Years",
+        )
 
         path = template.save()
         loaded = BatchTemplate.load(path)
@@ -72,6 +78,9 @@ class TestSave:
         assert loaded.name == "Round Trip"
         assert loaded.confirmed_labels == ["cross", "chalice"]
         assert loaded.preferred_vlm == "minicpm-v"
+        assert loaded.selection_request == "Select computers only.\nExclude captions."
+        assert loaded.guide_path == "/guides/apple.toml"
+        assert loaded.guide_name == "Apple — The First 50 Years"
         assert loaded.created_at == template.created_at
 
 
@@ -149,6 +158,20 @@ class TestLoad:
         with pytest.raises(Exception):
             BatchTemplate.load(incomplete)
 
+    def test_legacy_template_without_selection_request_loads_with_empty_default(
+        self, tmp_path: Path
+    ) -> None:
+        legacy = _make_template().model_dump()
+        legacy.pop("selection_request")
+        legacy.pop("guide_name")
+        path = tmp_path / "legacy.json"
+        path.write_text(__import__("json").dumps(legacy), encoding="utf-8")
+
+        loaded = BatchTemplate.load(path)
+
+        assert loaded.selection_request == ""
+        assert loaded.guide_name is None
+
 
 class TestListAll:
     def test_list_all_returns_empty_when_dir_missing(self, fake_home: Path) -> None:
@@ -186,3 +209,13 @@ class TestListAll:
         result = BatchTemplate.list_all()
 
         assert [t.name for t in result] == ["good one"]
+
+    def test_list_all_with_paths_preserves_template_source_paths(
+        self, fake_home: Path
+    ) -> None:
+        template = _make_template(name="with path")
+        path = template.save()
+
+        listed = BatchTemplate.list_all_with_paths()
+
+        assert listed == [(path, template)]

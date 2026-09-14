@@ -60,6 +60,7 @@ class BatchConfig(BaseModel):
     quality_profile: str = "balanced"
     preserve_path_detail: bool = True
     object_prompt: str = ""
+    selection_request: str = ""
     discover_parts: bool = True
 
     def model_post_init(self, __context: object) -> None:
@@ -124,7 +125,10 @@ def _worker_orchestrator(config_json: str):
         length_threshold=config.length_threshold,
         filter_speckle=config.speckle,
         knowledge_pack_path=config.guide_path,
-        interrogation_overrides={"preferred_vlm": config.preferred_vlm},
+        interrogation_overrides={
+            "preferred_vlm": config.preferred_vlm,
+            "selection_request": config.selection_request,
+        },
     )
     orchestrator = Orchestrator(
         capabilities=caps,

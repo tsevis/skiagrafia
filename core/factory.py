@@ -114,7 +114,14 @@ def build_interrogation_settings(
         ),
         max_aliases_per_object=int(prefs.get("max_aliases_per_object", 4)),
         selections=overrides.get("selections"),
-        user_prompt=str(overrides.get("user_prompt", prefs.get("object_prompt", ""))),
+        selection_request=str(
+            overrides.get(
+                "selection_request",
+                overrides.get("user_prompt", prefs.get("object_prompt", "")),
+            )
+        ),
+        # Kept while third-party callers migrate to selection_request.
+        user_prompt=str(overrides.get("user_prompt", "")),
         discover_parts=bool(overrides.get("discover_parts", prefs.get("discover_parts", True))),
     )
 

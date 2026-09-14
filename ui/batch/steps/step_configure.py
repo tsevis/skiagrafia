@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import tkinter as tk
 from pathlib import Path
-from tkinter import ttk
+from tkinter import messagebox, ttk
 from typing import TYPE_CHECKING
 
 from core.knowledge import (
@@ -30,6 +30,8 @@ class StepConfigure:
             text="Configure Pipeline",
             font=("SF Pro Display", 16, "bold"),
         ).pack(anchor=tk.W, pady=(0, 8))
+
+        self._build_selection_request_section()
 
         # Template override banner
         if view.template is not None:
@@ -106,11 +108,42 @@ class StepConfigure:
 
         self._build_interrogation_section()
 
+        # A historical run is restored as editable configuration.  It is not
+        # an approved result: Interrogate and Triage still have to run again.
+        if view.interrogation_settings:
+            self._apply_config(view.interrogation_settings)
+
         # Apply template values if available
         if view.template is not None:
             self._apply_template(view.template)
 
+    def _apply_config(self, config: dict[str, object]) -> None:
+        request = str(config.get("selection_request", "") or "")
+        if request:
+            self._set_selection_request(request)
+        mode = str(config.get("output_mode", ""))
+        if mode:
+            for key, var in self._mode_vars.items():
+                var.set(key in mode)
+        if "recursion_depth" in config:
+            self._depth_var.set(int(config["recursion_depth"]))
+        if config.get("vtracer_quality"):
+            self._quality_var.set(str(config["vtracer_quality"]))
+        if config.get("fallback_mode"):
+            self._fallback_mode_var.set(str(config["fallback_mode"]))
+        if config.get("interrogation_profile"):
+            self._profile_var.set(str(config["interrogation_profile"]))
+        if config.get("preferred_vlm"):
+            self._preferred_vlm_var.set(str(config["preferred_vlm"]))
+        if config.get("text_reasoner_model"):
+            self._reasoner_var.set(str(config["text_reasoner_model"]))
+        if "enable_tiled_fallback" in config:
+            self._tiled_fallback_var.set(bool(config["enable_tiled_fallback"]))
+
     def _apply_template(self, template: object) -> None:
+        request = str(getattr(template, "selection_request", "") or "")
+        if request:
+            self._set_selection_request(request)
         if hasattr(template, "output_mode"):
             mode = template.output_mode
             for key, var in self._mode_vars.items():
@@ -167,6 +200,16 @@ class StepConfigure:
             text="Clear guide",
             command=self._clear_guide,
         ).pack(side=tk.LEFT, padx=(6, 0))
+        ttk.Button(
+            guide_actions,
+            text="Apple preset",
+            command=self._use_apple_preset,
+        ).pack(side=tk.LEFT, padx=(6, 0))
+        ttk.Button(
+            guide_actions,
+            text="Save copy to batch folder",
+            command=self._save_guide_copy,
+        ).pack(side=tk.RIGHT)
 
         prefs = self._app.prefs
         guide_defaults = getattr(self._view, "knowledge_pack_defaults", {}) or {}
@@ -261,18 +304,79 @@ class StepConfigure:
         self._refresh_guide_status()
 
     def _refresh_guide_status(self) -> None:
-        if self._view.knowledge_pack_name:
+        if self._view.knowledge_pack_path:
             self._guide_status_label.config(
-                text=f"Guide: {self._view.knowledge_pack_name}",
+                text=f"Guide: {self._view.knowledge_pack_name or Path(self._view.knowledge_pack_path).stem}",
                 foreground="gray",
             )
             self._guide_mode_var.set(True)
+        elif self._view.knowledge_pack_name:
+            self._guide_status_label.config(
+                text=(
+                    f"Guide: {self._view.knowledge_pack_name} is unavailable — "
+                    "use Load guide to relink it"
+                ),
+                foreground="#FF9F0A",
+            )
+            self._guide_mode_var.set(False)
         else:
             self._guide_status_label.config(
                 text="Guide: No guide loaded",
                 foreground="gray",
             )
             self._guide_mode_var.set(False)
+
+    def _build_selection_request_section(self) -> None:
+        section = ttk.LabelFrame(self.frame, text="Selection Request", padding=8)
+        section.pack(fill=tk.X, pady=(0, 12))
+        ttk.Label(
+            section,
+            text="What should be selected in every image of this batch?",
+        ).pack(anchor=tk.W)
+        ttk.Label(
+            section,
+            text=(
+                "Plain-language inclusion and exclusion rules. This is used during semantic "
+                "interrogation and stays separate from the Domain Guide."
+            ),
+            foreground="gray",
+            wraplength=540,
+            justify=tk.LEFT,
+        ).pack(anchor=tk.W, pady=(2, 5))
+        self._selection_request_text = tk.Text(section, height=5, wrap="word")
+        self._selection_request_text.pack(fill=tk.X)
+        self._set_selection_request(self._view.selection_request)
+        self._selection_request_text.bind("<KeyRelease>", self._on_selection_request_changed)
+        self._selection_hint = ttk.Label(
+            section,
+            text="Applies to every image in this batch. Edit before Interrogate.",
+            foreground="gray",
+        )
+        self._selection_hint.pack(anchor=tk.W, pady=(4, 0))
+
+    def _set_selection_request(self, value: str) -> None:
+        self._selection_request_text.delete("1.0", tk.END)
+        self._selection_request_text.insert("1.0", value.strip())
+        # Buttons such as Apple preset edit the Text widget programmatically,
+        # so they do not emit KeyRelease.
+        if hasattr(self, "_selection_hint"):
+            self._on_selection_request_changed()
+
+    def get_selection_request(self) -> str:
+        return self._selection_request_text.get("1.0", tk.END).strip()
+
+    def _on_selection_request_changed(self, _event: object = None) -> None:
+        request = self.get_selection_request()
+        if request == self._view.selection_request:
+            return
+        self._view.selection_request = request
+        run_request = str(getattr(self._view.run_settings, "selection_request", ""))
+        if self._view.run_settings is not None and request != run_request:
+            self._view.invalidate_interrogation()
+            self._selection_hint.config(
+                text="Request changed — labels and Triage approval were cleared. Re-run Interrogate.",
+                foreground="#FF9F0A",
+            )
 
     def _load_guide(self) -> None:
         from tkinter import filedialog
@@ -298,6 +402,41 @@ class StepConfigure:
             str(Path(path).with_suffix(".md")) if Path(path).with_suffix(".md").exists() else None
         )
         self._view.knowledge_pack_defaults = pack.batch_defaults.model_dump()
+        self._view.knowledge_guidance_active = True
+        self._refresh_guide_status()
+
+    def _use_apple_preset(self) -> None:
+        from core.preset_library import load_apple_preset
+
+        pack, request = load_apple_preset()
+        self._view.knowledge_pack_path = pack.path
+        self._view.knowledge_pack_name = pack.name
+        self._view.knowledge_pack_notes_path = None
+        self._view.knowledge_pack_defaults = pack.batch_defaults.model_dump()
+        self._view.knowledge_guidance_active = True
+        self._set_selection_request(request)
+        self._refresh_guide_status()
+
+    def _save_guide_copy(self) -> None:
+        step_import = self._view._step_views[0]
+        folder_value = getattr(step_import, "input_folder", None) if step_import else None
+        guide_path = self._view.knowledge_pack_path
+        if not folder_value or not guide_path or not Path(guide_path).is_file():
+            self._guide_status_label.config(
+                text="Guide: Load a guide and select a batch folder first",
+                foreground="#FF9F0A",
+            )
+            return
+        destination = Path(folder_value) / "skiagrafia_guide.toml"
+        if destination.exists() and not messagebox.askyesno(
+            "Replace batch guide?",
+            f"{destination.name} already exists in this batch folder. Replace it?",
+            parent=self.frame.winfo_toplevel(),
+        ):
+            return
+        destination.write_text(Path(guide_path).read_text(encoding="utf-8"), encoding="utf-8")
+        self._view.knowledge_pack_path = str(destination)
+        self._view.knowledge_pack_notes_path = None
         self._view.knowledge_guidance_active = True
         self._refresh_guide_status()
 
@@ -433,6 +572,7 @@ class StepConfigure:
         active = [k for k, v in self._mode_vars.items() if v.get()]
         output_mode = "+".join(active) if active else "vector"
         config = {
+            "selection_request": self.get_selection_request(),
             "output_mode": output_mode,
             "recursion_depth": self._depth_var.get(),
             "vtracer_quality": self._quality_var.get(),
@@ -444,5 +584,6 @@ class StepConfigure:
             "text_reasoner_model": self._reasoner_var.get(),
             "enable_tiled_fallback": self._tiled_fallback_var.get(),
         }
+        self._view.selection_request = config["selection_request"]
         self._view.interrogation_settings = dict(config)
         return config

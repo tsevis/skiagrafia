@@ -96,7 +96,7 @@ class LabelsSectionMixin:
         self._scan_status.pack_forget()
 
         prompt = self._object_prompt_var.get().strip()
-        prefs = dict(self._app.prefs, object_prompt=prompt,
+        prefs = dict(self._app.prefs,
                      interrogation_profile={"fast": "fast", "detailed": "deep"}.get(self._quality_var.get(), "balanced"))
         image_path = self._image_path
 
@@ -118,6 +118,7 @@ class LabelsSectionMixin:
                     build_interrogation_settings(
                         prefs,
                         kp_defaults=self._knowledge_pack_defaults,
+                        overrides={"selection_request": prompt},
                     )
                 )
                 detected = interrogator.interrogate(image, knowledge_pack=knowledge_pack)

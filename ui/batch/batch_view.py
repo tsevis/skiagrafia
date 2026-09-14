@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import tkinter as tk
+from pathlib import Path
 from tkinter import ttk
 from typing import TYPE_CHECKING
 
@@ -32,6 +33,10 @@ class BatchView:
         self._completed_steps: set[int] = set()
         self._template: object | None = None
         self.confirmed_labels: list[str] = []
+        self.selection_request: str = ""
+        self.interrogation_records: dict[str, list[dict]] = {}
+        self.interrogation_stale = False
+        self.run_settings = None
         self.knowledge_pack_path: str | None = None
         self.knowledge_pack_name: str | None = None
         self.knowledge_pack_notes_path: str | None = None
@@ -154,3 +159,160 @@ class BatchView:
     @template.setter
     def template(self, value: object) -> None:
         self._template = value
+
+    def load_template(self, template: object) -> None:
+        """Start a new batch from a saved template without bypassing Triage."""
+        self._template = template
+        self.selection_request = str(getattr(template, "selection_request", "") or "")
+        self.confirmed_labels = []
+        self.interrogation_records = {}
+        self.interrogation_stale = False
+        self.run_settings = None
+        self.interrogation_settings = {}
+        guide_path = getattr(template, "guide_path", None)
+        if guide_path and Path(guide_path).is_file():
+            from core.knowledge import KnowledgePack
+
+            pack = KnowledgePack.load(guide_path)
+            self.knowledge_pack_path = str(guide_path)
+            self.knowledge_pack_name = pack.name
+            self.knowledge_pack_notes_path = (
+                str(Path(guide_path).with_suffix(".md"))
+                if Path(guide_path).with_suffix(".md").exists()
+                else None
+            )
+            self.knowledge_pack_defaults = pack.batch_defaults.model_dump()
+            self.knowledge_guidance_active = True
+        elif guide_path:
+            self.knowledge_pack_path = None
+            self.knowledge_pack_name = getattr(template, "guide_name", None) or Path(guide_path).stem
+            self.knowledge_pack_notes_path = None
+            self.knowledge_pack_defaults = {}
+            self.knowledge_guidance_active = False
+
+        # Rebuild views that render template/session values.
+        for index in (0, 1, 2, 3):
+            existing = self._step_views[index]
+            if existing and hasattr(existing, "frame"):
+                existing.frame.destroy()
+            self._step_views[index] = None
+        self._show_step(0)
+
+    def begin_run(self, config: dict) -> object:
+        """Freeze the configuration that produces an interrogation result."""
+        from core.batch_session import BatchRunSettings, capture_guide, write_snapshot
+
+        step_import = self._step_views[0]
+        input_folder = getattr(step_import, "input_folder", None) if step_import else None
+        output_directory = str(
+            self.app.prefs.get(
+                "output_directory", str(Path.home() / "Desktop" / "skiagrafia_out")
+            )
+        )
+        guide_path = config.get("guide_path")
+        guide_name, guide_fingerprint, guide_toml = capture_guide(guide_path)
+        self.run_settings = BatchRunSettings(
+            input_folder=input_folder or "",
+            output_directory=output_directory,
+            selection_request=str(config.get("selection_request", "")),
+            guide_path=guide_path,
+            guide_name=self.knowledge_pack_name or guide_name,
+            guide_fingerprint=guide_fingerprint,
+            guide_toml=guide_toml,
+            interrogation_settings=dict(config),
+            output_settings={
+                key: config.get(key)
+                for key in ("output_mode", "recursion_depth", "vtracer_quality")
+            },
+        )
+        self.interrogation_stale = False
+        write_snapshot(self.run_settings.run_dir / "run.json", self.run_settings)
+        return self.run_settings
+
+    def invalidate_interrogation(self) -> None:
+        """Invalidate candidates and Triage approval after request edits."""
+        self.interrogation_stale = True
+        self.interrogation_records = {}
+        self.confirmed_labels = []
+        step_interrogate = self._step_views[2]
+        if step_interrogate and hasattr(step_interrogate, "_clear_results"):
+            step_interrogate._clear_results()
+        step_triage = self._step_views[3]
+        if step_triage and hasattr(step_triage, "populate"):
+            step_triage.populate({})
+
+    def store_interrogation_records(self, records: dict[str, list[dict]]) -> None:
+        self.interrogation_records = {path: list(items) for path, items in records.items()}
+        self.interrogation_stale = False
+        if self.run_settings is None:
+            return
+        from core.batch_session import BatchInterrogationSnapshot, write_snapshot
+
+        write_snapshot(
+            self.run_settings.run_dir / "interrogation.json",
+            BatchInterrogationSnapshot(
+                batch_id=self.run_settings.batch_id,
+                selection_request=self.run_settings.selection_request,
+                candidates_by_image=self.interrogation_records,
+            ),
+        )
+
+    def store_triage_decision(self, approved_labels: list[str]) -> None:
+        self.confirmed_labels = list(approved_labels)
+        if self.run_settings is None:
+            return
+        from core.batch_session import BatchTriageSnapshot, write_snapshot
+
+        write_snapshot(
+            self.run_settings.run_dir / "triage.json",
+            BatchTriageSnapshot(
+                batch_id=self.run_settings.batch_id,
+                selection_request=self.run_settings.selection_request,
+                approved_labels=approved_labels,
+            ),
+        )
+
+    def labels_for_image(self, image_path: str) -> tuple[list[str], dict[str, str]]:
+        """Intersect human-approved labels with candidates from this image only."""
+        approved = set(self.confirmed_labels)
+        labels: list[str] = []
+        selections: dict[str, str] = {}
+        for item in self.interrogation_records.get(image_path, []):
+            canonical = str(item.get("canonical_label") or item.get("label") or "")
+            if canonical and canonical in approved and canonical not in labels:
+                labels.append(canonical)
+                selections[canonical] = str(item.get("selection", "all"))
+        return labels, selections
+
+    def load_run_settings(self, settings: object) -> None:
+        """Restore a historical request and guide context into a new editable batch."""
+        self._template = None
+        self.selection_request = str(getattr(settings, "selection_request", "") or "")
+        self.confirmed_labels = []
+        self.interrogation_records = {}
+        self.interrogation_stale = True
+        # Restoring a run starts a new, editable batch; it must never append
+        # outputs to the historical run directory.
+        self.run_settings = None
+        self.interrogation_settings = dict(
+            getattr(settings, "interrogation_settings", {}) or {}
+        )
+        guide_path = getattr(settings, "guide_path", None)
+        self.knowledge_pack_name = getattr(settings, "guide_name", None)
+        if guide_path and Path(guide_path).is_file():
+            from core.knowledge import KnowledgePack
+
+            pack = KnowledgePack.load(guide_path)
+            self.knowledge_pack_path = str(guide_path)
+            self.knowledge_pack_name = pack.name
+            self.knowledge_pack_defaults = pack.batch_defaults.model_dump()
+            self.knowledge_guidance_active = True
+        else:
+            self.knowledge_pack_path = None
+            self.knowledge_pack_defaults = {}
+            self.knowledge_guidance_active = False
+        for index in (1, 2, 3):
+            existing = self._step_views[index]
+            if existing and hasattr(existing, "frame"):
+                existing.frame.destroy()
+            self._step_views[index] = None

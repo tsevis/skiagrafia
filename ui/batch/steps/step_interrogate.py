@@ -24,6 +24,7 @@ class StepInterrogate:
         self._root = view.root
         self._queue: queue.Queue = queue.Queue()
         self._tags: dict[str, dict] = {}
+        self._interrogated_request: str | None = None
 
         self.frame = ttk.Frame(parent, padding=16)
 
@@ -83,10 +84,12 @@ class StepInterrogate:
 
     def _on_start(self) -> None:
         """Gather image paths from the import step and launch interrogation."""
-        self._start_btn.config(state="disabled", text="Analysing...")
-        self._view._bottom_bar.set_status("Analysing batch...", "#FF9F0A")
-        self._view._bottom_bar.set_progress(0, 1)
-
+        step_configure = self._view._step_views[1]
+        config = (
+            step_configure.get_config()
+            if step_configure and hasattr(step_configure, "get_config")
+            else {}
+        )
         # Collect image paths from step 1 (StepImport)
         step_import = self._view._step_views[0]
         image_paths: list[str] = []
@@ -100,6 +103,24 @@ class StepInterrogate:
             self._view._bottom_bar.set_progress(0, 1)
             return
 
+        request = str(config.get("selection_request", ""))
+        # A changed request defines a different semantic run.  Do not let old
+        # tags or triage choices look valid for this new interpretation.
+        if self._tags and request != self._interrogated_request:
+            self._clear_results()
+            self._view.interrogation_records = {}
+            self._view.confirmed_labels = []
+        else:
+            # Re-running with the same request replaces, rather than adds to,
+            # the previous candidate set.
+            self._clear_results()
+            self._view.interrogation_records = {}
+            self._view.confirmed_labels = []
+
+        self._view.begin_run(config)
+        self._start_btn.config(state="disabled", text="Analysing...")
+        self._view._bottom_bar.set_status("Analysing batch...", "#FF9F0A")
+        self._view._bottom_bar.set_progress(0, 1)
         self.start_interrogation(image_paths)
 
     def start_interrogation(
@@ -130,9 +151,11 @@ class StepInterrogate:
                             "enable_tiled_fallback",
                             self._app.prefs.get("enable_tiled_fallback", True),
                         ),
+                        "selection_request": settings_config.get("selection_request", ""),
                     },
                 )
             )
+            records: dict[str, list[dict]] = {}
 
             for i, path in enumerate(image_paths):
                 try:
@@ -150,15 +173,19 @@ class StepInterrogate:
                             "role": candidate.role,
                             "confidence": candidate.confidence,
                             "source_model": candidate.source_model,
+                            "selection": candidate.selection,
+                            "parent": candidate.parent,
                         }
                         for candidate in detected.candidates
                     ]
-                    self._queue.put(("progress", (i + 1, total, labels)))
+                    records[path] = labels
+                    self._queue.put(("progress", (path, i + 1, total, labels)))
                 except Exception as exc:
                     logger.error("Interrogation failed for %s: %s", path, exc)
-                    self._queue.put(("progress", (i + 1, total, [])))
+                    records[path] = []
+                    self._queue.put(("progress", (path, i + 1, total, [])))
 
-            self._queue.put(("complete", None))
+            self._queue.put(("complete", records))
 
         threading.Thread(target=_worker, daemon=True).start()
         self._poll_queue()
@@ -167,7 +194,7 @@ class StepInterrogate:
         try:
             msg_type, data = self._queue.get_nowait()
             if msg_type == "progress":
-                done, total, labels = data
+                image_path, done, total, labels = data
                 elapsed_text = f"~{max(1, (total - done) * 150 // 1000)}s remaining"
                 self._progress_label.config(
                     text=f"{done} / {total} \u00b7 {elapsed_text}"
@@ -178,8 +205,10 @@ class StepInterrogate:
                     "#FF9F0A",
                 )
                 self._view._bottom_bar.set_progress(done, total)
-                self._add_tags(labels)
+                self._add_tags(labels, image_path)
             elif msg_type == "complete":
+                self._view.store_interrogation_records(data)
+                self._interrogated_request = self._view.selection_request
                 self._progress_label.config(text="Interrogation complete")
                 self._start_btn.config(state="normal", text="Re-run Analysis")
                 self._view._bottom_bar.set_status("Review labels in Triage", "#007AFF")
@@ -189,14 +218,23 @@ class StepInterrogate:
             pass
         self._root.after(100, self._poll_queue)
 
-    def _add_tags(self, labels: list[dict]) -> None:
+    def _clear_results(self) -> None:
+        self._tags.clear()
+        for widget in self._tag_cloud.winfo_children():
+            widget.destroy()
+
+    def _add_tags(self, labels: list[dict], image_path: str | None = None) -> None:
         """Add new tags to the tag cloud."""
         for label_data in labels:
             label = label_data.get("label", "")
             key = label_data.get("canonical_label", label)
             role = label_data.get("role", "parent")
-            if label and key not in self._tags:
-                self._tags[key] = label_data
+            if not label:
+                continue
+            if key not in self._tags:
+                stored = dict(label_data)
+                stored["image_paths"] = set()
+                self._tags[key] = stored
                 colours = TAG_COLOURS.get(role, TAG_COLOURS["parent"])
                 pill = tk.Label(
                     self._tag_cloud,
@@ -209,6 +247,18 @@ class StepInterrogate:
                     pady=2,
                 )
                 pill.pack(side=tk.LEFT, padx=2, pady=2)
+                self._tags[key]["pill"] = pill
+            if image_path:
+                self._tags[key]["image_paths"].add(image_path)
+            count = len(self._tags[key]["image_paths"])
+            self._tags[key]["image_count"] = count
+            pill = self._tags[key].get("pill")
+            if pill:
+                pill.config(text=f"{label} · {count}")
 
     def get_all_tags(self) -> dict[str, dict]:
-        return dict(self._tags)
+        result: dict[str, dict] = {}
+        for key, value in self._tags.items():
+            copied = {k: v for k, v in value.items() if k not in {"pill", "image_paths"}}
+            result[key] = copied
+        return result

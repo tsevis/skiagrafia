@@ -147,10 +147,15 @@ class StepProgress:
         from core.factory import build_capabilities, build_knowledge_pack
         from core.orchestrator import Orchestrator
 
-        output_dir = Path(
-            self._app.prefs.get(
-                "output_directory",
-                str(Path.home() / "Desktop" / "skiagrafia_out"),
+        run = self._view.run_settings
+        output_dir = (
+            run.run_dir
+            if run is not None
+            else Path(
+                self._app.prefs.get(
+                    "output_directory",
+                    str(Path.home() / "Desktop" / "skiagrafia_out"),
+                )
             )
         )
         output_dir.mkdir(parents=True, exist_ok=True)
@@ -178,7 +183,15 @@ class StepProgress:
             img_id = Path(path).stem
             self._queue.put(("status", (img_id, "running")))
             try:
-                result = orchestrator.process(path, confirmed_labels)
+                # Triage approves a label globally, but it is applied only to
+                # images where semantic interrogation actually proposed it.
+                if self._view.interrogation_records:
+                    labels, selections = self._view.labels_for_image(path)
+                    caps.interrogator.set_confirmed_selections(selections)
+                    result = orchestrator.process(path, labels)
+                else:
+                    # Backward-compatible path for an old/incomplete batch.
+                    result = orchestrator.process(path, confirmed_labels)
                 status = "failed" if result.error else "complete"
             except Exception as exc:
                 logger.error("Batch failed for %s: %s", path, exc)
