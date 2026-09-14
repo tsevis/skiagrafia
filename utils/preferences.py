@@ -46,6 +46,14 @@ DEFAULT_PREFERENCES: dict[str, Any] = {
     "models_directory": "",  # empty = use default ~/ai/claudecode/mozaix/models
     "preferred_fallback_vlm": "gemma4:e4b",
     "preferred_text_reasoner": "gemma4:e4b",
+    "local_primary_model": "Qwen3-VL-8B-Instruct",
+    "local_fallback_model": "gemma-4-12B-it",
+    "segmentation_backend": "auto",
+    "sam3_confidence": 0.5,
+    "quality_profile": "balanced",
+    "preserve_path_detail": True,
+    "object_prompt": "",
+    "discover_parts": True,
     # Pipeline
     "sam_box_threshold": 0.35,
     "sam_text_threshold": 0.25,

@@ -413,7 +413,7 @@ class TestStartSuccessPath:
         runner._executor.drain()
 
         assert isinstance(runner._executor, FakeExecutor)
-        assert runner._executor.max_workers == 2
+        assert runner._executor.max_workers == (1 if sys.platform == "darwin" else 2)
         runner.close()
 
 
