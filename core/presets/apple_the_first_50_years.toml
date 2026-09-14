@@ -1,0 +1,200 @@
+[domain]
+name = "Apple — The First 50 Years"
+description = "Historical editorial imagery about Apple Inc. from 1976 to 2026. The collection includes Apple computers, consumer devices, prototypes, peripherals, circuit boards, packaging, logos, retail environments, offices, historical documents, advertisements, diagrams, and people associated with Apple."
+exclusions = ["captions", "headlines", "paragraphs", "printed text", "diagrams", "charts", "screenshots", "photographs printed inside another photograph", "page backgrounds", "decorative borders"]
+
+[batch_defaults]
+enable_tiling = true
+max_aliases_per_object = 4
+
+[[objects]]
+canonical = "Apple computer"
+aliases = ["Apple desktop computer", "Apple personal computer"]
+generic_terms = ["computer", "desktop computer"]
+description = "Apple computer hardware shown as a standalone physical product"
+parts = ["screen", "buttons", "ports", "speakers", "casing", "cables", "connectors", "circuit board", "removable accessory"]
+detector_phrases = ["Apple computer", "desktop computer"]
+
+[[objects]]
+canonical = "Macintosh computer"
+aliases = ["Mac", "Macintosh"]
+generic_terms = ["computer", "desktop computer"]
+description = "historical Apple Macintosh computer"
+parts = ["screen", "buttons", "ports", "speakers", "casing", "cables", "connectors"]
+detector_phrases = ["Macintosh computer", "Mac computer"]
+
+[[objects]]
+canonical = "Apple II computer"
+aliases = ["Apple II", "Apple 2"]
+generic_terms = ["computer", "desktop computer"]
+description = "Apple II personal computer"
+parts = ["keyboard", "ports", "casing", "cables", "connectors", "circuit board"]
+detector_phrases = ["Apple II computer", "Apple II"]
+
+[[objects]]
+canonical = "iMac"
+aliases = ["Apple iMac"]
+generic_terms = ["all in one computer", "desktop computer"]
+description = "Apple iMac computer"
+parts = ["screen", "buttons", "ports", "speakers", "casing", "cables", "connectors"]
+detector_phrases = ["iMac", "Apple iMac"]
+
+[[objects]]
+canonical = "iPhone"
+aliases = ["Apple iPhone"]
+generic_terms = ["smartphone", "mobile phone"]
+description = "Apple iPhone device"
+parts = ["screen", "buttons", "ports", "speakers", "casing", "connectors"]
+detector_phrases = ["iPhone", "Apple phone"]
+
+[[objects]]
+canonical = "iPad"
+aliases = ["Apple iPad"]
+generic_terms = ["tablet", "tablet computer"]
+description = "Apple iPad tablet"
+parts = ["screen", "buttons", "ports", "speakers", "casing", "connectors"]
+detector_phrases = ["iPad", "Apple tablet"]
+
+[[objects]]
+canonical = "iPod"
+aliases = ["Apple iPod"]
+generic_terms = ["music player", "portable media player"]
+description = "Apple iPod device"
+parts = ["screen", "buttons", "ports", "casing", "connectors"]
+detector_phrases = ["iPod", "Apple music player"]
+
+[[objects]]
+canonical = "Apple Watch"
+aliases = ["Apple smartwatch"]
+generic_terms = ["smartwatch", "watch"]
+description = "Apple Watch wearable"
+parts = ["screen", "buttons", "casing", "removable accessory"]
+detector_phrases = ["Apple Watch", "smartwatch"]
+
+[[objects]]
+canonical = "AirPods"
+aliases = ["Apple AirPods"]
+generic_terms = ["wireless earbuds", "earbuds"]
+description = "Apple wireless earphones or charging case"
+parts = ["casing", "connectors", "removable accessory"]
+detector_phrases = ["AirPods", "wireless earbuds"]
+
+[[objects]]
+canonical = "Newton device"
+aliases = ["Apple Newton", "Newton MessagePad"]
+generic_terms = ["PDA", "handheld computer"]
+description = "Apple Newton prototype or personal digital assistant"
+parts = ["screen", "buttons", "ports", "casing"]
+detector_phrases = ["Apple Newton", "Newton device"]
+
+[[objects]]
+canonical = "keyboard"
+aliases = ["Apple keyboard"]
+generic_terms = ["computer keyboard"]
+description = "standalone Apple keyboard peripheral"
+parts = ["buttons", "cables", "connectors", "casing"]
+detector_phrases = ["computer keyboard", "Apple keyboard"]
+
+[[objects]]
+canonical = "computer mouse"
+aliases = ["Apple mouse"]
+generic_terms = ["mouse"]
+description = "standalone computer mouse peripheral"
+parts = ["buttons", "cables", "connectors", "casing"]
+detector_phrases = ["computer mouse", "Apple mouse"]
+
+[[objects]]
+canonical = "CRT monitor"
+aliases = ["CRT display", "Apple monitor"]
+generic_terms = ["computer monitor", "display"]
+description = "standalone cathode ray tube computer monitor"
+parts = ["screen", "buttons", "ports", "speakers", "casing", "cables"]
+detector_phrases = ["CRT monitor", "computer monitor"]
+
+[[objects]]
+canonical = "printer"
+aliases = ["Apple printer"]
+generic_terms = ["computer printer"]
+description = "Apple printer peripheral"
+parts = ["buttons", "ports", "casing", "cables", "connectors"]
+detector_phrases = ["printer", "Apple printer"]
+
+[[objects]]
+canonical = "circuit board"
+aliases = ["motherboard", "logic board"]
+generic_terms = ["printed circuit board", "PCB"]
+description = "visible electronic circuit board"
+parts = ["microchip", "ports", "connectors", "cables"]
+detector_phrases = ["circuit board", "logic board"]
+
+[[objects]]
+canonical = "microchip"
+aliases = ["integrated circuit", "processor chip"]
+generic_terms = ["computer chip", "chip"]
+description = "visible electronic microchip"
+parts = []
+detector_phrases = ["microchip", "integrated circuit"]
+
+[[objects]]
+canonical = "prototype device"
+aliases = ["Apple prototype"]
+generic_terms = ["electronic prototype", "prototype"]
+description = "experimental Apple hardware prototype"
+parts = ["screen", "buttons", "ports", "speakers", "casing", "cables", "connectors"]
+detector_phrases = ["prototype device", "Apple prototype"]
+
+[[objects]]
+canonical = "product box"
+aliases = ["Apple packaging", "Apple box"]
+generic_terms = ["retail box", "product packaging"]
+description = "Apple product box or retail packaging"
+parts = []
+detector_phrases = ["product box", "Apple packaging"]
+
+[[objects]]
+canonical = "Apple logo"
+aliases = ["Apple Inc logo"]
+generic_terms = ["logo"]
+description = "visible Apple corporate logo"
+parts = []
+detector_phrases = ["Apple logo", "Apple Inc logo"]
+
+[[objects]]
+canonical = "Steve Jobs"
+aliases = ["Steven Jobs"]
+generic_terms = ["person", "man"]
+description = "Steve Jobs shown as a person"
+parts = []
+detector_phrases = ["Steve Jobs", "person"]
+
+[[objects]]
+canonical = "Steve Wozniak"
+aliases = ["Woz", "Stephen Wozniak"]
+generic_terms = ["person", "man"]
+description = "Steve Wozniak shown as a person"
+parts = []
+detector_phrases = ["Steve Wozniak", "person"]
+
+[[objects]]
+canonical = "Apple employee"
+aliases = ["Apple staff member"]
+generic_terms = ["person", "people"]
+description = "person associated with Apple"
+parts = []
+detector_phrases = ["person", "people"]
+
+[[objects]]
+canonical = "Apple Store"
+aliases = ["Apple retail store"]
+generic_terms = ["retail environment", "store interior"]
+description = "Apple retail environment"
+parts = []
+detector_phrases = ["Apple Store", "retail store"]
+
+[[objects]]
+canonical = "Apple building"
+aliases = ["Apple office", "Apple headquarters"]
+generic_terms = ["building", "office building"]
+description = "Apple office or corporate building"
+parts = []
+detector_phrases = ["Apple building", "office building"]

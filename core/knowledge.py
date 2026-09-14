@@ -13,6 +13,7 @@ logger = logging.getLogger(__name__)
 class KnowledgeDomain(BaseModel):
     name: str = ""
     description: str = ""
+    exclusions: list[str] = Field(default_factory=list)
 
 
 class BatchGuideDefaults(BaseModel):
@@ -100,8 +101,10 @@ class KnowledgePack(BaseModel):
             "[domain]",
             f'name = "{_toml_escape(self.domain.name)}"',
             f'description = "{_toml_escape(self.domain.description)}"',
-            "",
         ]
+        if self.domain.exclusions:
+            lines.append(f"exclusions = {_toml_list(self.domain.exclusions)}")
+        lines.append("")
 
         defaults = self.batch_defaults
         if (
@@ -155,6 +158,7 @@ def build_knowledge_pack(
     path: str | Path,
     domain_name: str,
     domain_description: str = "",
+    domain_exclusions: list[str] | None = None,
     object_specs: list[dict[str, object]] | None = None,
     preferred_vlm: str | None = None,
     fallback_vlms: list[str] | None = None,
@@ -168,7 +172,11 @@ def build_knowledge_pack(
     ]
     return KnowledgePack(
         path=str(path),
-        domain=KnowledgeDomain(name=domain_name, description=domain_description),
+        domain=KnowledgeDomain(
+            name=domain_name,
+            description=domain_description,
+            exclusions=domain_exclusions or [],
+        ),
         objects=objects,
         batch_defaults=BatchGuideDefaults(
             preferred_vlm=preferred_vlm,

@@ -46,6 +46,8 @@ class BatchTemplate(BaseModel):
     preferred_vlm: str | None = None
     text_reasoner_model: str | None = None
     enable_tiled_fallback: bool = True
+    selection_request: str = ""
+    guide_name: str | None = None
 
     def save(self) -> Path:
         d = Path.home() / ".config" / "skiagrafia" / "templates"
@@ -61,15 +63,20 @@ class BatchTemplate(BaseModel):
 
     @classmethod
     def list_all(cls) -> list[BatchTemplate]:
+        return [template for _path, template in cls.list_all_with_paths()]
+
+    @classmethod
+    def list_all_with_paths(cls) -> list[tuple[Path, BatchTemplate]]:
+        """Return usable templates with their source paths for UI actions."""
         d = Path.home() / ".config" / "skiagrafia" / "templates"
         if not d.exists():
             return []
-        templates: list[BatchTemplate] = []
+        templates: list[tuple[Path, BatchTemplate]] = []
         for p in sorted(
             d.glob("*.json"), key=lambda p: p.stat().st_mtime, reverse=True
         ):
             try:
-                templates.append(cls.load(p))
+                templates.append((p, cls.load(p)))
             except Exception:
                 # One unreadable template must not hide every other one.
                 logger.warning("Skipping unreadable template %s", p, exc_info=True)

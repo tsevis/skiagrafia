@@ -84,6 +84,8 @@ class InterrogationSettings:
     composition_first: bool = True
     enable_tiling: bool = True
     max_aliases_per_object: int = 4
+    selection_request: str = ""
+    # Legacy alias retained for callers from the first Single-mode release.
     user_prompt: str = ""
     discover_parts: bool = True
     selections: dict[str, str] | None = None
@@ -234,6 +236,10 @@ class GuidedInterrogator:
             confidence_summary=confidence_summary,
         )
 
+    def set_confirmed_selections(self, selections: dict[str, str]) -> None:
+        """Apply a per-image instance policy for the next confirmed-label pass."""
+        self._settings.selections = dict(selections)
+
     def _run_vision_stage(
         self,
         image: NDArray[np.uint8],
@@ -253,7 +259,7 @@ class GuidedInterrogator:
 
         raw_responses[f"{prompt_style}:{model}"] = response
         selections = {}
-        if self._settings.user_prompt:
+        if self._selection_request:
             try:
                 content = response.strip().removeprefix("```json").removeprefix("```").removesuffix("```").strip()
                 objects = json.loads(content)["objects"]
@@ -278,8 +284,14 @@ class GuidedInterrogator:
             )
             for label in labels
         ]
-        for candidate in candidates:
-            candidate.selection = selections.get(candidate.display_label, "all")
+        for source_label, candidate in zip(labels, candidates, strict=True):
+            candidate.selection = selections.get(
+                source_label,
+                selections.get(
+                    candidate.display_label,
+                    selections.get(candidate.canonical_label, "all"),
+                ),
+            )
         return candidates
 
     def _get_client(self, model: str) -> BaseVLMClient:
@@ -298,16 +310,6 @@ class GuidedInterrogator:
         knowledge_pack: KnowledgePack | None,
         prompt_style: str,
     ) -> str:
-        if self._settings.user_prompt:
-            return (
-                "Select the visible objects requested by the user. Exclude everything they ask to omit. "
-                "Use short concrete noun phrases retaining color/material attributes. "
-                "Do not include counts in labels. Separate distinct object types; repeated instances share a label. "
-                "For left/right/largest/smallest requests use selection leftmost/rightmost/largest/smallest; otherwise all. "
-                'Return ONLY JSON: {"objects":[{"label":"object name","selection":"all"}]}. '
-                'Return {"objects":[]} when nothing requested is visible. '
-                f"User request: {json.dumps(self._settings.user_prompt)}"
-            )
         domain_prefix = ""
         if knowledge_pack and knowledge_pack.domain.name:
             domain_prefix = (
@@ -319,15 +321,37 @@ class GuidedInterrogator:
         exemplars = ""
         if knowledge_pack and knowledge_pack.objects:
             sample_terms: list[str] = []
-            for obj in knowledge_pack.objects[:6]:
+            for obj in knowledge_pack.objects:
                 sample_terms.append(obj.canonical)
                 sample_terms.extend(obj.aliases[:1])
             exemplar_text = ", ".join(dict.fromkeys(sample_terms))
             exemplars = f"Possible object families include: {exemplar_text}. "
 
+        exclusions = ""
+        if knowledge_pack and knowledge_pack.domain.exclusions:
+            exclusions = (
+                "Never select these domain exclusions: "
+                + ", ".join(knowledge_pack.domain.exclusions)
+                + ". "
+            )
+
+        if self._selection_request:
+            return (
+                f"{domain_prefix}{domain_desc}{exemplars}{exclusions}"
+                "Select only visible objects that satisfy the batch Selection Request. "
+                "The Domain Guide provides naming and detector vocabulary; the Selection Request "
+                "controls what is in or out for this batch. Apply both sets of exclusions. "
+                "Use short concrete noun phrases retaining useful color or material attributes. "
+                "Do not include counts in labels. Separate distinct object types; repeated instances share a label. "
+                "For left/right/largest/smallest requests use selection leftmost/rightmost/largest/smallest; otherwise all. "
+                'Return ONLY JSON: {"objects":[{"label":"object name","selection":"all"}]}. '
+                'Return {"objects":[]} when nothing requested is visible. '
+                f"Selection Request: {json.dumps(self._selection_request)}"
+            )
+
         if prompt_style == "composition":
             return (
-                f"{domain_prefix}{domain_desc}{exemplars}"
+                f"{domain_prefix}{domain_desc}{exemplars}{exclusions}"
                 "Name each separate visible foreground object type. Do not merge touching or stacked objects into a group. "
                 "Include small recognizable objects. Exclude scenery and empty spaces. "
                 "If the exact specialist term is unknown, use short visual nouns based on shape, material, or purpose. "
@@ -335,18 +359,23 @@ class GuidedInterrogator:
             )
         if prompt_style == "guided":
             return (
-                f"{domain_prefix}{domain_desc}{exemplars}"
+                f"{domain_prefix}{domain_desc}{exemplars}{exclusions}"
                 "Identify the main foreground objects. "
                 "If the exact specialist term is unknown, reply with concrete visual nouns. "
                 "Prefer simple detector-friendly phrases that describe the visible object plainly. "
                 "Reply only as a comma-separated object list."
             )
         return (
-            f"{domain_prefix}{domain_desc}"
+            f"{domain_prefix}{domain_desc}{exclusions}"
             "List the main foreground objects in this image. "
             "Reply only as a comma-separated list of object names. "
             "If the exact name is unknown, use simple visual nouns."
         )
+
+    @property
+    def _selection_request(self) -> str:
+        """Return the explicit request, with the legacy Single alias as fallback."""
+        return self._settings.selection_request.strip() or self._settings.user_prompt.strip()
 
     def _knowledge_seed_candidates(
         self, knowledge_pack: KnowledgePack | None

@@ -103,6 +103,19 @@ class TestKnowledgePackName:
         assert pack.name == "skiagrafia_guide"
 
 
+def test_domain_exclusions_round_trip_in_toml(tmp_path: Path) -> None:
+    pack = build_knowledge_pack(
+        path=tmp_path / "guide.toml",
+        domain_name="Editorial book",
+        domain_exclusions=["captions", "printed text"],
+    )
+    pack.save(pack.path)
+
+    restored = KnowledgePack.load(pack.path)
+
+    assert restored.domain.exclusions == ["captions", "printed text"]
+
+
 class TestKnowledgePackFindObject:
     def _pack(self) -> KnowledgePack:
         return KnowledgePack(

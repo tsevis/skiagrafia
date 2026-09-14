@@ -135,6 +135,50 @@ class TestConfirmedLabelsPath:
         assert result.children_by_parent.get("chalice") == ["stem", "base"]
 
 
+class TestSelectionRequestPrompt:
+    def test_prompt_combines_request_domain_taxonomy_and_exclusions(self) -> None:
+        pack = KnowledgePack(
+            domain=KnowledgeDomain(
+                name="Apple — The First 50 Years",
+                description="Historical Apple editorial imagery.",
+                exclusions=["captions", "printed text"],
+            ),
+            objects=[ObjectKnowledge(canonical="iMac", aliases=["Apple iMac"])],
+        )
+        interrogator = _make_interrogator(
+            selection_request="Select iMac computers. Exclude diagrams."
+        )
+
+        prompt = interrogator._build_prompt(pack, "primary")
+
+        assert "Apple — The First 50 Years" in prompt
+        assert "Possible object families include: iMac, Apple iMac." in prompt
+        assert "captions, printed text" in prompt
+        assert "Select iMac computers. Exclude diagrams." in prompt
+        assert 'Return ONLY JSON: {"objects"' in prompt
+
+    def test_json_request_keeps_selection_policy_after_taxonomy_canonicalization(self) -> None:
+        pack = KnowledgePack(
+            objects=[ObjectKnowledge(canonical="iPhone", aliases=["Apple phone"])]
+        )
+        interrogator = _make_interrogator(
+            selection_request="Select the largest Apple phone.",
+            fallback_mode="moondream_only",
+            enable_tiling=False,
+        )
+        interrogator._clients["moondream"] = FakeVLMClient(
+            vision_responses={
+                "default": '{"objects":[{"label":"Apple phone","selection":"largest"}]}'
+            }
+        )
+
+        result = interrogator.interrogate(_tiny_image(), knowledge_pack=pack)
+
+        assert [(candidate.canonical_label, candidate.selection) for candidate in result.candidates] == [
+            ("iPhone", "largest")
+        ]
+
+
 # ── interrogate(): escalation chain ──────────────────────────────────────
 
 

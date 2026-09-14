@@ -45,6 +45,9 @@ py-modules = ["main"]
 # from output/scratch directories in a flat layout.
 include = ["core*", "models*", "processors*", "ui*", "utils*"]
 
+[tool.setuptools.package-data]
+"core.presets" = ["*.toml"]
+
 [tool.pytest.ini_options]
 # GUI tests construct real windows on the developer's desktop; they are
 # opt-in only. Run them deliberately with: pytest -m gui
