@@ -8,7 +8,7 @@ from pathlib import Path
 from tkinter import ttk
 from typing import TYPE_CHECKING
 
-from PIL import Image
+from PIL import Image, ImageOps
 
 from core.knowledge import load_knowledge_pack
 from ui.single.left_panel_labels import LabelsSectionMixin
@@ -171,6 +171,7 @@ class LeftPanel(LabelsSectionMixin):
     def _load_image(self, path: str) -> None:
         """Load an image and update the UI."""
         self._image_path = path
+        self._scan_prompt = None
         self._labels = []
         self._render_label_pills()
         p = Path(path)
@@ -179,7 +180,7 @@ class LeftPanel(LabelsSectionMixin):
         self._filename_label.config(text=p.name)
         try:
             img = Image.open(path)
-            w, h = img.size
+            w, h = ImageOps.exif_transpose(img).size
             self._dims_label.config(text=f"{w} x {h} px")
         except Exception:
             self._dims_label.config(text="")
@@ -284,9 +285,11 @@ class LeftPanel(LabelsSectionMixin):
 
     def _process_image(self) -> None:
         """Launch the 10-step orchestrator in a background thread."""
-        if not self._image_path:
+        if not self._image_path or getattr(self, "_work_in_progress", False):
             return
 
+        self._work_in_progress = True
+        self._scan_btn.config(state="disabled")
         self._process_btn.config(state="disabled")
         self._stage_label.pack(fill=tk.X, pady=(4, 0))
         self._process_progress.pack(fill=tk.X, pady=(2, 0))
@@ -299,6 +302,20 @@ class LeftPanel(LabelsSectionMixin):
             if lbl.get("role") == "parent"
         ]
 
+        prompt = self._object_prompt_var.get().strip()
+        prefs = dict(self._app.prefs, object_prompt=prompt,
+                     quality_profile=self._quality_var.get(), discover_parts=self._parts_var.get(),
+                     interrogation_profile={"fast": "fast", "detailed": "deep"}.get(self._quality_var.get(), "balanced"))
+        if self._scan_prompt is not None and prompt != self._scan_prompt:
+            active_labels = []  # A changed request needs fresh interpretation.
+        confirmed = active_labels if active_labels or self._scan_prompt == prompt else None
+        overrides = {"selections": {item["label"]: item.get("selection", "all") for item in self._labels}}
+        corner, length, speckle = self._corner_var.get(), self._length_var.get(), self._speckle_var.get()
+        output_mode = self._get_output_mode()
+        image_path = self._image_path
+        manual_detections = self._view.canvas_panel.get_manual_detections()
+        guide_path, guide_defaults = self._knowledge_pack_path, dict(self._knowledge_pack_defaults)
+
         def _progress_callback(step: int, msg: str) -> None:
             self._progress_queue.put(("progress", (step, msg)))
 
@@ -308,30 +325,32 @@ class LeftPanel(LabelsSectionMixin):
                 from core.orchestrator import Orchestrator
 
                 caps = build_capabilities(
-                    self._app.prefs,
-                    corner_threshold=self._corner_var.get(),
-                    length_threshold=self._length_var.get(),
-                    filter_speckle=self._speckle_var.get(),
-                    knowledge_pack_path=self._knowledge_pack_path,
-                    knowledge_pack_defaults=self._knowledge_pack_defaults,
+                    prefs,
+                    corner_threshold=corner,
+                    length_threshold=length,
+                    filter_speckle=speckle,
+                    interrogation_overrides=overrides,
+                    knowledge_pack_path=guide_path,
+                    knowledge_pack_defaults=guide_defaults,
                 )
                 orch = Orchestrator(
                     capabilities=caps,
-                    output_dir=Path(self._app.prefs.get(
+                    output_dir=Path(prefs.get(
                         "output_directory",
                         str(Path.home() / "Desktop" / "skiagrafia_out"),
                     )),
-                    output_mode=self._get_output_mode(),
-                    bilateral_d=int(self._app.prefs.get("bilateral_filter_d", 9)),
-                    box_threshold=float(self._app.prefs.get("sam_box_threshold", 0.35)),
-                    text_threshold=float(self._app.prefs.get("sam_text_threshold", 0.25)),
+                    output_mode=output_mode,
+                    quality=prefs["quality_profile"],
+                    bilateral_d=int(prefs.get("bilateral_filter_d", 9)),
+                    box_threshold=float(prefs.get("sam_box_threshold", 0.35)),
+                    text_threshold=float(prefs.get("sam_text_threshold", 0.25)),
                     progress_callback=_progress_callback,
-                    knowledge_pack=build_knowledge_pack(self._knowledge_pack_path),
+                    knowledge_pack=build_knowledge_pack(guide_path),
                 )
                 result = orch.process(
-                    self._image_path,
-                    active_labels or None,
-                    manual_detections=self._view.canvas_panel.get_manual_detections(),
+                    image_path,
+                    confirmed,
+                    manual_detections=manual_detections,
                 )
                 self._progress_queue.put(("complete", result))
             except Exception as exc:
@@ -351,13 +370,20 @@ class LeftPanel(LabelsSectionMixin):
                 self._stage_label.config(text=msg)
                 self._root.after(100, self._poll_process_queue)
             elif msg_type == "complete":
-                self._stage_label.config(text="Complete")
+                message = f"Failed: {data.error}" if data.error else (
+                    f"Review: {data.warnings[0]}" if getattr(data, "warnings", []) else "Complete")
+                self._stage_label.config(text=message)
                 self._process_progress["value"] = self._process_progress["maximum"]
                 self._process_btn.config(state="normal")
-                self._view.on_processing_complete(data)
+                self._scan_btn.config(state="normal")
+                self._work_in_progress = False
+                if getattr(data, "image_path", self._image_path) == self._image_path:
+                    self._view.on_processing_complete(data)
             elif msg_type == "error":
                 self._stage_label.config(text=f"Failed: {data}", foreground="red")
                 self._process_btn.config(state="normal")
+                self._scan_btn.config(state="normal")
+                self._work_in_progress = False
         except queue.Empty:
             self._root.after(100, self._poll_process_queue)
 
