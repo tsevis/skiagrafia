@@ -91,7 +91,7 @@ class InterrogationHelpersTests(unittest.TestCase):
             )
         )
         prompt = interrogator._build_prompt(None, "composition")
-        self.assertIn("whole foreground composition", prompt)
+        self.assertIn("Do not merge touching or stacked objects", prompt)
         self.assertIn("main whole objects", prompt)
 
     def test_reasoner_is_skipped_for_fast_high_confidence_results(self) -> None:

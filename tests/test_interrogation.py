@@ -104,7 +104,7 @@ def _candidate(label: str, confidence: float = 0.8, phrases=None) -> Interrogati
 
 
 # Unique substrings per prompt_style (see GuidedInterrogator._build_prompt).
-COMPOSITION_KEY = "Describe the whole foreground composition first"
+COMPOSITION_KEY = "Name each separate visible foreground object type"
 GUIDED_KEY = "Reply only as a comma-separated object list"
 PRIMARY_KEY = "Reply only as a comma-separated list of object names"
 
@@ -146,7 +146,7 @@ class TestEscalationChain:
         result = interrogator.interrogate(_tiny_image())
 
         assert result.escalation_stage == "composition"
-        assert result.confidence_summary == "high-confidence results"
+        assert result.confidence_summary == "object proposals; detection still required"
         assert {c.display_label for c in result.candidates} == {"cross", "chalice"}
         # Only the composition prompt should have been sent.
         assert len(client.vision_calls) == 1
