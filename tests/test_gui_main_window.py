@@ -1,7 +1,8 @@
 """test_gui_main_window.py  --  Windowed tests for the app shell and wizard.
 
-Marked `gui` automatically (via tk_root) and excluded from a plain pytest
-run. Run deliberately with: pytest -m gui
+Marked `gui_integration` automatically (via tk_root) and excluded from a
+plain pytest run. A small explicit `gui` smoke set runs with `pytest -m gui`;
+run every windowed test with `pytest -m "gui or gui_integration"`.
 
 Covers MainWindow (mode switching, view lifecycle, preference application),
 ModeSwitcher, and the first-run SetupWizard.

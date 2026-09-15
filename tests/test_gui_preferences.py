@@ -1,7 +1,8 @@
 """test_gui_preferences.py  --  Windowed tests for Preferences and the guide editor.
 
-Marked `gui` automatically (via tk_root) and excluded from a plain pytest
-run. Run deliberately with: pytest -m gui
+Marked `gui_integration` automatically (via tk_root) and excluded from a
+plain pytest run. A small explicit `gui` smoke set runs with `pytest -m gui`;
+run every windowed test with `pytest -m "gui or gui_integration"`.
 
 ISOLATION IS THE POINT HERE. Unlike the other GUI suites, this window
 *writes* to the user's real configuration: _save calls save_preferences,

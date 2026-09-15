@@ -51,10 +51,14 @@ include = ["core*", "models*", "processors*", "ui*", "utils*"]
 "core.presets" = ["*.toml"]
 
 [tool.pytest.ini_options]
-# GUI tests construct real windows on the developer's desktop; they are
-# opt-in only. Run them deliberately with: pytest -m gui
-addopts = ["-m", "not gui"]
-markers = ["gui: opens real windows; excluded from the default run"]
+# Windowed tests construct real windows on the developer's desktop.  Keep the
+# daily smoke gate deliberately small; run the complete windowed suite only
+# before a release or commit with: pytest -m "gui or gui_integration".
+addopts = ["-m", "not gui and not gui_integration"]
+markers = [
+    "gui: fast real-window smoke test; the fast set stays under five seconds",
+    "gui_integration: full real-window integration test; excluded from the default and smoke runs",
+]
 # find_incomplete_batches deliberately opens a corrupt state.db to prove it
 # skips one. sqlitedict connects from a daemon writer thread, so the failure
 # also surfaces there, asynchronously -- pytest blames whichever test happens

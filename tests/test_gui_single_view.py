@@ -1,10 +1,10 @@
 """test_gui_single_view.py  --  Windowed tests for the Single Image view.
 
-These construct real Tk windows and are therefore marked `gui` (automatically,
-via the tk_root fixture) and excluded from a plain `pytest` run. Run them
-deliberately:
+These construct real Tk windows and are therefore marked `gui_integration`
+automatically (via the tk_root fixture), unless explicitly selected for the
+small `gui` smoke set. Run the complete suite deliberately:
 
-    pytest -m gui
+    pytest -m "gui or gui_integration"
 
 They exist to cover what launching the app cannot: the drawing and event
 methods extracted into canvas_drawing.py, canvas_events.py and

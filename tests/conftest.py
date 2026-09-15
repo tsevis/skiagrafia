@@ -1,31 +1,48 @@
 """Shared pytest configuration.
 
 Keeps window-opening tests out of the default run. A test that constructs a
-real Tk window puts it on the developer's desktop, so such tests are marked
-`gui` automatically — based on the fixtures they request — and excluded by
-the `addopts` in pyproject.toml. Run them deliberately with `pytest -m gui`.
+real Tk window puts it on the developer's desktop, so it is normally marked
+`gui_integration` automatically — based on its fixtures — and excluded by the
+`addopts` in pyproject.toml. A deliberately small, explicitly marked `gui`
+smoke set remains available for fast local feedback.
 """
 from __future__ import annotations
+
+from pathlib import Path
 
 import pytest
 
 # Any test requesting one of these fixtures builds a real window, so it is
-# marked `gui` without the author having to remember the marker.
+# integration coverage unless an author deliberately marks it as fast `gui`.
 GUI_FIXTURE_NAMES = frozenset({"tk_root", "gui_root", "gui_app", "main_window"})
+FAST_GUI_MODULE_NAMES = frozenset({"test_gui_smoke.py"})
+
+
+def pytest_ignore_collect(collection_path: Path, config: pytest.Config) -> bool:
+    """Avoid importing the full test tree for the deliberately tiny smoke gate."""
+    if config.option.markexpr.strip() != "gui":
+        return False
+    return (
+        collection_path.parent.name == "tests"
+        and collection_path.name.startswith("test_")
+        and collection_path.name not in FAST_GUI_MODULE_NAMES
+    )
 
 
 def pytest_collection_modifyitems(
     config: pytest.Config, items: list[pytest.Item]
 ) -> None:
-    """Mark every test that depends on a window-creating fixture as `gui`."""
+    """Classify real-window tests as fast smoke or full integration coverage."""
     for item in items:
         fixtures = frozenset(getattr(item, "fixturenames", ()))
-        if fixtures & GUI_FIXTURE_NAMES:
-            item.add_marker("gui")
+        if fixtures & GUI_FIXTURE_NAMES and item.get_closest_marker("gui") is None:
+            item.add_marker("gui_integration")
 
 # ── GUI fixtures ────────────────────────────────────────────────────────────
-# Requesting any of these auto-marks the test `gui` (see the hook above), so
-# it stays out of a plain `pytest` run. Run them deliberately: pytest -m gui
+# Requesting any of these auto-marks the test `gui_integration` (see the hook
+# above), so it stays out of a plain pytest run. Fast smoke tests explicitly
+# use `@pytest.mark.gui`; run every windowed test with:
+# pytest -m "gui or gui_integration".
 
 
 @pytest.fixture

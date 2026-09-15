@@ -18,6 +18,7 @@ fi
 case "$mode" in
     default) exec "$PYTHON" -m pytest "$@" ;;
     gui) exec "$PYTHON" -m pytest -m gui "$@" ;;
-    all) "$PYTHON" -m pytest "$@"; "$PYTHON" -m pytest -m gui "$@"; "$PYTHON" -m ruff check .; "$PYTHON" -m compileall -q .; "$PYTHON" -m pip check; "$PYTHON" -m pip_audit ;;
-    *) echo "usage: $0 [default|gui|all] [pytest arguments...]" >&2; exit 2 ;;
+    gui-full) exec "$PYTHON" -m pytest -m "gui or gui_integration" "$@" ;;
+    all) "$PYTHON" -m pytest "$@"; "$PYTHON" -m pytest -m "gui or gui_integration" "$@"; "$PYTHON" -m ruff check .; "$PYTHON" -m compileall -q .; "$PYTHON" -m pip check; "$PYTHON" -m pip_audit ;;
+    *) echo "usage: $0 [default|gui|gui-full|all] [pytest arguments...]" >&2; exit 2 ;;
 esac

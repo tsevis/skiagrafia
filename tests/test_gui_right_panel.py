@@ -1,7 +1,8 @@
 """test_gui_right_panel.py  --  Windowed tests for the layers/export panel.
 
-Marked `gui` automatically (via tk_root) and excluded from a plain pytest
-run. Run deliberately with: pytest -m gui
+Marked `gui_integration` automatically (via tk_root) and excluded from a
+plain pytest run. A small explicit `gui` smoke set runs with `pytest -m gui`;
+run every windowed test with `pytest -m "gui or gui_integration"`.
 
 The panel is built by the shared `single_view` fixture, so these drive the
 real widget alongside a real canvas and left panel.
