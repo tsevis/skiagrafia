@@ -23,32 +23,19 @@ if [ -d "/opt/homebrew/lib" ]; then
 fi
 
 # Resolve the interpreter explicitly. A bare `python3` runs whichever comes
-# first on PATH, which can be a system Python that has none of the app's
-# dependencies -- it then dies at its first import, before logging exists.
-# Set SKIAGRAFIA_PYTHON to force a particular interpreter or virtualenv.
+# first on PATH, which can be a system Python with unrelated packages.  The
+# normal launcher and verification runner both use .venv; SKIAGRAFIA_PYTHON is
+# retained only for an intentionally managed, explicitly selected runtime.
 if [ -n "${SKIAGRAFIA_PYTHON:-}" ]; then
-    # An explicit choice is used as given, not second-guessed.
     PYTHON="$SKIAGRAFIA_PYTHON"
 else
-    PYTHON=""
-    for candidate in \
-        "$SCRIPT_DIR/.venv/bin/python3" \
-        "$HOME/miniconda3/bin/python3" \
-        "$(command -v python3 2>/dev/null || true)"
-    do
-        [ -n "$candidate" ] && [ -x "$candidate" ] || continue
-        # find_spec reports availability without paying torch's import cost.
-        if "$candidate" -c 'import importlib.util as u, sys; sys.exit(0 if u.find_spec("torch") and u.find_spec("rich") else 1)' 2>/dev/null; then
-            PYTHON="$candidate"
-            break
-        fi
-    done
+    PYTHON="$SCRIPT_DIR/.venv/bin/python"
 fi
 
-if [ -z "$PYTHON" ] || [ ! -x "$PYTHON" ]; then
-    echo "skiagrafia: no Python with the required dependencies was found." >&2
-    echo "  tried: ./.venv/bin/python3, ~/miniconda3/bin/python3, python3 on PATH" >&2
-    echo "  fix:   export SKIAGRAFIA_PYTHON=/path/to/python3" >&2
+if [ ! -x "$PYTHON" ]; then
+    echo "skiagrafia: project runtime is missing: $PYTHON" >&2
+    echo "  fix: uv sync --locked --group dev" >&2
+    echo "  override deliberately with: export SKIAGRAFIA_PYTHON=/path/to/python" >&2
     exit 1
 fi
 

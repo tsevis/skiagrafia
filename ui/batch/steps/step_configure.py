@@ -33,20 +33,18 @@ class StepConfigure:
 
         self._build_selection_request_section()
 
-        # Template override banner
+        # A template is only an initial value set; every field below remains
+        # editable.  State that plainly instead of exposing a no-op override
+        # action.
         if view.template is not None:
             override_frame = ttk.Frame(self.frame)
             override_frame.pack(fill=tk.X, pady=(0, 8))
-            ttk.Label(
+            self._template_status_label = ttk.Label(
                 override_frame,
-                text="Using template settings.",
+                text="Template values are loaded below and remain editable.",
                 foreground="gray",
-            ).pack(side=tk.LEFT)
-            ttk.Button(
-                override_frame,
-                text="Edit / override",
-                command=self._enable_editing,
-            ).pack(side=tk.RIGHT)
+            )
+            self._template_status_label.pack(side=tk.LEFT)
 
         # Output mode cards (checkboxes — user can enable multiple)
         ttk.Label(self.frame, text="Output Mode").pack(anchor=tk.W, pady=(8, 4))
@@ -164,10 +162,6 @@ class StepConfigure:
             self._reasoner_var.set(template.text_reasoner_model)
         if hasattr(template, "enable_tiled_fallback"):
             self._tiled_fallback_var.set(template.enable_tiled_fallback)
-
-    def _enable_editing(self) -> None:
-        """Enable editing when overriding template."""
-        pass
 
     def _build_interrogation_section(self) -> None:
         section = ttk.LabelFrame(self.frame, text="Advanced Interrogation", padding=8)

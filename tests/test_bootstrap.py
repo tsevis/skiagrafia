@@ -251,7 +251,7 @@ class TestIsSetupComplete:
         )
         assert bootstrap.is_setup_complete({}) is False
 
-    def test_never_blocks_app_on_broken_check(
+    def test_inconclusive_check_opens_setup_workflow(
         self, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
     ) -> None:
         def broken(prefs):
@@ -259,7 +259,7 @@ class TestIsSetupComplete:
 
         monkeypatch.setattr(bootstrap, "check_setup", broken)
 
-        assert bootstrap.is_setup_complete({}) is True
+        assert bootstrap.is_setup_complete({}) is False
 
 
 # ── pull_ollama_model ─────────────────────────────────────────────────────

@@ -7,7 +7,6 @@ from tkinter import ttk
 from typing import TYPE_CHECKING
 
 from core.knowledge import load_knowledge_pack
-from core.state_manager import StateManager
 
 if TYPE_CHECKING:
     from ui.batch.batch_view import BatchView
@@ -113,12 +112,21 @@ class StepImport:
         self._recent_list.column("date", width=120)
         self._recent_list.pack(fill=tk.X)
         self._recent_paths: dict[str, Path] = {}
+        self._resumable_items: set[str] = set()
         self._recent_list.bind("<Double-1>", self._load_selected_run)
+        self._recent_list.bind("<<TreeviewSelect>>", self._update_resume_button)
         ttk.Button(
             self.frame,
             text="Load selected run into Configure",
             command=self._load_selected_run,
         ).pack(anchor=tk.W, pady=(6, 0))
+        self._resume_btn = ttk.Button(
+            self.frame,
+            text="Resume selected batch",
+            command=self._resume_selected_run,
+            state="disabled",
+        )
+        self._resume_btn.pack(anchor=tk.W, pady=(4, 0))
 
         self._scan_recent_batches()
 
@@ -173,19 +181,13 @@ class StepImport:
                 str(Path.home() / "Desktop" / "skiagrafia_out"),
             )
         )
-        incomplete = StateManager.find_incomplete_batches(output_dir)
-        for db_path in incomplete[:5]:
-            batch_dir = db_path.parent
-            self._recent_list.insert(
-                "",
-                tk.END,
-                values=(batch_dir.name, "Incomplete", ""),
-            )
-
-        # Immutable run settings make completed and historical batches useful
-        # starting points, not merely status entries.
+        for item in self._recent_list.get_children():
+            self._recent_list.delete(item)
+        self._recent_paths.clear()
+        self._resumable_items.clear()
+        self._resume_btn.config(state="disabled")
         try:
-            from core.batch_session import load_run_settings
+            from core.batch_session import load_resumable_batch, load_run_settings
 
             run_files = sorted(
                 output_dir.glob("*/run.json"),
@@ -198,16 +200,20 @@ class StepImport:
                 except Exception:
                     logger.warning("Skipping unreadable batch run %s", run_file, exc_info=True)
                     continue
+                resumable = load_resumable_batch(run_file.parent)
+                status = "Resume ready" if resumable is not None else "Saved run"
                 item = self._recent_list.insert(
                     "",
                     tk.END,
                     values=(
                         Path(settings.input_folder).name or settings.batch_id,
-                        "Saved run",
+                        status,
                         settings.created_at[:19],
                     ),
                 )
                 self._recent_paths[item] = run_file
+                if resumable is not None:
+                    self._resumable_items.add(item)
         except OSError:
             logger.warning("Could not scan recent batch runs", exc_info=True)
 
@@ -231,6 +237,36 @@ class StepImport:
             self._set_folder(settings.input_folder)
         self._view.load_run_settings(settings)
         self._view.go_to_step(1)
+
+    def _update_resume_button(self, _event: object = None) -> None:
+        selected = self._recent_list.selection()
+        state = "normal" if selected and selected[0] in self._resumable_items else "disabled"
+        self._resume_btn.config(state=state)
+
+    def _resume_selected_run(self) -> None:
+        """Resume only a freshly revalidated, fully triaged GUI batch."""
+        selected = self._recent_list.selection()
+        if not selected:
+            return
+        run_path = self._recent_paths.get(selected[0])
+        if run_path is None:
+            return
+        from core.batch_session import load_resumable_batch
+
+        resumable = load_resumable_batch(run_path.parent)
+        if resumable is None:
+            self._resume_btn.config(state="disabled")
+            logger.warning("Selected run is no longer safe to resume: %s", run_path)
+            return
+        if resumable.run_settings.input_folder and Path(
+            resumable.run_settings.input_folder
+        ).is_dir():
+            self._set_folder(resumable.run_settings.input_folder)
+        self._view.resume_run(resumable)
+        self._view.go_to_step(4)
+        progress_step = self._view._step_views[4]
+        if progress_step and hasattr(progress_step, "resume_existing"):
+            progress_step.resume_existing()
 
     def _update_knowledge_pack(self, folder: Path) -> None:
         pack = load_knowledge_pack(folder)

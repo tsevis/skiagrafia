@@ -21,6 +21,7 @@ from models.vlm_client import (
     BaseVLMClient,
     LlamaCppVLMClient,
     OllamaVLMClient,
+    VLMResponseError,
     _dedupe,
     _split_children_response,
     create_vlm_client,
@@ -146,6 +147,29 @@ class TestLlamaCppClient:
         )
         with pytest.raises(ValueError):
             client.query_text("hello")
+
+    def test_chat_rejects_empty_content_as_an_explicit_response_error(self) -> None:
+        client = LlamaCppVLMClient()
+        client._request_json = (  # type: ignore[method-assign]
+            lambda *a, **k: {"choices": [{"message": {"content": "   "}}]}
+        )
+        with pytest.raises(VLMResponseError, match="non-text"):
+            client.query_text("hello")
+
+    def test_request_json_rejects_malformed_json(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        class _Response:
+            def read(self) -> bytes:
+                return b"{not json"
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *args):
+                return False
+
+        monkeypatch.setattr("models.vlm_client.urllib.request.urlopen", lambda *a, **k: _Response())
+        with pytest.raises(VLMResponseError, match="malformed JSON"):
+            LlamaCppVLMClient()._request_json("/health")
 
     def test_health_check_ok(self) -> None:
         client = LlamaCppVLMClient()

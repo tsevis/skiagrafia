@@ -9,6 +9,22 @@ from processors.output_writer import write_svg, write_tiff
 from processors.vectorizer import assemble_svg
 
 
+def all_objects_alpha(alphas, shape):
+    """Return the alpha union of every accepted layer at *shape*.
+
+    The all-objects asset is deliberately a union, not a stack of body
+    mattes: it must contain every visible object once while preserving soft
+    edges and excluding all pixels outside the accepted masks.  An empty
+    layer set is represented faithfully by a transparent matte, which lets
+    callers create a predictable sidecar without inventing foreground.
+    """
+    if not alphas:
+        return np.zeros(shape, dtype=np.uint8)
+    if any(alpha is None or alpha.shape != shape for alpha in alphas):
+        raise ValueError("All-objects alpha layers must match the source dimensions")
+    return np.maximum.reduce(alphas).astype(np.uint8, copy=False)
+
+
 def body_alpha(parent, children):
     """Alpha for a body that recomposes correctly beneath its visible parts."""
     child = np.maximum.reduce(children).astype(np.float32) / 255
@@ -38,6 +54,20 @@ def save_layer_outputs(result, image=None, icc_profile=None):
                 body_path = path.with_name(f"{path.stem}-body.tiff")
                 write_tiff(image, body_path, body_alpha(layer.alpha, children), icc_profile=icc_profile)
                 files.append(str(body_path))
+    all_objects_path = getattr(result, "all_objects_tiff_path", None)
+    if all_objects_path:
+        # Vector-only runs have no per-layer soft alpha, but still have the
+        # authoritative binary masks.  Use them on a later layer edit rather
+        # than accidentally replacing the sidecar with an empty image.
+        alphas = [layer.alpha for layer in result.layers if layer.alpha is not None]
+        if not alphas:
+            alphas = [layer.mask for layer in result.layers if layer.mask is not None]
+        alpha = all_objects_alpha(
+            alphas,
+            image.shape[:2],
+        )
+        write_tiff(image, Path(all_objects_path), alpha, icc_profile=icc_profile)
+        files.append(str(all_objects_path))
     result.tiff_files = files
 
 

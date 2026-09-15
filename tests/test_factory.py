@@ -220,6 +220,11 @@ class TestBuildCapabilities:
         assert instances[0].models_dir == models_dir
 
 
+def test_explicit_mlx_sam3_is_rejected_on_the_python_312_runtime(tmp_path: Path) -> None:
+    with pytest.raises(RuntimeError, match="Python 3.13"):
+        factory.build_detector(_prefs(tmp_path, segmentation_backend="mlx-sam3"))
+
+
 class TestFactoryBuildKnowledgePack:
     def test_returns_none_when_no_path_given(self) -> None:
         assert factory.build_knowledge_pack(None) is None

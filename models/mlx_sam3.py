@@ -79,7 +79,16 @@ class MLXSAM3:
                     if results:
                         # Spatial order keeps instance naming stable across prompt runs.
                         return sorted(results, key=lambda d: (d.bbox[0], d.bbox[1]))
-                except Exception as exc:
+                except (
+                    AttributeError,
+                    ImportError,
+                    IndexError,
+                    KeyError,
+                    OSError,
+                    RuntimeError,
+                    TypeError,
+                    ValueError,
+                ) as exc:
                     self._failed = True
                     warning = f"MLX SAM 3 unavailable; using GroundingDINO + SAM 2.1: {exc}"
                     self.warnings.append(warning)

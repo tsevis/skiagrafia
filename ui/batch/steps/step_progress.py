@@ -8,6 +8,8 @@ from pathlib import Path
 from tkinter import ttk
 from typing import TYPE_CHECKING
 
+from PIL import Image, ImageOps, ImageTk
+
 from ui.theme import is_macos
 
 logger = logging.getLogger(__name__)
@@ -29,7 +31,13 @@ class StepProgress:
         self._failed = 0
         self._start_time = 0.0
         self._successful_svgs = 0
+        self._all_objects_tiffs = 0
         self._total_layers = 0
+        self._summary_svg_base = 0
+        self._summary_all_objects_base = 0
+        self._summary_layer_total_base = 0.0
+        self._runner = None
+        self._runner_finished = False
 
         self.frame = ttk.Frame(parent, padding=16)
 
@@ -84,6 +92,10 @@ class StepProgress:
         thumb_scrollbar.pack(fill=tk.X)
 
         self._thumb_labels: dict[str, tk.Label] = {}
+        # Tk does not retain PhotoImage instances itself.  Keep explicit
+        # references for as long as the corresponding status cells exist.
+        self._thumb_refs: dict[str, ImageTk.PhotoImage] = {}
+        self._thumb_key_by_source: dict[str, str] = {}
 
         # Start Processing button
         self._start_btn = ttk.Button(
@@ -94,7 +106,7 @@ class StepProgress:
         self._start_btn.pack(anchor=tk.W, pady=(12, 0))
 
     def _on_start(self) -> None:
-        """Collect images and confirmed labels, then launch batch processing."""
+        """Freeze the approved batch, then hand processing to BatchRunner."""
         self._start_btn.config(state="disabled", text="Processing...")
 
         # Get image paths from Step 1
@@ -108,158 +120,126 @@ class StepProgress:
             self._progress_label.config(text="No images — go back to Step 1")
             return
 
-        # Get confirmed labels from Triage (Step 4) or fallback to all
-        confirmed_labels = getattr(self._view, "confirmed_labels", []) or None
+        try:
+            batch_config = self._view.freeze_processing_config(image_paths)
+        except (OSError, ValueError) as exc:
+            self._start_btn.config(state="normal", text="Start Processing")
+            self._progress_label.config(text=str(exc))
+            self._view._bottom_bar.set_status("Batch needs review", "#FF9F0A")
+            return
+        self._start_processing(batch_config)
 
-        # Get config from Step 2
-        step_configure = self._view._step_views[1]
-        config: dict = {}
-        if step_configure and hasattr(step_configure, "get_config"):
-            config = step_configure.get_config()
+    def start_retry(self, image_paths: list[str]) -> None:
+        """Retry exactly the failed inputs while preserving prior successes."""
+        if not image_paths:
+            return
+        self.resume_existing()
 
-        # Init thumbnails
-        image_ids = [Path(p).stem for p in image_paths]
-        self.init_thumbnails(image_ids)
-
-        # Launch processing in background thread
-        self._total = len(image_paths)
-        self._completed = 0
-        self._failed = 0
-        self._successful_svgs = 0
-        self._total_layers = 0
-        self._start_time = time.time()
-
-        import threading
-        threading.Thread(
-            target=self._process_batch,
-            args=(image_paths, confirmed_labels, config),
-            daemon=True,
-        ).start()
-        self._poll_progress()
-
-    def _process_batch(
-        self,
-        image_paths: list[str],
-        confirmed_labels: list[str] | None,
-        config: dict,
-    ) -> None:
-        """Run orchestrator on each image (background thread)."""
-        from core.factory import build_capabilities, build_knowledge_pack
-        from core.orchestrator import Orchestrator
-
+    def resume_existing(self) -> None:
+        """Continue a verified frozen manifest through the shared runner."""
         run = self._view.run_settings
-        output_dir = (
-            run.run_dir
-            if run is not None
-            else Path(
-                self._app.prefs.get(
-                    "output_directory",
-                    str(Path.home() / "Desktop" / "skiagrafia_out"),
+        if run is None:
+            self._progress_label.config(text="No verified batch is available to resume")
+            return
+        try:
+            from core.batch_runner import BatchConfig
+            from core.batch_session import load_resumable_batch
+
+            resumable = load_resumable_batch(run.run_dir)
+            if resumable is None:
+                self._progress_label.config(
+                    text="Cannot resume: saved inputs, guide, or state no longer match"
                 )
-            )
+                return
+            batch_config = BatchConfig.model_validate(resumable.processing.config)
+        except (OSError, ValueError) as exc:
+            self._progress_label.config(text=f"Cannot resume batch: {exc}")
+            return
+        self._start_processing(batch_config)
+
+    def _start_processing(
+        self,
+        batch_config: object,
+    ) -> None:
+        """Initialize GUI state and launch the common durable BatchRunner."""
+        from core.batch_runner import BatchRunner
+
+        self._start_btn.config(state="disabled", text="Processing...")
+        image_paths = list(getattr(batch_config, "input_images", []))
+        self.init_thumbnails(image_paths)
+        self._total = len(image_paths)
+        self._runner_finished = False
+        self._start_time = time.time()
+        self._runner = BatchRunner(
+            batch_config,
+            progress_callback=lambda progress: self._queue.put(("runner_progress", progress)),
+            completion_callback=lambda progress: self._queue.put(("runner_complete", progress)),
+            job_callback=lambda _id, image_path, status: self._queue.put(
+                ("runner_job", (image_path, status.value))
+            ),
         )
-        output_dir.mkdir(parents=True, exist_ok=True)
-
-        quality = {"draft": "fast", "maximum": "detailed", "balanced": "balanced"}.get(
-            config.get("vtracer_quality"), self._app.prefs.get("quality_profile", "balanced"))
-        prefs = dict(self._app.prefs, quality_profile=quality)
-        caps = build_capabilities(
-            prefs,
-            knowledge_pack_path=config.get("guide_path"),
-            interrogation_overrides=self._view.interrogation_settings,
-        )
-        orchestrator = Orchestrator(
-            capabilities=caps,
-            quality=quality,
-            output_dir=output_dir,
-            output_mode=config.get("output_mode", "vector+bitmap"),
-            bilateral_d=int(self._app.prefs.get("bilateral_filter_d", 9)),
-            box_threshold=float(self._app.prefs.get("sam_box_threshold", 0.35)),
-            text_threshold=float(self._app.prefs.get("sam_text_threshold", 0.25)),
-            knowledge_pack=build_knowledge_pack(config.get("guide_path")),
-        )
-
-        for i, path in enumerate(image_paths):
-            img_id = Path(path).stem
-            self._queue.put(("status", (img_id, "running")))
-            try:
-                # Triage approves a label globally, but it is applied only to
-                # images where semantic interrogation actually proposed it.
-                if self._view.interrogation_records:
-                    labels, selections = self._view.labels_for_image(path)
-                    caps.interrogator.set_confirmed_selections(selections)
-                    result = orchestrator.process(path, labels)
-                else:
-                    # Backward-compatible path for an old/incomplete batch.
-                    result = orchestrator.process(path, confirmed_labels)
-                status = "failed" if result.error else "complete"
-            except Exception as exc:
-                logger.error("Batch failed for %s: %s", path, exc)
-                result = None
-                status = "failed"
-
-            if status == "failed":
-                self._failed += 1
-            else:
-                if result and getattr(result, "svg_path", None):
-                    self._successful_svgs += 1
-                if result:
-                    self._total_layers += len(getattr(result, "layers", []))
-            self._completed += 1
-            self._queue.put(("status", (img_id, status)))
-            self._queue.put(("progress", (self._completed, self._total, self._failed)))
-
-        self._queue.put(("done", None))
+        try:
+            self._runner.start()
+        except (OSError, ValueError, RuntimeError) as exc:
+            self._runner.close()
+            self._runner = None
+            self._start_btn.config(state="normal", text="Start Processing")
+            self._progress_label.config(text=f"Cannot start batch: {exc}")
+            return
+        self._poll_progress()
 
     def _poll_progress(self) -> None:
         """Poll the queue for progress updates from the worker thread."""
         try:
             while True:
                 msg_type, data = self._queue.get_nowait()
-                if msg_type == "status":
-                    img_id, status = data
-                    self.update_thumbnail_status(img_id, status)
-                elif msg_type == "progress":
-                    completed, total, failed = data
-                    remaining = total - completed
-                    elapsed = time.time() - self._start_time
-                    speed = completed / (elapsed / 60) if elapsed > 0 else 0
-                    eta = (remaining / speed * 60) if speed > 0 else 0
-                    pct = int(completed / total * 100) if total > 0 else 0
-
-                    self._complete_card._value_label.config(text=str(completed))
-                    self._remaining_card._value_label.config(text=str(remaining))
-                    self._speed_card._value_label.config(text=f"{speed:.1f} img/min")
-                    self._progress_bar["maximum"] = total
-                    self._progress_bar["value"] = completed
-                    eta_min, eta_sec = int(eta // 60), int(eta % 60)
-                    self._progress_label.config(
-                        text=f"{pct}%  \u00b7  ETA: {eta_min}m {eta_sec}s"
+                if msg_type == "runner_job":
+                    image_path, status = data
+                    self.update_thumbnail_status(image_path, status)
+                elif msg_type == "runner_progress":
+                    self.update_progress(data)
+                    self._view._bottom_bar.set_progress(
+                        getattr(data, "completed", 0) + getattr(data, "failed", 0),
+                        max(getattr(data, "total", 0), 1),
                     )
-                elif msg_type == "done":
-                    self._start_btn.config(text="Complete", state="disabled")
-                    self._progress_label.config(text="100%  \u00b7  Complete")
-
-                    svg_count = self._successful_svgs
-                    avg_layers = (
-                        self._total_layers / svg_count if svg_count > 0 else 0.0
-                    )
-                    self._view.output_summary = {
-                        "svg_count": svg_count,
-                        "avg_layers": avg_layers,
-                        "failed_count": self._failed,
-                    }
-
-                    # Update output step summary if the step is already instantiated.
-                    step_output = self._view._step_views[5]
-                    if step_output and hasattr(step_output, "update_summary"):
-                        step_output.update_summary(svg_count, avg_layers, self._failed)
-
-                    self._root.after(1000, lambda: self._view.go_next())
+                elif msg_type == "runner_complete":
+                    self._finish_runner()
                     return
         except queue.Empty:
             pass
         self._root.after(200, self._poll_progress)
+
+    def _finish_runner(self) -> None:
+        """Render durable state metrics only after the common runner finishes."""
+        if self._runner_finished or self._runner is None:
+            return
+        self._runner_finished = True
+        summary = self._runner.summary()
+        self._view.failed_image_paths = list(summary.failed_image_paths)
+        self._view.output_summary = {
+            "svg_count": summary.svg_count,
+            "all_objects_count": summary.all_objects_count,
+            "avg_layers": summary.avg_layers,
+            "failed_count": summary.failed,
+        }
+        for image_path, status in summary.status_by_image.items():
+            self.update_thumbnail_status(image_path, status)
+        self._start_btn.config(text="Complete", state="disabled")
+        self._progress_label.config(text="100%  \u00b7  Complete")
+        self._view._bottom_bar.set_status("Batch complete", "#34C759")
+        self._view._bottom_bar.set_progress(summary.completed + summary.failed, max(summary.total, 1))
+
+        step_output = self._view._step_views[5]
+        if step_output and hasattr(step_output, "update_summary"):
+            step_output.update_summary(
+                summary.svg_count,
+                summary.avg_layers,
+                summary.failed,
+                summary.all_objects_count,
+            )
+        self._runner.close()
+        self._runner = None
+        self._root.after(1000, lambda: self._view.go_next())
 
     def _metric_card(
         self, parent: tk.Widget, title: str, value: str
@@ -274,13 +254,27 @@ class StepProgress:
         card._value_label = label  # type: ignore[attr-defined]
         return card
 
-    def init_thumbnails(self, image_ids: list[str]) -> None:
-        """Create placeholder thumbnails for all images."""
+    def init_thumbnails(self, image_paths_or_ids: list[str]) -> None:
+        """Create source-image thumbnails, with status-cell fallbacks.
+
+        The string-only identifier form is retained for callers that do not
+        have local files available yet (and for the safe empty-state view).
+        """
         for w in self._thumb_frame.winfo_children():
             w.destroy()
         self._thumb_labels.clear()
+        self._thumb_refs.clear()
+        self._thumb_key_by_source.clear()
 
-        for img_id in image_ids:
+        for image_path_or_id in image_paths_or_ids:
+            source_path = Path(image_path_or_id)
+            img_id = source_path.stem if source_path.is_file() else image_path_or_id
+            if img_id in self._thumb_labels:
+                # A batch may legitimately contain a.jpg and a.png.  Keep
+                # the established compact stem for the first cell while
+                # giving later source paths an unambiguous status target.
+                img_id = image_path_or_id
+            photo = self._load_source_thumbnail(source_path) if source_path.is_file() else None
             lbl = tk.Label(
                 self._thumb_frame,
                 text="\u2014",
@@ -291,14 +285,44 @@ class StepProgress:
                 relief="solid",
                 borderwidth=1,
             )
+            if photo is not None:
+                lbl.config(
+                    image=photo,
+                    text="\u2014",
+                    compound=tk.CENTER,
+                    width=0,
+                    height=0,
+                    highlightthickness=1,
+                    highlightbackground="#3a3a3a",
+                )
+                self._thumb_refs[img_id] = photo
             lbl.pack(side=tk.LEFT, padx=1, pady=2)
             self._thumb_labels[img_id] = lbl
+            if source_path.is_file():
+                self._thumb_key_by_source[str(source_path)] = img_id
+
+    @staticmethod
+    def _load_source_thumbnail(source_path: Path) -> ImageTk.PhotoImage | None:
+        """Render a small, orientation-correct source preview for progress."""
+        try:
+            with Image.open(source_path) as image:
+                preview = ImageOps.exif_transpose(image).convert("RGB")
+                preview.thumbnail((48, 48), Image.Resampling.LANCZOS)
+        except (OSError, ValueError) as exc:
+            logger.warning("Could not create batch thumbnail for %s: %s", source_path, exc)
+            return None
+
+        canvas = Image.new("RGB", (48, 48), "#3a3a3a")
+        x = (canvas.width - preview.width) // 2
+        y = (canvas.height - preview.height) // 2
+        canvas.paste(preview, (x, y))
+        return ImageTk.PhotoImage(canvas)
 
     def update_progress(self, progress: object) -> None:
         """Update metrics from a BatchProgress object."""
         total = getattr(progress, "total", 0)
         completed = getattr(progress, "completed", 0)
-        _failed = getattr(progress, "failed", 0)  # reserved for a failures card
+        failed = getattr(progress, "failed", 0)
         remaining = getattr(progress, "remaining", 0)
         speed = getattr(progress, "images_per_min", 0)
         eta = getattr(progress, "eta_seconds", 0)
@@ -308,9 +332,10 @@ class StepProgress:
         self._speed_card._value_label.config(text=f"{speed:.1f} img/min")  # type: ignore[attr-defined]
 
         if total > 0:
-            pct = int(completed / total * 100)
+            done = completed + failed
+            pct = int(done / total * 100)
             self._progress_bar["maximum"] = total
-            self._progress_bar["value"] = completed
+            self._progress_bar["value"] = done
             eta_min = int(eta // 60)
             eta_sec = int(eta % 60)
             self._progress_label.config(
@@ -321,18 +346,30 @@ class StepProgress:
         self, image_id: str, status: str
     ) -> None:
         """Update a single thumbnail's appearance based on status."""
-        lbl = self._thumb_labels.get(image_id)
+        thumb_key = self._thumb_key_by_source.get(image_id, image_id)
+        lbl = self._thumb_labels.get(thumb_key)
         if lbl is None:
             return
 
         status_styles = {
             "pending": {"bg": "#3a3a3a", "fg": "gray", "highlightbackground": "#3a3a3a"},
             "running": {"bg": "#1a1a1a", "fg": "#007AFF", "highlightbackground": "#007AFF"},
+            "interrogating": {"bg": "#1a1a1a", "fg": "#007AFF", "highlightbackground": "#007AFF"},
+            "masking": {"bg": "#1a1a1a", "fg": "#007AFF", "highlightbackground": "#007AFF"},
+            "vectorizing": {"bg": "#1a1a1a", "fg": "#007AFF", "highlightbackground": "#007AFF"},
             "complete": {"bg": "#1a1a1a", "fg": "#34C759", "highlightbackground": "#34C759"},
             "failed": {"bg": "#1a1a1a", "fg": "#FF453A", "highlightbackground": "#FF453A"},
         }
         style = status_styles.get(status, status_styles["pending"])
-        text_map = {"pending": "\u2014", "running": "\u00b7", "complete": "\u2713", "failed": "\u2715"}
+        text_map = {
+            "pending": "\u2014",
+            "running": "\u00b7",
+            "interrogating": "\u00b7",
+            "masking": "\u00b7",
+            "vectorizing": "\u00b7",
+            "complete": "\u2713",
+            "failed": "\u2715",
+        }
         lbl.config(text=text_map.get(status, "\u2014"), **style)
 
     def on_batch_complete(self) -> None:

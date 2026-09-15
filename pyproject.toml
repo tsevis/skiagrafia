@@ -2,7 +2,7 @@
 name = "skiagrafia"
 version = "0.3.1"
 description = "Semantic vectorizing & masking creator"
-requires-python = ">=3.11"
+requires-python = ">=3.12,<3.13"
 dependencies = [
     "torch",
     "torchvision",
@@ -20,7 +20,9 @@ dependencies = [
     "vtracer",
     "ollama",
     "lxml",
-    "transformers",
+    # GroundingDINO's BERT wrapper needs a small compatibility shim for the
+    # removed mask helper in transformers 5; use a patched supported line.
+    "transformers>=5.10,<6",
     "accelerate",
     # Required by the Grounded-SAM-2 source packages (grounding_dino + sam2)
     "supervision",
@@ -60,4 +62,11 @@ markers = ["gui: opens real windows; excluded from the default run"]
 # sqlite message so any other unhandled thread exception still fails loudly.
 filterwarnings = [
     "ignore:(?s).*file is not a database.*:pytest.PytestUnhandledThreadExceptionWarning",
+]
+
+[dependency-groups]
+dev = [
+    "pip-audit>=2.9,<3.0",
+    "pytest>=9.0.3,<10",
+    "ruff==0.15.2",
 ]

@@ -17,6 +17,7 @@ from pydantic import BaseModel
 
 from utils.model_manager import REGISTRY, ModelManager
 from utils.preferences import get_models_dir
+from utils.security import SecurityError, validate_loopback_url
 
 logger = logging.getLogger(__name__)
 
@@ -61,12 +62,12 @@ class SetupStatus(BaseModel):
 
 def _list_ollama_models(host: str) -> list[str] | None:
     """Model names on the Ollama server, or None when unreachable."""
-    try:
-        import ollama
+    import ollama
 
-        response = ollama.Client(host=host).list()
+    try:
+        response = ollama.Client(host=validate_loopback_url(host)).list()
         return [m.model or "" for m in response.models]
-    except Exception:
+    except (OSError, TimeoutError, SecurityError, ollama.RequestError, ollama.ResponseError):
         return None
 
 
@@ -103,7 +104,7 @@ def check_setup(prefs: dict[str, Any]) -> SetupStatus:
                 ready, detail = False, str(exc)
             items.append(SetupItem(name=f"Local {model}", kind="backend", status="ready" if ready else "missing", detail=detail))
         sam3_root = get_models_dir(prefs) / "mlx_sam3"
-        if prefs.get("segmentation_backend") in {"auto", "mlx-sam3"}:
+        if prefs.get("segmentation_backend") == "mlx-sam3":
             present = (sam3_root / "sam3-mod-weights/model.safetensors").is_file()
             items.append(SetupItem(name="MLX SAM 3", kind="backend", status="ready" if present else "missing",
                                    required=False, detail=str(sam3_root)))
@@ -112,7 +113,10 @@ def check_setup(prefs: dict[str, Any]) -> SetupStatus:
         from models.vlm_client import DEFAULT_LLAMACPP_URL, LlamaCppVLMClient
 
         host = str(prefs.get("llamacpp_url", DEFAULT_LLAMACPP_URL))
-        reachable = LlamaCppVLMClient(host=host).health_check()
+        try:
+            reachable = LlamaCppVLMClient(host=host).health_check()
+        except SecurityError:
+            reachable = False
         items.append(
             SetupItem(
                 name=f"llama.cpp server ({host})",
@@ -173,9 +177,12 @@ def is_setup_complete(prefs: dict[str, Any]) -> bool:
     """True when every required component is ready on this machine."""
     try:
         return check_setup(prefs).complete
-    except Exception:
+    except (ConnectionError, OSError, RuntimeError, SecurityError, TimeoutError, ValueError):
         logger.warning("First-run setup check failed", exc_info=True)
-        return True  # never block the app on a broken check
+        # Do not tell callers the machine is ready when the verification was
+        # inconclusive: the setup wizard makes the failure visible and avoids
+        # an opaque later pipeline error.
+        return False
 
 
 def pull_ollama_model(
@@ -189,7 +196,7 @@ def pull_ollama_model(
     """
     import ollama
 
-    client = ollama.Client(host=host)
+    client = ollama.Client(host=validate_loopback_url(host))
     for update in client.pull(model, stream=True):
         if progress_callback is None:
             continue
@@ -215,7 +222,15 @@ def download_missing_weights(
                     progress_callback(name, done, total)
 
             manager.ensure(name, progress_callback=_cb)
-        except Exception:
+        except (
+            ConnectionError,
+            KeyError,
+            OSError,
+            RuntimeError,
+            SecurityError,
+            TimeoutError,
+            ValueError,
+        ):
             logger.error("Failed to download %s", name, exc_info=True)
             failures.append(name)
     return failures

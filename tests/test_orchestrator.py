@@ -15,6 +15,7 @@ from pathlib import Path
 import cv2
 import numpy as np
 import pytest
+from PIL import Image
 from numpy.typing import NDArray
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
@@ -52,6 +53,10 @@ class FakeInterrogator:
         self._candidates = candidates
         self._children = children_by_parent or {}
         self.calls: list[tuple] = []
+        self.confirmed_selections: list[dict[str, str]] = []
+
+    def set_confirmed_selections(self, selections: dict[str, str]) -> None:
+        self.confirmed_selections.append(dict(selections))
 
     def interrogate(self, image, confirmed_labels=None, knowledge_pack=None):
         self.calls.append((confirmed_labels, knowledge_pack))
@@ -466,6 +471,27 @@ class TestProcessBasicFlow:
         assert result.tiff_path is not None
         assert segmenter.clear_cache_called is True
 
+    def test_confirmed_selections_are_applied_before_confirmed_labels(
+        self, tmp_path: Path
+    ) -> None:
+        image_path = _write_image(tmp_path / "img.png")
+        interrogator = FakeInterrogator([_candidate("chalice")])
+        caps = _make_caps(
+            interrogator,
+            FakeDetector(default=(5, 5, 40, 40)),
+            FakeSegmenter(),
+        )
+
+        orchestrator = Orchestrator(capabilities=caps, output_dir=tmp_path / "out")
+        orchestrator.set_confirmed_selections({"chalice": "largest"})
+        orchestrator.process(
+            image_path,
+            confirmed_labels=["chalice"],
+        )
+
+        assert interrogator.confirmed_selections == [{"chalice": "largest"}]
+        assert interrogator.calls[0][0] == ["chalice"]
+
     def test_image_load_failure_sets_result_error(self, tmp_path: Path) -> None:
         caps = _make_caps(FakeInterrogator([]), FakeDetector(), FakeSegmenter())
         orch = Orchestrator(capabilities=caps, output_dir=tmp_path / "out")
@@ -481,6 +507,11 @@ class TestProcessBasicFlow:
         assert result.error is None
         assert result.layers == []
         assert result.svg_path is None
+        assert result.all_objects_tiff_path is not None
+        with Image.open(result.all_objects_tiff_path) as rgba:
+            pixels = np.asarray(rgba)
+        assert pixels.shape == (IMG_SIZE, IMG_SIZE, 4)
+        assert not pixels[..., 3].any()
 
     def test_output_dir_is_created(self, tmp_path: Path) -> None:
         image_path = _write_image(tmp_path / "img.png")
@@ -490,7 +521,50 @@ class TestProcessBasicFlow:
         orch.process(image_path)
         assert out_dir.is_dir()
 
-    def test_vector_only_mode_skips_vitmatte_tiff(self, tmp_path: Path) -> None:
+    def test_invalid_mask_has_a_clear_pipeline_error(self, tmp_path: Path) -> None:
+        image_path = _write_image(tmp_path / "img.png")
+        bad_mask = np.zeros((4, 4), dtype=np.uint8)
+        caps = _make_caps(
+            FakeInterrogator([_candidate("chalice")]),
+            FakeDetector(default=(5, 5, 40, 40)),
+            FakeSegmenter(mask_by_label={"chalice": bad_mask}),
+        )
+        result = Orchestrator(capabilities=caps, output_dir=tmp_path / "out").process(image_path)
+        assert result.error is not None
+        assert "Mask generation failed" in result.error
+
+    def test_failed_alpha_refinement_has_a_clear_pipeline_error(self, tmp_path: Path) -> None:
+        class FailingAlpha:
+            def predict(self, image, mask):
+                raise RuntimeError("backend unavailable")
+
+        image_path = _write_image(tmp_path / "img.png")
+        caps = _make_caps(
+            FakeInterrogator([_candidate("chalice")]),
+            FakeDetector(default=(5, 5, 40, 40)),
+            FakeSegmenter(),
+            alpha_refiner=FailingAlpha(),
+        )
+        result = Orchestrator(capabilities=caps, output_dir=tmp_path / "out").process(image_path)
+        assert result.error is not None
+        assert "Alpha refinement failed" in result.error
+
+    def test_unsafe_vector_output_has_a_clear_export_error(self, tmp_path: Path) -> None:
+        class UnsafeVectorizer:
+            def trace(self, mask):
+                return '<script>alert(1)</script>'
+
+        image_path = _write_image(tmp_path / "img.png")
+        caps = _make_caps(
+            FakeInterrogator([_candidate("chalice")]),
+            FakeDetector(default=(5, 5, 40, 40)),
+            FakeSegmenter(),
+            vectorizer=UnsafeVectorizer(),
+        )
+        result = Orchestrator(capabilities=caps, output_dir=tmp_path / "out").process(image_path)
+        assert result.error == "SVG export failed integrity validation."
+
+    def test_vector_only_mode_keeps_the_all_objects_alpha_sidecar(self, tmp_path: Path) -> None:
         image_path = _write_image(tmp_path / "img.png")
         candidates = [_candidate("chalice")]
         detector = FakeDetector(default=(5, 5, 40, 40))
@@ -504,8 +578,10 @@ class TestProcessBasicFlow:
         )
         result = orch.process(image_path)
         assert result.error is None
-        assert result.tiff_path is None
-        assert alpha_refiner.calls == 0
+        assert result.tiff_path is not None
+        assert result.all_objects_tiff_path is not None
+        assert result.tiff_files == [result.all_objects_tiff_path]
+        assert alpha_refiner.calls == 1
 
     def test_progress_callback_receives_step_updates(self, tmp_path: Path) -> None:
         image_path = _write_image(tmp_path / "img.png")

@@ -23,8 +23,7 @@
 ```bash
 # Clone and install
 git clone https://github.com/tsevis/skiagrafia.git && cd skiagrafia
-python -m venv venv && source venv/bin/activate
-pip install -e .
+uv sync --group dev
 
 # VLM backend, option A — Ollama (default)
 ollama serve &
@@ -93,9 +92,9 @@ Skiagrafia addresses a common challenge in design and production workflows: conv
 ### Batch Mode
 
 - Six-step wizard for production pipelines
-- Process 2,000+ images in parallel
+- Process large image folders with a guided workflow
 - Human-in-the-loop label triage (mandatory gate)
-- Persistent state with resume capability
+- Saved batch setups for editable reruns
 - Template system for reusable configurations
 - Progress tracking and error recovery
 
@@ -169,9 +168,7 @@ All downloadable by the first-run wizard (or Preferences → Models → Download
 ```bash
 git clone https://github.com/tsevis/skiagrafia.git
 cd skiagrafia
-python -m venv venv
-source venv/bin/activate
-pip install -e .
+uv sync --group dev
 ```
 
 ### 2. Set Up a VLM Backend
@@ -250,7 +247,8 @@ Notes on llama.cpp:
 3. **Interrogate** — the VLM scans all images (parallel)
 4. **Triage** — review and confirm labels (mandatory gate)
 5. **Process** — run the full pipeline on all images
-6. **Output** — review results and retry failures
+6. **Output** — review SVG/layer metrics and foreground `all-objects` TIFFs,
+   export either bundle to a chosen folder, and retry only failed inputs
 
 See the [User Manual](docs/MANUAL.md) for a full walkthrough of both modes.
 
@@ -398,11 +396,17 @@ export DYLD_FALLBACK_LIBRARY_PATH="/opt/homebrew/lib"   # cairo for PDF export
 | Format | Contents |
 |--------|----------|
 | **SVG** | Layered vector paths grouped by parent/child hierarchy |
-| **TIFF** | 4-channel (RGBA) bitmap per layer with alpha matte |
+| **TIFF** | 4-channel (RGBA) bitmap per layer with alpha matte, plus an `all-objects` foreground union for every processed image |
 | **PNG** | Flattened preview or per-layer export |
 | **PDF** | Vector output via cairosvg (requires Homebrew libcairo) |
 
-Batch runs write to `<output_dir>/<batch_id>/` with a `state.db` for resume.
+GUI batches write `run.json`, `interrogation.json`, `triage.json`, and an
+immutable `processing.json` under `<output_dir>/<batch_id>/`. The processing
+manifest freezes the exact source paths, guide copy, per-image Triage labels,
+selection policies, and effective BatchRunner configuration. Completed output
+paths and layer metrics live in `state.db`. The GUI offers Resume only when
+these artifacts validate together; otherwise a saved run is restored only as a
+new editable batch that must be interrogated and triaged again.
 
 ---
 

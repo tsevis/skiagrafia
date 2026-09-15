@@ -36,7 +36,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 import core.batch_runner as batch_runner
 from core.batch_runner import BatchConfig, BatchProgress, BatchRunner
-from core.orchestrator import PipelineResult
+from core.orchestrator import LayerResult, PipelineResult
 from core.state_manager import JobRecord, JobStatus, StateManager
 
 
@@ -66,6 +66,7 @@ def _ok_result(image_path: str) -> PipelineResult:
         height=32,
         svg_path=image_path + ".svg",
         tiff_path=image_path + ".tiff",
+        all_objects_tiff_path=image_path + ".all-objects.tiff",
     )
 
 
@@ -199,6 +200,37 @@ class TestBatchConfig:
         assert cfg.max_workers == 5
 
 
+def test_worker_uses_the_frozen_per_image_labels_and_selection_policy(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    image_path = str(tmp_path / "input" / "a.png")
+    config = _make_config(
+        tmp_path,
+        confirmed_labels=["fallback"],
+        labels_by_image={image_path: ["Apple computer"]},
+        selections_by_image={image_path: {"Apple computer": "largest"}},
+    )
+    events: list[tuple[str, object]] = []
+
+    class StubOrchestrator:
+        def set_confirmed_selections(self, selections: dict[str, str]) -> None:
+            events.append(("selections", selections))
+
+        def process(self, path: str, labels: list[str]) -> PipelineResult:
+            events.append(("process", (path, labels)))
+            return _ok_result(path)
+
+    monkeypatch.setattr(batch_runner, "_worker_orchestrator", lambda _: StubOrchestrator())
+
+    result = batch_runner._process_single(image_path, config.model_dump())
+
+    assert result.error is None
+    assert events == [
+        ("selections", {"Apple computer": "largest"}),
+        ("process", (image_path, ["Apple computer"])),
+    ]
+
+
 # ── discover_images ──────────────────────────────────────────────────────
 
 
@@ -272,6 +304,25 @@ class TestDiscoverImages:
         assert record.image_path == "/old/a.png"
         runner.close()
 
+    def test_frozen_inputs_do_not_pick_up_new_folder_images(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        input_dir = tmp_path / "input"
+        input_dir.mkdir()
+        approved = _write_image(input_dir / "approved.png")
+        _write_image(input_dir / "new-unreviewed.png")
+        calls = _patch_process_single(monkeypatch)
+
+        runner = BatchRunner(
+            _make_config(tmp_path, input_images=[str(approved)], max_workers=1)
+        )
+        runner.start()
+        runner._executor.drain()
+
+        assert [Path(path).name for path, _ in calls] == ["approved.png"]
+        assert runner._state.get("new-unreviewed") is None
+        runner.close()
+
 
 # ── start() / _on_complete / _get_progress ──────────────────────────────
 
@@ -294,6 +345,7 @@ class TestStartSuccessPath:
         assert runner._state.get("a").status == JobStatus.COMPLETE
         assert runner._state.get("b").status == JobStatus.COMPLETE
         assert runner._state.get("a").output_svg == str(input_dir / "a.png") + ".svg"
+        assert runner._state.get("a").output_all_objects_tiff == str(input_dir / "a.png") + ".all-objects.tiff"
         assert not runner.is_running
         runner.close()
 
@@ -315,6 +367,63 @@ class TestStartSuccessPath:
         assert image_path == str(input_dir / "a.png")
         assert config_dict["batch_id"] == cfg.batch_id
         assert config_dict["confirmed_labels"] == ["cat"]
+        runner.close()
+
+    def test_persists_per_image_triage_and_output_metrics(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        input_dir = tmp_path / "input"
+        input_dir.mkdir()
+        image_path = _write_image(input_dir / "a.png")
+
+        result = _ok_result(str(image_path))
+        result.layers = [
+            LayerResult(
+                layer_id="object-001",
+                label="Apple computer",
+                role="parent",
+                bbox=(0, 0, 16, 16),
+            )
+        ]
+        calls: list[tuple[str, dict]] = []
+
+        def worker(path: str, config: dict) -> PipelineResult:
+            calls.append((path, config))
+            return result
+
+        monkeypatch.setattr(batch_runner, "_process_single", worker)
+        cfg = _make_config(
+            tmp_path,
+            max_workers=1,
+            confirmed_labels=["Apple computer"],
+            input_images=[str(image_path)],
+            labels_by_image={str(image_path): ["Apple computer"]},
+            selections_by_image={str(image_path): {"Apple computer": "largest"}},
+        )
+        runner = BatchRunner(cfg)
+        runner.start()
+        runner._executor.drain()
+
+        record = runner._state.get("a")
+        assert record is not None
+        assert record.labels == ["Apple computer"]
+        assert record.layer_count == 1
+        assert runner.summary().model_dump() == {
+            "total": 1,
+            "completed": 1,
+            "failed": 0,
+            "svg_count": 1,
+            "all_objects_count": 1,
+            "avg_layers": 1.0,
+            "failed_image_paths": [],
+            "status_by_image": {str(image_path): "complete"},
+        }
+        assert calls[0][1]["labels_by_image"] == {
+            str(image_path): ["Apple computer"]
+        }
+        assert calls[0][1]["selections_by_image"] == {
+            str(image_path): {"Apple computer": "largest"}
+        }
         runner.close()
 
     def test_skips_jobs_already_complete_or_skipped(

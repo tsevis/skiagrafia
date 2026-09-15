@@ -255,7 +255,7 @@ class TestDownloadFile:
         )
 
         ModelManager._download_file(
-            "https://example.invalid/f.bin",
+            "https://github.com/example/f.bin",
             dest,
             progress_callback=lambda done, total: progress.append((done, total)),
         )
@@ -280,7 +280,7 @@ class TestDownloadFile:
         )
 
         ModelManager._download_file(
-            "https://example.invalid/f.bin",
+            "https://github.com/example/f.bin",
             dest,
             progress_callback=lambda done, total: progress.append((done, total)),
         )
@@ -301,7 +301,7 @@ class TestDownloadFile:
             model_manager.urllib.request, "urlretrieve", fake_urlretrieve
         )
 
-        ModelManager._download_file("https://example.invalid/f.bin", dest)
+        ModelManager._download_file("https://github.com/example/f.bin", dest)
         assert dest.read_bytes() == b"x"
 
     def test_part_file_cleaned_up_on_failure(
@@ -319,7 +319,7 @@ class TestDownloadFile:
         )
 
         with pytest.raises(OSError):
-            ModelManager._download_file("https://example.invalid/f.bin", dest)
+            ModelManager._download_file("https://github.com/example/f.bin", dest)
 
         assert not part.exists()
         assert not dest.exists()
@@ -470,7 +470,7 @@ class TestDownloadGithubZip:
         monkeypatch.setattr(model_manager.urllib.request, "urlopen", fake_urlopen)
         progress: list[tuple[int, int | None]] = []
 
-        entry = {"url": "https://x/y.zip", "zip_root": "root"}
+        entry = {"url": "https://github.com/x/y.zip", "zip_root": "root"}
         target = tmp_path / "dest"
 
         ModelManager._download_github_zip(

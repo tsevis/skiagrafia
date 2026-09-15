@@ -54,7 +54,7 @@ def render_svg_thumbnail(
             img = Image.open(io.BytesIO(png_bytes)).convert("RGBA")
             tinted = Image.new("RGBA", img.size, (r, g, b, 180))
             tinted.putalpha(img.split()[3])
-        except Exception:
+        except (OSError, SyntaxError, ValueError):
             logger.debug("SVG thumbnail render failed, using placeholder", exc_info=True)
             tinted = Image.new("RGBA", (size, size), (r, g, b, 180))
     else:

@@ -26,12 +26,24 @@ from models.grounded_sam import (
     GroundedSAM,
     _ensure_gsam_on_path,
     _patch_bert_head_mask,
+    _patch_bert_invert_attention_mask,
     _patch_get_extended_attention_mask,
     _patch_onnx_ml_dtypes,
 )
 
 
 IMG_SIZE = 64
+
+
+def test_transformers_v5_invert_attention_mask_compatibility() -> None:
+    class LegacyBert:
+        dtype = torch.float32
+
+    _patch_bert_invert_attention_mask(LegacyBert)
+    output = LegacyBert().invert_attention_mask(torch.tensor([[1, 0]]))
+    assert output.shape == (1, 1, 1, 2)
+    assert output[0, 0, 0, 0] == 0
+    assert output[0, 0, 0, 1] < -1e30
 
 
 def _tiny_image(size: int = IMG_SIZE) -> NDArray[np.uint8]:

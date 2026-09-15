@@ -8,6 +8,7 @@ from tkinter import ttk
 from typing import TYPE_CHECKING
 
 from ui.theme import is_macos
+from utils.security import SecurityError, atomic_write_bytes, safe_child_path
 
 if TYPE_CHECKING:
     from ui.batch.batch_view import BatchView
@@ -30,18 +31,21 @@ class StepOutput:
             font=("SF Pro Display", 16, "bold"),
         ).pack(anchor=tk.W, pady=(0, 12))
 
-        # Metric cards (3 across)
+        # Metric cards
         metrics_frame = ttk.Frame(self.frame)
         metrics_frame.pack(fill=tk.X, pady=(0, 12))
 
         self._svg_card = self._metric_card(metrics_frame, "SVG Files", "0")
-        self._svg_card.pack(side=tk.LEFT, expand=True, fill=tk.X, padx=(0, 4))
+        self._svg_card.pack(side=tk.LEFT, expand=True, fill=tk.X, padx=(0, 3))
+
+        self._all_objects_card = self._metric_card(metrics_frame, "Foreground TIFFs", "0")
+        self._all_objects_card.pack(side=tk.LEFT, expand=True, fill=tk.X, padx=3)
 
         self._layers_card = self._metric_card(metrics_frame, "Avg Layers", "0")
-        self._layers_card.pack(side=tk.LEFT, expand=True, fill=tk.X, padx=4)
+        self._layers_card.pack(side=tk.LEFT, expand=True, fill=tk.X, padx=3)
 
         self._failed_card = self._metric_card(metrics_frame, "Failed", "0")
-        self._failed_card.pack(side=tk.LEFT, expand=True, fill=tk.X, padx=(4, 0))
+        self._failed_card.pack(side=tk.LEFT, expand=True, fill=tk.X, padx=(3, 0))
 
         # Output folder
         ttk.Separator(self.frame, orient=tk.HORIZONTAL).pack(fill=tk.X, pady=12)
@@ -108,15 +112,21 @@ class StepOutput:
         return card
 
     def update_summary(
-        self, svg_count: int, avg_layers: float, failed_count: int
+        self,
+        svg_count: int,
+        avg_layers: float,
+        failed_count: int,
+        all_objects_count: int = 0,
     ) -> None:
         """Update summary metrics."""
         self._view.output_summary = {
             "svg_count": svg_count,
+            "all_objects_count": all_objects_count,
             "avg_layers": avg_layers,
             "failed_count": failed_count,
         }
         self._svg_card._value_label.config(text=str(svg_count))  # type: ignore[attr-defined]
+        self._all_objects_card._value_label.config(text=str(all_objects_count))  # type: ignore[attr-defined]
         self._layers_card._value_label.config(text=f"{avg_layers:.1f}")  # type: ignore[attr-defined]
         self._failed_card._value_label.config(text=str(failed_count))  # type: ignore[attr-defined]
 
@@ -130,27 +140,95 @@ class StepOutput:
     def _apply_saved_summary(self) -> None:
         """Hydrate the view from the latest batch summary, if one exists."""
         summary = getattr(self._view, "output_summary", None) or {}
+        self._folder_label.config(text=str(self._output_dir()))
         self.update_summary(
             int(summary.get("svg_count", 0)),
             float(summary.get("avg_layers", 0.0)),
             int(summary.get("failed_count", 0)),
+            int(summary.get("all_objects_count", 0)),
+        )
+
+    def _output_dir(self) -> Path:
+        """Return the run-specific output directory when a Batch run exists."""
+        run = getattr(self._view, "run_settings", None)
+        if run is not None:
+            return Path(run.run_dir)
+        return Path(
+            self._app.prefs.get(
+                "output_directory",
+                str(Path.home() / "Desktop" / "skiagrafia_out"),
+            )
         )
 
     def _reveal_in_finder(self) -> None:
-        output_dir = self._app.prefs.get(
-            "output_directory",
-            str(Path.home() / "Desktop" / "skiagrafia_out"),
-        )
+        output_dir = self._output_dir()
         if is_macos():
-            subprocess.run(["open", output_dir], check=False)
+            subprocess.run(["open", str(output_dir)], check=False)
         else:
-            subprocess.run(["xdg-open", output_dir], check=False)
+            subprocess.run(["xdg-open", str(output_dir)], check=False)
 
     def _export_svg_bundle(self) -> None:
-        logger.info("Exporting SVG bundle")
+        self._export_bundle("*.svg", "SVG")
 
     def _export_tiff_bundle(self) -> None:
-        logger.info("Exporting TIFF bundle")
+        self._export_bundle("*.tiff", "TIFF")
+
+    def _export_bundle(self, pattern: str, format_name: str) -> None:
+        """Copy generated files to a user-selected folder without symlink writes."""
+        from tkinter import filedialog, messagebox
+
+        source_dir = self._output_dir()
+        files = [
+            path for path in sorted(source_dir.glob(pattern))
+            if path.is_file() and not path.is_symlink()
+        ]
+        if not files:
+            messagebox.showinfo(
+                "Nothing to export",
+                f"No {format_name} files are available in this Batch output.",
+                parent=self.frame.winfo_toplevel(),
+            )
+            return
+
+        destination_text = filedialog.askdirectory(
+            parent=self.frame.winfo_toplevel(),
+            title=f"Export {format_name} bundle",
+            initialdir=str(source_dir),
+        )
+        if not destination_text:
+            return
+
+        destination = Path(destination_text)
+        copied = 0
+        failures: list[str] = []
+        for source in files:
+            try:
+                target = safe_child_path(destination, source.name)
+                atomic_write_bytes(target, source.read_bytes())
+                copied += 1
+            except (OSError, SecurityError) as exc:
+                logger.warning("Could not export %s: %s", source, exc)
+                failures.append(source.name)
+
+        if failures:
+            messagebox.showwarning(
+                "Export incomplete",
+                f"Copied {copied} {format_name} file(s); could not export {len(failures)}.",
+                parent=self.frame.winfo_toplevel(),
+            )
+        else:
+            messagebox.showinfo(
+                "Export complete",
+                f"Copied {copied} {format_name} file(s) to {destination}.",
+                parent=self.frame.winfo_toplevel(),
+            )
 
     def _retry_failed(self) -> None:
-        logger.info("Retrying failed images")
+        failed_paths = list(getattr(self._view, "failed_image_paths", []))
+        if not failed_paths:
+            self._retry_btn.config(text="Retry 0 failed", state="disabled")
+            return
+        self._view.go_to_step(4)
+        progress_step = self._view._step_views[4]
+        if progress_step and hasattr(progress_step, "start_retry"):
+            progress_step.start_retry(failed_paths)

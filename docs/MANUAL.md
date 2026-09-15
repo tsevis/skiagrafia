@@ -137,7 +137,8 @@ The window has three panels: controls (left), canvas (center), layers (right).
    the canvas; each parent object and its parts are separate layers.
 
 8. **Export** — SVG (layered vectors), TIFF (per-layer RGBA with alpha),
-   PNG, or PDF.
+   plus one `all-objects` RGBA TIFF containing the union of every accepted
+   object and no background. PNG and PDF remain available from Export.
 
 ---
 
@@ -146,9 +147,14 @@ The window has three panels: controls (left), canvas (center), layers (right).
 Batch mode is a six-step wizard for processing whole folders. The sidebar
 tracks your position; the bottom bar shows status and progress.
 
-1. **Import** — drop or select a folder of images. Recent batches can be
-   resumed; state is stored per batch in `state.db`, so a stopped run
-   continues where it left off.
+1. **Import** — drop or select a folder of images. Select a saved run to
+   restore its request, guide, and settings into a new editable batch; the
+   required Interrogate and Triage review is performed again before output.
+   **Resume selected batch** appears only for an interrupted GUI batch whose
+   `run.json`, interrogation, Triage, frozen processing manifest, source
+   paths, guide copy, and `state.db` all still agree. It continues that exact
+   run without reprocessing completed images. A legacy or inconsistent
+   `state.db` is deliberately not offered as resumable.
 
 2. **Configure** — output mode (vector, bitmap, or both), recursion depth for
    child parts, VTracer quality, interrogation profile, fallback mode,
@@ -159,13 +165,18 @@ tracks your position; the bottom bar shows status and progress.
    of detected labels. Blue tags are parents, green are children.
 
 4. **Triage** — *mandatory human gate.* Review the aggregated labels and
-   confirm exactly which objects the batch should extract. Nothing is
-   processed until you approve.
+   confirm exactly which objects the batch should extract. A label can also
+   be skipped for a specific input without rejecting it from the whole batch;
+   these per-image exceptions are saved in `triage.json`. Nothing is processed
+   until you approve.
 
-5. **Progress** — parallel processing across CPU workers with per-image
-   thumbnails, throughput (images/min), and ETA.
+5. **Progress** — the same durable `BatchRunner` used for resume processes
+   the frozen inputs with per-image thumbnails, throughput (images/min), and
+   ETA. On macOS it uses one warm model worker to avoid competing GPU replicas.
 
-6. **Output** — summary, failures with reasons, and retry.
+6. **Output** — summary, foreground `all-objects` TIFF count, and direct SVG
+   or TIFF bundle export to a chosen folder. Retry runs only the images that
+   failed in the preceding pass; completed outputs and their summary remain.
 
 Templates: any batch configuration can be saved as a reusable template
 (managed in Preferences → Templates).

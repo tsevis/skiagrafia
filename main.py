@@ -32,6 +32,8 @@ configure_cairo_library_path()
 
 from rich.logging import RichHandler  # noqa: E402 — must follow configure_cairo_library_path()
 
+from utils.security import SecurityError  # noqa: E402 — configured before imports above
+
 
 # Log rotation — the file handler runs at DEBUG, so an unbounded file grows
 # without limit. Cap total on-disk history at LOG_BACKUP_COUNT + 1 files.
@@ -106,7 +108,16 @@ def check_vlm_backend() -> None:
                 settings.backend,
                 settings.primary_vlm,
             )
-    except Exception:
+    except (
+        AttributeError,
+        ConnectionError,
+        ImportError,
+        OSError,
+        RuntimeError,
+        SecurityError,
+        TimeoutError,
+        ValueError,
+    ):
         logger.warning(
             "VLM backend not reachable — scan features unavailable", exc_info=True
         )
@@ -137,7 +148,15 @@ def check_first_run(root: "tk.Misc") -> None:
                 logger.info("First-run setup wizard opened")
 
             root.after(0, _open)
-        except Exception:
+        except (
+            AttributeError,
+            ImportError,
+            OSError,
+            RuntimeError,
+            SecurityError,
+            TimeoutError,
+            ValueError,
+        ):
             logger.warning("First-run check failed", exc_info=True)
 
     threading.Thread(target=_probe, daemon=True).start()

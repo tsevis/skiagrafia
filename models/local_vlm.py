@@ -111,6 +111,7 @@ class LocalServer:
         )
         probe = LlamaCppVLMClient(self.host, model)
         deadline = time.monotonic() + 120
+        started = False
         try:
             while time.monotonic() < deadline:
                 if self.process.poll() is not None:
@@ -121,14 +122,18 @@ class LocalServer:
                     if probe._request_json("/health", timeout=1).get("status") == "ok":
                         self.model = model
                         logger.info("Managed local model ready: %s", model)
+                        started = True
                         return self.host
                 except (OSError, ValueError):
                     pass
                 time.sleep(0.2)
             raise TimeoutError(f"Local {model} did not become ready within 120 seconds")
-        except Exception:
-            self.stop()
-            raise
+        finally:
+            # A failed or cancelled readiness probe must not leave a child
+            # server behind.  This also handles exceptions not anticipated by
+            # the HTTP polling loop without converting them into success.
+            if not started:
+                self.stop()
 
 
 _SERVER = LocalServer()
@@ -147,7 +152,14 @@ class ManagedVLMClient(LlamaCppVLMClient):
                 self._host = _SERVER.start(self._model)
                 _SERVER.keep_alive()
                 return True
-        except Exception:
+        except (
+            ConnectionError,
+            OSError,
+            RuntimeError,
+            subprocess.SubprocessError,
+            TimeoutError,
+            ValueError,
+        ):
             logger.exception("Managed local VLM unavailable")
             return False
 

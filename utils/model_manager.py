@@ -19,6 +19,8 @@ from __future__ import annotations
 import io
 import logging
 import shutil
+import stat
+import tempfile
 import urllib.request
 import zipfile
 from collections.abc import Callable
@@ -26,7 +28,17 @@ from pathlib import Path
 
 from pydantic import BaseModel
 
+from utils.security import SecurityError, safe_child_path, validate_download_url
+
 logger = logging.getLogger(__name__)
+
+_MODEL_DOWNLOAD_HOSTS = {
+    "github.com",
+    "dl.fbaipublicfiles.com",
+    "huggingface.co",
+}
+_MAX_SOURCE_ARCHIVE_BYTES = 256 * 1024 * 1024
+_MAX_SOURCE_ARCHIVE_MEMBERS = 20_000
 
 # ── Registry of known models ────────────────────────────────────────────────
 
@@ -122,8 +134,9 @@ class ModelManager:
     """
 
     def __init__(self, models_dir: Path) -> None:
-        self._models_dir = models_dir
+        self._models_dir = models_dir.expanduser()
         self._models_dir.mkdir(parents=True, exist_ok=True)
+        self._models_dir = self._models_dir.resolve(strict=True)
 
     @property
     def models_dir(self) -> Path:
@@ -133,9 +146,13 @@ class ModelManager:
     def resolve(self, name: str) -> Path:
         """Resolve logical model name to absolute path via registry subpath."""
         entry = REGISTRY.get(name)
-        if entry and "subpath" in entry:
-            return self._models_dir / str(entry["subpath"])
-        return self._models_dir / name
+        relative = str(entry["subpath"]) if entry and "subpath" in entry else name
+        candidate = (self._models_dir / relative).resolve(strict=False)
+        try:
+            candidate.relative_to(self._models_dir)
+        except ValueError as exc:
+            raise SecurityError("Model path escapes the configured model directory.") from exc
+        return candidate
 
     def is_available(self, name: str) -> bool:
         """Check if model exists on disk (all expected files for hf_files)."""
@@ -173,6 +190,7 @@ class ModelManager:
             )
 
         kind = str(entry.get("kind", "file"))
+        validate_download_url(str(url), _MODEL_DOWNLOAD_HOSTS)
         logger.info("Downloading %s (%s) -> %s", name, kind, path)
         if kind == "github_zip":
             self._download_github_zip(entry, path, progress_callback)
@@ -192,8 +210,11 @@ class ModelManager:
         progress_callback: Callable[[int, int | None], None] | None = None,
     ) -> None:
         """Fetch a single file from a direct URL with optional progress."""
+        validate_download_url(url, _MODEL_DOWNLOAD_HOSTS)
         path.parent.mkdir(parents=True, exist_ok=True)
         tmp_path = path.with_suffix(path.suffix + ".part")
+        if path.is_symlink() or tmp_path.is_symlink():
+            raise SecurityError("Refusing to write a model download through a symlink.")
 
         def _reporthook(block_num: int, block_size: int, total_size: int) -> None:
             if progress_callback is not None:
@@ -217,13 +238,14 @@ class ModelManager:
     ) -> None:
         """Fetch a model directory file-by-file from HuggingFace resolve URLs."""
         base_url = str(entry["url"]).rstrip("/")
+        validate_download_url(base_url, _MODEL_DOWNLOAD_HOSTS)
         files = list(_entry_files(entry))
         alternatives = _entry_files(entry, "hf_weight_alternatives")
         if alternatives and not any((target_dir / f).is_file() for f in alternatives):
             files.append(alternatives[0])
         target_dir.mkdir(parents=True, exist_ok=True)
         for filename in files:
-            dest = target_dir / filename
+            dest = safe_child_path(target_dir, filename)
             if dest.is_file():
                 continue
             cls._download_file(
@@ -239,6 +261,11 @@ class ModelManager:
         """Restore a source checkout from a GitHub archive zip."""
         url = str(entry["url"])
         zip_root = str(entry.get("zip_root", ""))
+        validate_download_url(url, _MODEL_DOWNLOAD_HOSTS)
+        if not zip_root or Path(zip_root).name != zip_root:
+            raise SecurityError("Model archive has an unsafe expected root directory.")
+        if target_dir.is_symlink():
+            raise SecurityError("Refusing to extract a model archive through a symlink.")
 
         request = urllib.request.Request(url)
         with urllib.request.urlopen(request, timeout=120) as response:
@@ -254,20 +281,62 @@ class ModelManager:
                 read += len(chunk)
                 if progress_callback is not None:
                     progress_callback(read, total_size)
+                if read > _MAX_SOURCE_ARCHIVE_BYTES:
+                    raise SecurityError("Model source archive exceeds the safety size limit.")
         payload = b"".join(chunks)
 
         extract_parent = target_dir.parent
         extract_parent.mkdir(parents=True, exist_ok=True)
         with zipfile.ZipFile(io.BytesIO(payload)) as archive:
-            archive.extractall(extract_parent)
+            with tempfile.TemporaryDirectory(prefix="skiagrafia-model-", dir=extract_parent) as staging_name:
+                staging = Path(staging_name)
+                extracted = staging / zip_root
+                ModelManager._extract_archive_safely(archive, staging, zip_root)
+                if not extracted.is_dir():
+                    raise SecurityError("Model archive did not contain its expected root directory.")
+                if target_dir.exists():
+                    # Preserve a partial user-owned checkout while only copying
+                    # the validated archive tree into the configured model root.
+                    shutil.copytree(extracted, target_dir, dirs_exist_ok=True)
+                else:
+                    extracted.rename(target_dir)
 
-        extracted = extract_parent / zip_root
-        if zip_root and extracted.is_dir() and not target_dir.exists():
-            extracted.rename(target_dir)
-        elif zip_root and extracted.is_dir():
-            # Merge into an existing partial checkout, then clean up
-            shutil.copytree(extracted, target_dir, dirs_exist_ok=True)
-            shutil.rmtree(extracted)
+    @staticmethod
+    def _extract_archive_safely(
+        archive: zipfile.ZipFile,
+        destination: Path,
+        expected_root: str,
+    ) -> None:
+        """Extract a zip without traversal, symlinks, zip bombs, or extra roots."""
+        members = archive.infolist()
+        if len(members) > _MAX_SOURCE_ARCHIVE_MEMBERS:
+            raise SecurityError("Model source archive has too many files.")
+        total_size = 0
+        canonical_destination = destination.resolve(strict=True)
+        for member in members:
+            filename = member.filename.replace("\\", "/")
+            parts = [part for part in filename.split("/") if part]
+            if not parts or parts[0] != expected_root or any(part in {".", ".."} for part in parts):
+                raise SecurityError("Model source archive contains an unsafe file path.")
+            if filename.startswith("/") or ":" in parts[0]:
+                raise SecurityError("Model source archive contains an absolute file path.")
+            mode = member.external_attr >> 16
+            if stat.S_ISLNK(mode):
+                raise SecurityError("Model source archive contains a symbolic link.")
+            total_size += member.file_size
+            if total_size > _MAX_SOURCE_ARCHIVE_BYTES:
+                raise SecurityError("Model source archive expands beyond the safety size limit.")
+            target = (destination.joinpath(*parts)).resolve(strict=False)
+            try:
+                target.relative_to(canonical_destination)
+            except ValueError as exc:
+                raise SecurityError("Model source archive escapes its staging directory.") from exc
+            if member.is_dir() or filename.endswith("/"):
+                target.mkdir(parents=True, exist_ok=True)
+                continue
+            target.parent.mkdir(parents=True, exist_ok=True)
+            with archive.open(member, "r") as source, target.open("xb") as output:
+                shutil.copyfileobj(source, output, length=1024 * 1024)
 
     def scan(self) -> list[ModelInfo]:
         """List all known models with their status."""
@@ -327,7 +396,7 @@ def _get_default() -> ModelManager:
         try:
             from utils.preferences import get_models_dir
             models_dir = get_models_dir()
-        except Exception:
+        except (OSError, RuntimeError, TypeError, ValueError):
             models_dir = DEFAULT_MODELS_DIR
         _default_manager = ModelManager(models_dir)
     return _default_manager

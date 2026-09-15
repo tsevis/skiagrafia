@@ -28,7 +28,7 @@ def _patch_onnx_ml_dtypes() -> None:
     """
     try:
         import ml_dtypes
-    except Exception:
+    except ImportError:
         return
 
     fallbacks = {
@@ -53,10 +53,11 @@ def _patch_bert_head_mask() -> None:
     """
     try:
         from transformers.models.bert.modeling_bert import BertModel
-    except Exception:
+    except (ImportError, AttributeError):
         return
 
     if hasattr(BertModel, "get_head_mask"):
+        _patch_bert_invert_attention_mask(BertModel)
         return
 
     def get_head_mask(
@@ -77,7 +78,27 @@ def _patch_bert_head_mask() -> None:
         return head_mask
 
     BertModel.get_head_mask = get_head_mask  # type: ignore[attr-defined]
+    _patch_bert_invert_attention_mask(BertModel)
     logger.info("Patched BertModel.get_head_mask for GroundingDINO compatibility")
+
+
+def _patch_bert_invert_attention_mask(bert_model_type) -> None:
+    """Restore the historical BERT encoder-mask helper removed in v5."""
+    if hasattr(bert_model_type, "invert_attention_mask"):
+        return
+
+    def invert_attention_mask(self, encoder_attention_mask):
+        if encoder_attention_mask.dim() == 3:
+            extended = encoder_attention_mask[:, None, :, :]
+        elif encoder_attention_mask.dim() == 2:
+            extended = encoder_attention_mask[:, None, None, :]
+        else:
+            raise ValueError("encoder_attention_mask must have two or three dimensions")
+        target_dtype = getattr(self, "dtype", torch.float32)
+        return (1.0 - extended.to(dtype=target_dtype)) * torch.finfo(target_dtype).min
+
+    bert_model_type.invert_attention_mask = invert_attention_mask  # type: ignore[attr-defined]
+    logger.info("Patched BertModel.invert_attention_mask for GroundingDINO compatibility")
 
 
 def _patch_get_extended_attention_mask() -> None:
@@ -90,10 +111,10 @@ def _patch_get_extended_attention_mask() -> None:
     """
     try:
         from transformers.modeling_utils import ModuleUtilsMixin
-    except Exception:
+    except (ImportError, AttributeError):
         return
 
-    original = ModuleUtilsMixin.get_extended_attention_mask
+    original = getattr(ModuleUtilsMixin, "get_extended_attention_mask", None)
     if getattr(original, "_skiagrafia_patched", False):
         return
 
@@ -108,10 +129,24 @@ def _patch_get_extended_attention_mask() -> None:
             dtype, device = device, None
         elif not isinstance(device, torch.device) and device is not None and dtype is None:
             dtype = device
-        return original(self, attention_mask, input_shape, dtype=dtype)
+        if original is not None:
+            return original(self, attention_mask, input_shape, dtype=dtype)
+
+        # transformers 5 removed this helper.  GroundingDINO still calls the
+        # historical BERT API, so reproduce the non-causal BERT mask shape
+        # rather than pinning an EOL transformers release with advisories.
+        if attention_mask.dim() == 3:
+            extended = attention_mask[:, None, :, :]
+        elif attention_mask.dim() == 2:
+            extended = attention_mask[:, None, None, :]
+        else:
+            raise ValueError("attention_mask must have two or three dimensions")
+        target_dtype = dtype or getattr(self, "dtype", torch.float32)
+        extended = extended.to(dtype=target_dtype)
+        return (1.0 - extended) * torch.finfo(target_dtype).min
 
     get_extended_attention_mask._skiagrafia_patched = True  # type: ignore[attr-defined]
-    ModuleUtilsMixin.get_extended_attention_mask = get_extended_attention_mask  # type: ignore[assignment]
+    ModuleUtilsMixin.get_extended_attention_mask = get_extended_attention_mask  # type: ignore[attr-defined,assignment]
     logger.info(
         "Patched ModuleUtilsMixin.get_extended_attention_mask for GroundingDINO compatibility"
     )
@@ -208,7 +243,7 @@ class GroundedSAM:
                 str(config_path), str(weights), device=str(DEVICE)
             )
             logger.info("GroundingDINO loaded on %s", DEVICE)
-        except Exception:
+        except (ImportError, FileNotFoundError, OSError, RuntimeError, ValueError, AttributeError):
             logger.error("Failed to load GroundingDINO", exc_info=True)
             raise
 
@@ -230,7 +265,7 @@ class GroundedSAM:
             )
             self._sam_predictor = SAM2ImagePredictor(sam)
             logger.info("SAM 2.1 loaded on %s", DEVICE)
-        except Exception:
+        except (ImportError, FileNotFoundError, OSError, RuntimeError, ValueError, AttributeError):
             logger.error("Failed to load SAM 2.1", exc_info=True)
             raise
 

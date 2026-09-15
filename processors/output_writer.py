@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import logging
+import os
+import xml.etree.ElementTree as ET
 from pathlib import Path
 
 import numpy as np
@@ -8,14 +10,46 @@ from numpy.typing import NDArray
 from PIL import Image
 
 from utils.cairo_support import load_cairosvg
+from utils.security import SecurityError, atomic_write_bytes, temporary_output_path
 
 logger = logging.getLogger(__name__)
 
+_MAX_SVG_BYTES = 32 * 1024 * 1024
+_FORBIDDEN_SVG_TAGS = {"script", "foreignobject", "iframe", "object", "embed", "image"}
+
+
+def _validate_svg(svg_content: str) -> None:
+    """Reject malformed SVG and content that can load or execute external data."""
+    if not svg_content.strip():
+        raise ValueError("SVG export content is empty.")
+    encoded = svg_content.encode("utf-8")
+    if len(encoded) > _MAX_SVG_BYTES:
+        raise ValueError("SVG export exceeds the maximum supported size.")
+    if "<!DOCTYPE" in svg_content.upper() or "<!ENTITY" in svg_content.upper():
+        raise ValueError("SVG export must not contain DTDs or entities.")
+    try:
+        root = ET.fromstring(encoded)
+    except ET.ParseError as exc:
+        raise ValueError("SVG export content is malformed.") from exc
+    if root.tag.rsplit("}", 1)[-1].lower() != "svg":
+        raise ValueError("SVG export must have an SVG root element.")
+    for element in root.iter():
+        tag = element.tag.rsplit("}", 1)[-1].lower()
+        if tag in _FORBIDDEN_SVG_TAGS:
+            raise SecurityError(f"SVG export contains forbidden <{tag}> content.")
+        for name, value in element.attrib.items():
+            attribute = name.rsplit("}", 1)[-1].lower()
+            normalized = value.strip().lower()
+            if attribute.startswith("on") or attribute in {"href", "xlink:href"}:
+                raise SecurityError("SVG export contains an executable or external reference.")
+            if "url(" in normalized or "javascript:" in normalized or "data:" in normalized:
+                raise SecurityError("SVG export contains an external resource reference.")
+
 
 def write_svg(svg_content: str, output_path: Path) -> Path:
-    """Write SVG string to file."""
-    output_path.parent.mkdir(parents=True, exist_ok=True)
-    output_path.write_text(svg_content, encoding="utf-8")
+    """Write a validated SVG atomically to a non-symlink target."""
+    _validate_svg(svg_content)
+    atomic_write_bytes(output_path, svg_content.encode("utf-8"))
     logger.info("SVG written: %s (%.1f KB)", output_path, output_path.stat().st_size / 1024)
     return output_path
 
@@ -28,7 +62,12 @@ def write_tiff(
     icc_profile: bytes | None = None,
 ) -> Path:
     """Write image as TIFF with optional alpha channel (4-channel RGBA)."""
-    output_path.parent.mkdir(parents=True, exist_ok=True)
+    if image.ndim not in {2, 3}:
+        raise ValueError("TIFF export image must be grayscale or RGB.")
+    if image.ndim == 3 and image.shape[2] != 3:
+        raise ValueError("TIFF export image must have exactly three RGB channels.")
+    if alpha is not None and alpha.shape != image.shape[:2]:
+        raise ValueError("TIFF export alpha dimensions must match the image.")
 
     if alpha is not None:
         if len(image.shape) == 2:
@@ -42,8 +81,17 @@ def write_tiff(
         else:
             pil_img = Image.fromarray(image, mode="RGB")
 
-    pil_img.save(str(output_path), format="TIFF", compression="tiff_lzw",
-                 **({"icc_profile": icc_profile} if icc_profile else {}))
+    temporary = temporary_output_path(output_path)
+    try:
+        pil_img.save(str(temporary), format="TIFF", compression="tiff_lzw",
+                     **({"icc_profile": icc_profile} if icc_profile else {}))
+        os.replace(temporary, output_path)
+    finally:
+        temporary.unlink(missing_ok=True)
+    with Image.open(output_path) as decoded:
+        expected_mode = "RGBA" if alpha is not None else ("L" if image.ndim == 2 else "RGB")
+        if decoded.size != (image.shape[1], image.shape[0]) or decoded.mode != expected_mode:
+            raise RuntimeError("TIFF export failed integrity validation.")
     logger.info("TIFF written: %s (%.1f KB)", output_path, output_path.stat().st_size / 1024)
     return output_path
 
@@ -54,7 +102,12 @@ def write_png(
     alpha: NDArray[np.uint8] | None = None,
 ) -> Path:
     """Write image as PNG with optional alpha channel."""
-    output_path.parent.mkdir(parents=True, exist_ok=True)
+    if image.ndim not in {2, 3}:
+        raise ValueError("PNG export image must be grayscale or RGB.")
+    if image.ndim == 3 and image.shape[2] != 3:
+        raise ValueError("PNG export image must have exactly three RGB channels.")
+    if alpha is not None and alpha.shape != image.shape[:2]:
+        raise ValueError("PNG export alpha dimensions must match the image.")
 
     if alpha is not None:
         if len(image.shape) == 2:
@@ -68,13 +121,23 @@ def write_png(
         else:
             pil_img = Image.fromarray(image, mode="RGB")
 
-    pil_img.save(str(output_path), format="PNG")
+    temporary = temporary_output_path(output_path)
+    try:
+        pil_img.save(str(temporary), format="PNG")
+        os.replace(temporary, output_path)
+    finally:
+        temporary.unlink(missing_ok=True)
+    with Image.open(output_path) as decoded:
+        expected_mode = "RGBA" if alpha is not None else ("L" if image.ndim == 2 else "RGB")
+        if decoded.size != (image.shape[1], image.shape[0]) or decoded.mode != expected_mode:
+            raise RuntimeError("PNG export failed integrity validation.")
     logger.info("PNG written: %s (%.1f KB)", output_path, output_path.stat().st_size / 1024)
     return output_path
 
 
 def write_pdf(svg_content: str, output_path: Path) -> Path:
     """Convert SVG to PDF via cairosvg."""
+    _validate_svg(svg_content)
     cairosvg = load_cairosvg(logger)
     if cairosvg is None:
         raise RuntimeError(
@@ -82,7 +145,15 @@ def write_pdf(svg_content: str, output_path: Path) -> Path:
             "Install Cairo with 'brew install cairo' and restart Skiagrafia."
         )
 
-    output_path.parent.mkdir(parents=True, exist_ok=True)
-    cairosvg.svg2pdf(bytestring=svg_content.encode("utf-8"), write_to=str(output_path))
+    temporary = temporary_output_path(output_path)
+    try:
+        cairosvg.svg2pdf(
+            bytestring=svg_content.encode("utf-8"), write_to=str(temporary), unsafe=False
+        )
+        if not temporary.read_bytes().startswith(b"%PDF"):
+            raise RuntimeError("PDF export failed integrity validation.")
+        os.replace(temporary, output_path)
+    finally:
+        temporary.unlink(missing_ok=True)
     logger.info("PDF written: %s (%.1f KB)", output_path, output_path.stat().st_size / 1024)
     return output_path

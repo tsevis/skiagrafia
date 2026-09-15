@@ -1,10 +1,11 @@
 from __future__ import annotations
 
 import logging
+import sqlite3
 from enum import StrEnum
 from pathlib import Path
 
-from pydantic import BaseModel
+from pydantic import BaseModel, ValidationError
 from sqlitedict import SqliteDict
 
 logger = logging.getLogger(__name__)
@@ -31,6 +32,10 @@ class JobRecord(BaseModel):
     error: str | None = None
     output_svg: str | None = None
     output_tiff: str | None = None
+    output_all_objects_tiff: str | None = None
+    # Stored rather than inferred from output files so a later resume retains
+    # the original processing metrics without scanning or trusting artefacts.
+    layer_count: int = 0
 
 
 class StateManager:
@@ -90,11 +95,14 @@ class StateManager:
         if not output_dir.exists():
             return results
         for db_path in output_dir.glob("*/state.db"):
+            sm: StateManager | None = None
             try:
                 sm = StateManager(db_path)
                 if sm.incomplete_ids():
                     results.append(db_path)
-                sm.close()
-            except Exception:
+            except (OSError, sqlite3.DatabaseError, ValidationError, ValueError):
                 logger.warning("Could not read %s", db_path, exc_info=True)
+            finally:
+                if sm is not None:
+                    sm.close()
         return results

@@ -139,6 +139,17 @@ class TestNameSlugging:
         assert path.exists()
         assert len(path.name.encode()) < 255
 
+    def test_save_refuses_symlinked_template_target(self, fake_home: Path) -> None:
+        templates = fake_home / ".config" / "skiagrafia" / "templates"
+        templates.mkdir(parents=True)
+        external = fake_home / "outside.json"
+        (templates / "symlinked.json").symlink_to(external)
+
+        with pytest.raises(ValueError, match="symlink"):
+            _make_template(name="symlinked").save()
+
+        assert not external.exists()
+
 
 class TestLoad:
     def test_load_malformed_json_raises(self, tmp_path: Path) -> None:

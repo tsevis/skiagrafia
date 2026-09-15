@@ -129,6 +129,68 @@ class TestBatchViewConstruction:
         assert labels_two == ["iPhone"]
         assert selections_two == {"iPhone": "all"}
 
+    def test_image_specific_triage_exclusion_preserves_the_label_elsewhere(
+        self, batch_view
+    ) -> None:
+        batch_view.confirmed_labels = ["Apple computer"]
+        batch_view.excluded_labels_by_image = {
+            "/input/rubble.jpg": ["Apple computer"]
+        }
+        batch_view.interrogation_records = {
+            "/input/rubble.jpg": [{"canonical_label": "Apple computer", "selection": "all"}],
+            "/input/mac.jpg": [{"canonical_label": "Apple computer", "selection": "largest"}],
+        }
+
+        skipped_labels, skipped_selections = batch_view.labels_for_image("/input/rubble.jpg")
+        kept_labels, kept_selections = batch_view.labels_for_image("/input/mac.jpg")
+
+        assert skipped_labels == []
+        assert skipped_selections == {}
+        assert kept_labels == ["Apple computer"]
+        assert kept_selections == {"Apple computer": "largest"}
+
+    def test_freezing_processing_manifest_preserves_per_image_triage(
+        self, batch_view, tmp_path
+    ) -> None:
+        from core.batch_session import BatchRunSettings, load_processing_snapshot
+
+        input_dir = tmp_path / "input"
+        input_dir.mkdir()
+        kept = _write_image(input_dir / "kept.png")
+        skipped = _write_image(input_dir / "skipped.png")
+        batch_view.run_settings = BatchRunSettings(
+            batch_id="frozen-triage",
+            input_folder=str(input_dir),
+            output_directory=batch_view.app.prefs["output_directory"],
+            selection_request="Select Apple computers.",
+            interrogation_settings={
+                "output_mode": "vector+bitmap",
+                "interrogation_profile": "balanced",
+            },
+        )
+        batch_view.interrogation_records = {
+            str(kept): [{"canonical_label": "Apple computer", "selection": "largest"}],
+            str(skipped): [{"canonical_label": "Apple computer", "selection": "all"}],
+        }
+        batch_view.confirmed_labels = ["Apple computer"]
+        batch_view.excluded_labels_by_image = {str(skipped): ["Apple computer"]}
+
+        config = batch_view.freeze_processing_config([str(kept), str(skipped)])
+        snapshot = load_processing_snapshot(
+            batch_view.run_settings.run_dir / "processing.json"
+        )
+
+        assert config.input_images == [str(kept), str(skipped)]
+        assert config.labels_by_image == {
+            str(kept): ["Apple computer"],
+            str(skipped): [],
+        }
+        assert config.selections_by_image == {
+            str(kept): {"Apple computer": "largest"},
+            str(skipped): {},
+        }
+        assert snapshot.config == config.model_dump()
+
 
 # ── Navigation ──────────────────────────────────────────────────────────────
 
@@ -296,6 +358,135 @@ class TestStepImport:
         tk_root.update()
         assert step.input_folder is None
 
+    def test_legacy_state_database_is_not_presented_as_a_gui_resume_action(
+        self, batch_view, tmp_path
+    ) -> None:
+        from core.state_manager import JobRecord, JobStatus, StateManager
+
+        state = StateManager(tmp_path / "out" / "legacy-run" / "state.db")
+        state.put(
+            "unfinished",
+            JobRecord(image_path="/input/unfinished.jpg", status=JobStatus.PENDING),
+        )
+        state.close()
+
+        step = batch_view._step_views[0]
+        step._scan_recent_batches()
+
+        statuses = [
+            step._recent_list.item(item_id, "values")[1]
+            for item_id in step._recent_list.get_children()
+        ]
+        assert "Incomplete" not in statuses
+
+    def test_verified_batch_resume_restores_triage_before_starting_runner(
+        self, batch_view, tk_root, tmp_path, monkeypatch
+    ) -> None:
+        from core.batch_runner import BatchConfig
+        from core.batch_session import (
+            BatchInterrogationSnapshot,
+            BatchProcessingSnapshot,
+            BatchRunSettings,
+            BatchTriageSnapshot,
+            triage_labels_for_image,
+            write_processing_snapshot,
+            write_snapshot,
+        )
+        from core.state_manager import JobRecord, JobStatus, StateManager
+        from ui.batch.steps.step_progress import StepProgress
+
+        input_dir = tmp_path / "resume-input"
+        input_dir.mkdir()
+        complete = _write_image(input_dir / "complete.png")
+        pending = _write_image(input_dir / "pending.png")
+        output_dir = Path(batch_view.app.prefs["output_directory"])
+        run = BatchRunSettings(
+            batch_id="gui-resume",
+            input_folder=str(input_dir),
+            output_directory=str(output_dir),
+            selection_request="Select Apple computers.",
+            interrogation_settings={"output_mode": "vector+bitmap"},
+        )
+        candidates = {
+            str(complete): [{"canonical_label": "Apple computer", "selection": "largest"}],
+            str(pending): [{"canonical_label": "Apple computer", "selection": "all"}],
+        }
+        triage = BatchTriageSnapshot(
+            batch_id=run.batch_id,
+            selection_request=run.selection_request,
+            approved_labels=["Apple computer"],
+            excluded_labels_by_image={str(pending): ["Apple computer"]},
+        )
+        labels_by_image: dict[str, list[str]] = {}
+        selections_by_image: dict[str, dict[str, str]] = {}
+        for image_path, image_candidates in candidates.items():
+            labels, selections = triage_labels_for_image(
+                image_candidates,
+                triage.approved_labels,
+                triage.excluded_labels_by_image.get(image_path, []),
+            )
+            labels_by_image[image_path] = labels
+            selections_by_image[image_path] = selections
+        config = BatchConfig(
+            batch_id=run.batch_id,
+            input_folder=run.input_folder,
+            output_dir=run.output_directory,
+            confirmed_labels=triage.approved_labels,
+            input_images=[str(complete), str(pending)],
+            labels_by_image=labels_by_image,
+            selections_by_image=selections_by_image,
+        )
+        write_snapshot(run.run_dir / "run.json", run)
+        write_snapshot(
+            run.run_dir / "interrogation.json",
+            BatchInterrogationSnapshot(
+                batch_id=run.batch_id,
+                selection_request=run.selection_request,
+                candidates_by_image=candidates,
+            ),
+        )
+        write_snapshot(run.run_dir / "triage.json", triage)
+        write_processing_snapshot(
+            run.run_dir / "processing.json",
+            BatchProcessingSnapshot(batch_id=run.batch_id, config=config.model_dump()),
+        )
+        all_objects = run.run_dir / "complete_all-objects.tiff"
+        all_objects.write_bytes(b"durable output marker")
+        state = StateManager(run.run_dir / "state.db")
+        state.put(
+            "complete",
+            JobRecord(
+                image_path=str(complete),
+                status=JobStatus.COMPLETE,
+                output_all_objects_tiff=str(all_objects),
+            ),
+        )
+        state.put("pending", JobRecord(image_path=str(pending), status=JobStatus.FAILED))
+        state.close()
+
+        calls: list[str] = []
+        monkeypatch.setattr(StepProgress, "resume_existing", lambda self: calls.append("resume"))
+        step = batch_view._step_views[0]
+        step._scan_recent_batches()
+        item = next(
+            item_id
+            for item_id in step._recent_list.get_children()
+            if step._recent_list.item(item_id, "values")[1] == "Resume ready"
+        )
+        step._recent_list.selection_set(item)
+        step._update_resume_button()
+
+        assert str(step._resume_btn.cget("state")) == "normal"
+        step._resume_selected_run()
+        tk_root.update()
+
+        assert calls == ["resume"]
+        assert batch_view.current_step == 4
+        assert batch_view.run_settings.batch_id == "gui-resume"
+        assert batch_view.confirmed_labels == ["Apple computer"]
+        assert batch_view.excluded_labels_by_image == {str(pending): ["Apple computer"]}
+        assert batch_view.interrogation_records == candidates
+
 
 # ── Step 3: Interrogate ─────────────────────────────────────────────────────
 
@@ -429,6 +620,39 @@ class TestStepTriage:
         assert sorted(batch_view.confirmed_labels) == ["chalice", "paten"]
         assert batch_view.current_step == 4
 
+    def test_per_image_exception_is_stored_with_the_triage_decision(
+        self, batch_view, tk_root
+    ) -> None:
+        from core.batch_session import BatchRunSettings, load_triage_snapshot
+
+        batch_view.go_to_step(3)
+        step = batch_view._step_views[3]
+        batch_view.run_settings = BatchRunSettings(
+            batch_id="triage-exception",
+            output_directory=batch_view.app.prefs["output_directory"],
+            selection_request="Select Apple computers; exclude scenery.",
+        )
+        batch_view.interrogation_records = {
+            "/input/rubble.jpg": [{"canonical_label": "Apple computer", "role": "parent"}],
+            "/input/mac.jpg": [{"canonical_label": "Apple computer", "role": "parent"}],
+        }
+        step.populate(
+            {"Apple computer": {"label": "Apple computer", "role": "parent"}}
+        )
+        tk_root.update()
+
+        step._image_exclude_vars[("/input/rubble.jpg", "Apple computer")].set(True)
+        step._on_confirm()
+
+        assert batch_view.confirmed_labels == ["Apple computer"]
+        assert batch_view.excluded_labels_by_image == {
+            "/input/rubble.jpg": ["Apple computer"]
+        }
+        snapshot = load_triage_snapshot(batch_view.run_settings.run_dir / "triage.json")
+        assert snapshot.excluded_labels_by_image == {
+            "/input/rubble.jpg": ["Apple computer"]
+        }
+
     def test_confirming_nothing_does_not_advance(
         self, batch_view, tk_root
     ) -> None:
@@ -468,6 +692,33 @@ class TestStepProgress:
         tk_root.update()
         assert len(step._thumb_labels) == 3
 
+    def test_source_thumbnail_is_shown_when_image_path_is_available(
+        self, batch_view, tk_root, tmp_path
+    ) -> None:
+        image_path = _write_image(tmp_path / "source.png")
+        batch_view.go_to_step(4)
+        step = batch_view._step_views[4]
+
+        step.init_thumbnails([str(image_path)])
+        tk_root.update()
+
+        assert "source" in step._thumb_labels
+        assert step._thumb_labels["source"].cget("image")
+        assert "source" in step._thumb_refs
+
+    def test_missing_source_image_keeps_the_status_cell_fallback(
+        self, batch_view, tk_root, tmp_path
+    ) -> None:
+        batch_view.go_to_step(4)
+        step = batch_view._step_views[4]
+
+        step.init_thumbnails([str(tmp_path / "missing.png")])
+        tk_root.update()
+
+        label = step._thumb_labels[str(tmp_path / "missing.png")]
+        assert label.cget("text") == "—"
+        assert not label.cget("image")
+
     def test_thumbnail_status_updates(self, batch_view, tk_root) -> None:
         batch_view.go_to_step(4)
         step = batch_view._step_views[4]
@@ -476,6 +727,39 @@ class TestStepProgress:
         step.update_thumbnail_status("a", "complete")
         tk_root.update()
         assert step._thumb_labels["a"].cget("text") != before
+
+    def test_batch_runner_phases_render_as_running_thumbnail_status(
+        self, batch_view, tk_root
+    ) -> None:
+        batch_view.go_to_step(4)
+        step = batch_view._step_views[4]
+        step.init_thumbnails(["a"])
+
+        step.update_thumbnail_status("a", "masking")
+        tk_root.update()
+
+        assert step._thumb_labels["a"].cget("text") == "·"
+
+    def test_progress_counts_terminal_failures_in_the_percentage(
+        self, batch_view, tk_root
+    ) -> None:
+        batch_view.go_to_step(4)
+        step = batch_view._step_views[4]
+
+        step.update_progress(
+            SimpleNamespace(
+                total=4,
+                completed=1,
+                failed=2,
+                remaining=1,
+                images_per_min=3.0,
+                eta_seconds=20.0,
+            )
+        )
+        tk_root.update()
+
+        assert step._progress_bar["value"] == 3
+        assert step._progress_label.cget("text").startswith("75%")
 
     def test_status_for_an_unknown_image_is_ignored(
         self, batch_view, tk_root
@@ -505,9 +789,12 @@ class TestStepOutput:
     def test_summary_updates_the_cards(self, batch_view, tk_root) -> None:
         batch_view.go_to_step(5)
         step = batch_view._step_views[5]
-        step.update_summary(svg_count=12, avg_layers=3.5, failed_count=2)
+        step.update_summary(
+            svg_count=12, avg_layers=3.5, failed_count=2, all_objects_count=11
+        )
         tk_root.update()
         assert step._svg_card._value_label.cget("text") == "12"
+        assert step._all_objects_card._value_label.cget("text") == "11"
         assert step._layers_card._value_label.cget("text") == "3.5"
 
     def test_summary_is_stored_on_the_view(self, batch_view, tk_root) -> None:
@@ -535,6 +822,23 @@ class TestStepOutput:
         tk_root.update()
         assert str(step._retry_btn.cget("state")) == "disabled"
 
+    def test_retry_failed_restarts_only_the_failed_images(
+        self, batch_view, monkeypatch
+    ) -> None:
+        batch_view.failed_image_paths = ["/input/failed-one.jpg", "/input/failed-two.jpg"]
+        batch_view.go_to_step(5)
+        step = batch_view._step_views[5]
+        calls: list[list[str]] = []
+        batch_view.go_to_step(4)
+        progress = batch_view._step_views[4]
+        monkeypatch.setattr(progress, "start_retry", lambda paths: calls.append(paths))
+        batch_view.go_to_step(5)
+
+        step._retry_failed()
+
+        assert calls == [["/input/failed-one.jpg", "/input/failed-two.jpg"]]
+        assert batch_view.current_step == 4
+
     def test_saved_summary_is_rehydrated_on_revisit(
         self, batch_view, tk_root
     ) -> None:
@@ -546,6 +850,43 @@ class TestStepOutput:
         batch_view.go_to_step(5)
         tk_root.update()
         assert batch_view._step_views[5]._svg_card._value_label.cget("text") == "9"
+
+    def test_tiff_bundle_copies_all_objects_and_layer_exports(
+        self, batch_view, tmp_path, monkeypatch
+    ) -> None:
+        batch_view.go_to_step(5)
+        step = batch_view._step_views[5]
+        source = tmp_path / "out"
+        all_objects = source / "sample_all-objects.tiff"
+        layer = source / "sample_object-001.tiff"
+        all_objects.write_bytes(b"foreground")
+        layer.write_bytes(b"layer")
+        destination = tmp_path / "exported"
+        destination.mkdir()
+        monkeypatch.setattr("tkinter.filedialog.askdirectory", lambda **_: str(destination))
+        monkeypatch.setattr("tkinter.messagebox.showinfo", lambda *_, **__: None)
+
+        step._export_tiff_bundle()
+
+        assert (destination / all_objects.name).read_bytes() == b"foreground"
+        assert (destination / layer.name).read_bytes() == b"layer"
+
+    def test_svg_bundle_copies_only_svg_files(self, batch_view, tmp_path, monkeypatch) -> None:
+        batch_view.go_to_step(5)
+        step = batch_view._step_views[5]
+        source = tmp_path / "out"
+        svg = source / "sample.svg"
+        svg.write_text("<svg/>", encoding="utf-8")
+        (source / "sample.tiff").write_bytes(b"tiff")
+        destination = tmp_path / "exported"
+        destination.mkdir()
+        monkeypatch.setattr("tkinter.filedialog.askdirectory", lambda **_: str(destination))
+        monkeypatch.setattr("tkinter.messagebox.showinfo", lambda *_, **__: None)
+
+        step._export_svg_bundle()
+
+        assert (destination / svg.name).read_text(encoding="utf-8") == "<svg/>"
+        assert not (destination / "sample.tiff").exists()
 
 
 # ── Step 2: Configure ───────────────────────────────────────────────────────
@@ -586,12 +927,14 @@ class TestStepConfigure:
         batch_view.selection_request = "Original request"
         batch_view.interrogation_records = {"/input/a.jpg": [{"canonical_label": "iMac"}]}
         batch_view.confirmed_labels = ["iMac"]
+        batch_view.excluded_labels_by_image = {"/input/a.jpg": ["iMac"]}
         step._set_selection_request("Changed request")
         tk_root.update()
 
         assert batch_view.interrogation_stale is True
         assert batch_view.interrogation_records == {}
         assert batch_view.confirmed_labels == []
+        assert batch_view.excluded_labels_by_image == {}
 
     def test_template_and_previous_run_restore_selection_request(
         self, batch_view, tk_root
@@ -608,7 +951,9 @@ class TestStepConfigure:
         batch_view.load_template(template)
         batch_view.go_to_step(1)
         tk_root.update()
-        assert batch_view._step_views[1].get_selection_request() == "Template request"
+        step = batch_view._step_views[1]
+        assert step.get_selection_request() == "Template request"
+        assert "remain editable" in step._template_status_label.cget("text")
 
         batch_view.load_run_settings(
             BatchRunSettings(

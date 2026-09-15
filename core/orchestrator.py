@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import logging
 import re
+from hashlib import sha256
 from pathlib import Path
 from typing import Callable
 
@@ -24,13 +25,14 @@ from pydantic import BaseModel, ConfigDict, Field
 from core.contracts import CapabilitySet
 from core.interrogation import InterrogationCandidate
 from core.knowledge import KnowledgePack
-from core.layer_editing import body_alpha
+from core.layer_editing import all_objects_alpha, body_alpha
 from models.grounded_sam import DetectionResult
 from processors.mask_ops import refine_mask
 from processors.vectorizer import assemble_svg
 from processors.output_writer import write_svg, write_tiff
 from processors.source_image import load_source_image, detection_image
 from utils.coord_math import tight_bbox
+from utils.security import SecurityError, safe_child_path
 
 logger = logging.getLogger(__name__)
 
@@ -55,7 +57,10 @@ def _safe_filename_label(label: str) -> str:
     lists of 38 items).  macOS enforces a 255-byte filename limit.
     """
     # Replace path-unsafe characters
-    safe = label.replace("/", "_").replace("\\", "_").replace(":", "_")
+    safe = re.sub(r"[^A-Za-z0-9._ -]+", "_", label).strip(". ")
+    safe = safe.replace("/", "_").replace("\\", "_").replace(":", "_")
+    if not safe:
+        safe = "layer"
     if len(safe) > MAX_LABEL_FILENAME_LEN:
         safe = safe[:MAX_LABEL_FILENAME_LEN].rstrip(". ")
     return safe
@@ -102,6 +107,7 @@ class PipelineResult(BaseModel):
     layers: list[LayerResult] = []
     svg_path: str | None = None
     tiff_path: str | None = None
+    all_objects_tiff_path: str | None = None
     error: str | None = None
     warnings: list[str] = Field(default_factory=list)
     tiff_files: list[str] = Field(default_factory=list)
@@ -245,6 +251,12 @@ class Orchestrator:
         self._progress(step, text)
         logger.info("Step %d/%d: %s", step + 1, len(PIPELINE_STEPS), text)
 
+    def set_confirmed_selections(self, selections: dict[str, str]) -> None:
+        """Apply one image's approved instance policy before ``process()``."""
+        set_selections = getattr(self._interrogator, "set_confirmed_selections", None)
+        if callable(set_selections):
+            set_selections(selections)
+
     # ─────────────────────────────────────────────────────────────────────
     # Public entry point
     # ─────────────────────────────────────────────────────────────────────
@@ -258,7 +270,6 @@ class Orchestrator:
         image_path = Path(image_path)
         result = PipelineResult(image_path=str(image_path), width=0, height=0)
         self._output_dir.mkdir(parents=True, exist_ok=True)
-
         try:
             result = self._run_structural_branch(
                 image_path,
@@ -266,7 +277,7 @@ class Orchestrator:
                 confirmed_labels,
                 manual_detections,
             )
-        except Exception as exc:
+        except (OSError, ValueError, RuntimeError, SecurityError) as exc:
             result.error = str(exc)
             logger.error("Pipeline failed for %s: %s", image_path, exc, exc_info=True)
 
@@ -288,7 +299,10 @@ class Orchestrator:
 
         # STEP 0 — Load
         self._report(0)
-        source_rgb, source_alpha, source_icc = load_source_image(image_path)
+        try:
+            source_rgb, source_alpha, source_icc = load_source_image(image_path)
+        except FileNotFoundError as exc:
+            raise RuntimeError(f"Invalid image input: {exc}") from exc
         image = detection_image(source_rgb, source_alpha)
         h, w = image.shape[:2]
         result.width, result.height = w, h
@@ -381,14 +395,22 @@ class Orchestrator:
             self._report(6)
             for layer in result.layers:
                 mask = masks[layer.layer_id]
-                alpha = mask.copy() if self._quality == "fast" else self._alpha_refiner.predict(image, mask)
+                try:
+                    alpha = mask.copy() if self._quality == "fast" else self._alpha_refiner.predict(image, mask)
+                except (OSError, RuntimeError, ValueError) as exc:
+                    raise RuntimeError(f"Alpha refinement failed for '{layer.label}'.") from exc
+                if alpha.shape != image.shape[:2]:
+                    raise RuntimeError(f"Alpha refinement failed for '{layer.label}': invalid dimensions.")
                 alpha = np.minimum(alpha, source_alpha)
                 if layer.parent_id:
                     alpha = np.minimum(alpha, alphas[layer.parent_id])
                 alphas[layer.layer_id] = alpha
                 layer.alpha = alpha
-                path = self._output_dir / f"{image_path.stem}_{layer.layer_id}.tiff"
-                write_tiff(source_rgb, path, alpha, icc_profile=source_icc)
+                path = self._output_path(f"{self._image_token(image_path)}_{layer.layer_id}.tiff")
+                try:
+                    write_tiff(source_rgb, path, alpha, icc_profile=source_icc)
+                except (OSError, RuntimeError, ValueError, SecurityError) as exc:
+                    raise RuntimeError(f"TIFF export failed for '{layer.label}'.") from exc
                 layer.alpha_path = str(path)
                 result.tiff_files.append(str(path))
             # Bodies use subtraction of the actual child mattes, not a second
@@ -397,31 +419,78 @@ class Orchestrator:
                 children = [c for c in result.layers if c.parent_id == layer.layer_id]
                 if children:
                     body = body_alpha(alphas[layer.layer_id], [alphas[c.layer_id] for c in children])
-                    path = self._output_dir / f"{image_path.stem}_{layer.layer_id}-body.tiff"
-                    write_tiff(source_rgb, path, body, icc_profile=source_icc)
+                    path = self._output_path(f"{self._image_token(image_path)}_{layer.layer_id}-body.tiff")
+                    try:
+                        write_tiff(source_rgb, path, body, icc_profile=source_icc)
+                    except (OSError, RuntimeError, ValueError, SecurityError) as exc:
+                        raise RuntimeError(f"TIFF body export failed for '{layer.label}'.") from exc
                     result.tiff_files.append(str(path))
-            if result.tiff_files:
-                result.tiff_path = str(self._output_dir)
+            all_alpha = all_objects_alpha(list(alphas.values()), (h, w))
         else:
-            self._report(6, "Alpha export skipped (vector mode)")
+            # The all-objects sidecar is intentionally present even for a
+            # vector-only run.  It gives every processed image one complete
+            # foreground asset, while per-layer TIFFs remain opt-in.
+            self._report(6, "Creating all-objects alpha sidecar")
+            all_mask = all_objects_alpha(list(masks.values()), (h, w))
+            if result.layers and self._quality != "fast":
+                try:
+                    all_alpha = self._alpha_refiner.predict(image, all_mask)
+                except (OSError, RuntimeError, ValueError) as exc:
+                    raise RuntimeError("All-objects alpha refinement failed.") from exc
+                if all_alpha.shape != image.shape[:2]:
+                    raise RuntimeError("All-objects alpha refinement failed: invalid dimensions.")
+            else:
+                all_alpha = all_mask
+            all_alpha = np.minimum(all_alpha, source_alpha)
+
+        # Always export one complete foreground asset.  With no accepted
+        # layers this is an intentionally transparent TIFF: it is a truthful,
+        # predictable result rather than a full-frame background fallback.
+        all_objects_path = self._output_path(
+            f"{self._image_token(image_path)}_all-objects.tiff"
+        )
+        try:
+            write_tiff(source_rgb, all_objects_path, all_alpha, icc_profile=source_icc)
+        except (OSError, RuntimeError, ValueError, SecurityError) as exc:
+            raise RuntimeError("All-objects TIFF export failed.") from exc
+        result.all_objects_tiff_path = str(all_objects_path)
+        result.tiff_files.append(str(all_objects_path))
+        result.tiff_path = str(self._output_dir)
 
         self._report(7, "Preserving holes and fine mask details")
         self._report(8)
         svg_layers = []
         for layer in result.layers:
             layer.mask = masks[layer.layer_id]
-            layer.svg_data = self._vectorizer.trace(layer.mask)
+            try:
+                layer.svg_data = self._vectorizer.trace(layer.mask)
+            except (OSError, RuntimeError, ValueError) as exc:
+                raise RuntimeError(f"SVG tracing failed for '{layer.label}'.") from exc
             svg_layers.append({"id": layer.layer_id, "label": layer.label, "parent_id": layer.parent_id or "",
                                "svg_data": layer.svg_data, "dx": 0, "dy": 0})
         self._report(9)
         if svg_layers:
-            path = self._output_dir / f"{image_path.stem}.svg"
-            write_svg(assemble_svg(w, h, svg_layers), path)
+            path = self._output_path(f"{self._image_token(image_path)}.svg")
+            try:
+                write_svg(assemble_svg(w, h, svg_layers), path)
+            except (OSError, RuntimeError, ValueError, SecurityError) as exc:
+                raise RuntimeError("SVG export failed integrity validation.") from exc
             result.svg_path = str(path)
         else:
             result.warnings.append("No usable object masks were found. Review the prompt or draw a box.")
         result.warnings.extend(getattr(self._detector, "warnings", []))
         return result
+
+    def _output_path(self, filename: str) -> Path:
+        """Create a flat output path under the configured, canonical root."""
+        return safe_child_path(self._output_dir, filename)
+
+    @staticmethod
+    def _image_token(image_path: Path) -> str:
+        """A readable, collision-resistant filename stem for one source image."""
+        stem = _safe_filename_label(image_path.stem)[:80]
+        digest = sha256(str(image_path.resolve(strict=False)).encode("utf-8")).hexdigest()[:10]
+        return f"{stem}-{digest}"
 
     @staticmethod
     def _layer_id(index: int, label: str) -> str:
@@ -472,7 +541,7 @@ class Orchestrator:
         if mask is None or manual:
             mask = self._segmenter.segment(image, detection.bbox, label, prefer_full_box=manual)
         if mask.shape != image.shape[:2]:
-            raise ValueError(f"Mask dimensions do not match the image for {label}")
+            raise RuntimeError(f"Mask generation failed for '{label}': invalid dimensions.")
         mask = (mask > 127).astype(np.uint8) * 255
         return _clip_mask_to_bbox(mask, detection.bbox) if manual else mask
 

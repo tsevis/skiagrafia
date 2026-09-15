@@ -110,12 +110,14 @@ class StepInterrogate:
             self._clear_results()
             self._view.interrogation_records = {}
             self._view.confirmed_labels = []
+            self._view.excluded_labels_by_image = {}
         else:
             # Re-running with the same request replaces, rather than adds to,
             # the previous candidate set.
             self._clear_results()
             self._view.interrogation_records = {}
             self._view.confirmed_labels = []
+            self._view.excluded_labels_by_image = {}
 
         self._view.begin_run(config)
         self._start_btn.config(state="disabled", text="Analysing...")

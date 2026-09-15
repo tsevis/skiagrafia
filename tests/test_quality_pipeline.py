@@ -39,7 +39,12 @@ def test_repeated_objects_and_parts_have_independent_exports(tmp_path):
     assert len(parents) == len(children) == 2
     assert len({x.layer_id for x in result.layers}) == 4
     assert {x.parent_id for x in children} == {x.layer_id for x in parents}
-    assert len(result.tiff_files) == len(set(result.tiff_files)) == 6
+    assert len(result.tiff_files) == len(set(result.tiff_files)) == 7
+    assert result.all_objects_tiff_path is not None
+    with Image.open(result.all_objects_tiff_path) as rgba:
+        alpha = np.asarray(rgba)[..., 3]
+    expected = np.maximum.reduce([layer.alpha for layer in result.layers])
+    assert np.array_equal(alpha, expected)
     assert not np.array_equal(children[0].mask, children[1].mask)
     root = ET.parse(result.svg_path)
     ids = [node.attrib['id'] for node in root.iter() if 'id' in node.attrib]
@@ -186,6 +191,10 @@ def test_layer_edit_reclips_children_and_updates_export(tmp_path):
     assert not child.mask.any()
     with Image.open(child.alpha_path) as rgba:
         assert not np.asarray(rgba)[..., 3].any()
+    with Image.open(result.all_objects_tiff_path) as rgba:
+        composite_alpha = np.asarray(rgba)[..., 3]
+    expected = np.maximum.reduce([layer.alpha for layer in result.layers])
+    assert np.array_equal(composite_alpha, expected)
 
 
 def test_existing_transparency_is_preserved_in_export(tmp_path):

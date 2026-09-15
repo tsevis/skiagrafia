@@ -1,10 +1,12 @@
 from __future__ import annotations
 
 import functools
+import hashlib
 import json
 import sys
 import logging
 import os
+import re
 import time
 import uuid
 from concurrent.futures import ProcessPoolExecutor, Future
@@ -18,6 +20,8 @@ from core.orchestrator import Orchestrator, PipelineResult
 from core.state_manager import JobRecord, JobStatus, StateManager
 
 logger = logging.getLogger(__name__)
+
+_BATCH_ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$")
 
 
 class BatchConfig(BaseModel):
@@ -53,7 +57,7 @@ class BatchConfig(BaseModel):
     enable_tiled_fallback: bool = True
     max_aliases_per_object: int = 4
     models_directory: str = ""
-    segmentation_backend: str = "auto"
+    segmentation_backend: str = "sam2"
     sam3_confidence: float = 0.5
     local_primary_model: str = "Qwen3-VL-8B-Instruct"
     local_fallback_model: str = "gemma-4-12B-it"
@@ -62,10 +66,20 @@ class BatchConfig(BaseModel):
     object_prompt: str = ""
     selection_request: str = ""
     discover_parts: bool = True
+    # GUI batches freeze this exact list after interrogation.  A resume must
+    # never discover a newly-added folder file that did not pass Triage.
+    input_images: list[str] = Field(default_factory=list)
+    # The human-approved labels and instance policies are image-specific.
+    # Keeping them in the worker config preserves GUI Triage semantics when
+    # BatchRunner resumes an interrupted run.
+    labels_by_image: dict[str, list[str]] = Field(default_factory=dict)
+    selections_by_image: dict[str, dict[str, str]] = Field(default_factory=dict)
 
     def model_post_init(self, __context: object) -> None:
         if not self.batch_id:
             self.batch_id = uuid.uuid4().hex[:12]
+        elif not _BATCH_ID_RE.fullmatch(self.batch_id):
+            raise ValueError("Batch ID must use only letters, numbers, underscores, or hyphens.")
         if self.max_workers <= 0:
             self.max_workers = os.cpu_count() or 4
 
@@ -82,6 +96,19 @@ class BatchProgress(BaseModel):
     eta_seconds: float = 0.0
 
 
+class BatchRunSummary(BaseModel):
+    """Persisted output metrics reconstructed from successful state records."""
+
+    total: int = 0
+    completed: int = 0
+    failed: int = 0
+    svg_count: int = 0
+    all_objects_count: int = 0
+    avg_layers: float = 0.0
+    failed_image_paths: list[str] = Field(default_factory=list)
+    status_by_image: dict[str, str] = Field(default_factory=dict)
+
+
 def _process_single(
     image_path: str,
     config_dict: dict,
@@ -92,7 +119,12 @@ def _process_single(
     cannot be shared across process boundaries).
     """
     orchestrator = _worker_orchestrator(json.dumps(config_dict, sort_keys=True))
-    return orchestrator.process(image_path, config_dict.get("confirmed_labels"))
+    labels = config_dict.get("labels_by_image", {}).get(
+        image_path, config_dict.get("confirmed_labels")
+    )
+    selections = config_dict.get("selections_by_image", {}).get(image_path, {})
+    orchestrator.set_confirmed_selections(selections)
+    return orchestrator.process(image_path, labels)
 
 
 @functools.lru_cache(maxsize=1)
@@ -154,16 +186,19 @@ class BatchRunner:
         config: BatchConfig,
         progress_callback: Callable[[BatchProgress], None] | None = None,
         completion_callback: Callable[[BatchProgress], None] | None = None,
+        job_callback: Callable[[str, str, JobStatus], None] | None = None,
     ) -> None:
         self._config = config
         self._progress_cb = progress_callback
         self._completion_cb = completion_callback
+        self._job_cb = job_callback
 
         batch_dir = Path(config.output_dir) / config.batch_id
         batch_dir.mkdir(parents=True, exist_ok=True)
         self._state = StateManager(batch_dir / "state.db")
 
         self._image_paths: list[Path] = []
+        self._image_ids: dict[str, str] = {}
         self._start_time: float = 0.0
         self._executor: ProcessPoolExecutor | None = None
         self._futures: dict[str, Future] = {}
@@ -173,21 +208,48 @@ class BatchRunner:
         """Scan input folder for supported image files."""
         folder = Path(self._config.input_folder)
         extensions = {".png", ".jpg", ".jpeg", ".tiff", ".tif", ".bmp", ".webp"}
-        self._image_paths = sorted(
-            p for p in folder.iterdir()
-            if p.suffix.lower() in extensions and p.is_file()
-        )
+        if self._config.input_images:
+            self._image_paths = [Path(path) for path in self._config.input_images]
+            invalid = [
+                path
+                for path in self._image_paths
+                if not path.is_file() or path.suffix.lower() not in extensions
+            ]
+            if invalid:
+                raise ValueError(
+                    "Frozen batch inputs are missing or are no longer supported images."
+                )
+        else:
+            self._image_paths = sorted(
+                p for p in folder.iterdir()
+                if p.suffix.lower() in extensions and p.is_file()
+            )
         logger.info("Discovered %d images in %s", len(self._image_paths), folder)
+
+        stem_counts: dict[str, int] = {}
+        for image_path in self._image_paths:
+            stem_counts[image_path.stem] = stem_counts.get(image_path.stem, 0) + 1
 
         # Initialise state records for new images
         for img_path in self._image_paths:
-            image_id = img_path.stem
+            image_id = self._state_id_for(img_path, stem_counts)
+            self._image_ids[str(img_path)] = image_id
             if self._state.get(image_id) is None:
                 self._state.put(
                     image_id,
-                    JobRecord(image_path=str(img_path)),
+                    JobRecord(
+                        image_path=str(img_path),
+                        labels=list(self._config.labels_by_image.get(str(img_path), [])),
+                    ),
                 )
         return self._image_paths
+
+    def _state_id_for(self, image_path: Path, stem_counts: dict[str, int]) -> str:
+        """Keep legacy simple IDs unless same-stem source files need separation."""
+        if stem_counts[image_path.stem] == 1:
+            return image_path.stem
+        digest = hashlib.sha256(str(image_path).encode("utf-8")).hexdigest()[:10]
+        return f"{image_path.stem}-{digest}"
 
     def start(self) -> None:
         """Launch batch processing with ProcessPoolExecutor."""
@@ -204,12 +266,13 @@ class BatchRunner:
         self._executor = ProcessPoolExecutor(max_workers=workers)
 
         for img_path in self._image_paths:
-            image_id = img_path.stem
+            image_id = self._image_ids[str(img_path)]
             record = self._state.get(image_id)
             if record and record.status in (JobStatus.COMPLETE, JobStatus.SKIPPED):
                 continue
 
             self._state.update_status(image_id, JobStatus.MASKING)
+            self._emit_job(image_id, str(img_path), JobStatus.MASKING)
             future = self._executor.submit(
                 _process_single, str(img_path), config_dict
             )
@@ -225,10 +288,19 @@ class BatchRunner:
         # finishes while the loop is still submitting would otherwise fire
         # _on_complete against a half-filled _futures -- clearing the last
         # entry and reporting the whole batch finished before it had started.
+        submitted_any = bool(self._futures)
         for image_id, future in list(self._futures.items()):
             future.add_done_callback(
                 functools.partial(self._on_complete, image_id)
             )
+
+        if not submitted_any:
+            self._running = False
+            progress = self._get_progress()
+            if self._progress_cb:
+                self._progress_cb(progress)
+            if self._completion_cb:
+                self._completion_cb(progress)
 
     def _on_complete(self, image_id: str, future: Future) -> None:
         """Handle completion of a single image."""
@@ -246,6 +318,8 @@ class BatchRunner:
                             "status": JobStatus.COMPLETE,
                             "output_svg": result.svg_path,
                             "output_tiff": result.tiff_path,
+                            "output_all_objects_tiff": result.all_objects_tiff_path,
+                            "layer_count": len(result.layers),
                         }
                     )
                     self._state.put(image_id, updated)
@@ -257,6 +331,10 @@ class BatchRunner:
 
         self._futures.pop(image_id, None)
 
+        record = self._state.get(image_id)
+        if record is not None:
+            self._emit_job(image_id, record.image_path, record.status)
+
         progress = self._get_progress()
         if self._progress_cb:
             self._progress_cb(progress)
@@ -265,6 +343,14 @@ class BatchRunner:
             self._running = False
             if self._completion_cb:
                 self._completion_cb(progress)
+
+    def _emit_job(self, image_id: str, image_path: str, status: JobStatus) -> None:
+        if self._job_cb is None:
+            return
+        try:
+            self._job_cb(image_id, image_path, status)
+        except Exception:
+            logger.exception("Batch job callback failed for %s", image_id)
 
     def _get_progress(self) -> BatchProgress:
         counts = self._state.count_by_status()
@@ -298,6 +384,32 @@ class BatchRunner:
         """Shut down executor and close state DB."""
         self.stop()
         self._state.close()
+
+    def summary(self) -> BatchRunSummary:
+        """Reconstruct output metrics and failed paths from durable state."""
+        records = self._state.all_records()
+        completed_records = [
+            record for record in records.values() if record.status == JobStatus.COMPLETE
+        ]
+        failed_records = [
+            record for record in records.values() if record.status == JobStatus.FAILED
+        ]
+        total_layers = sum(record.layer_count for record in completed_records)
+        return BatchRunSummary(
+            total=len(records),
+            completed=len(completed_records),
+            failed=len(failed_records),
+            svg_count=sum(record.output_svg is not None for record in completed_records),
+            all_objects_count=sum(
+                record.output_all_objects_tiff is not None
+                for record in completed_records
+            ),
+            avg_layers=(total_layers / len(completed_records)) if completed_records else 0.0,
+            failed_image_paths=sorted(record.image_path for record in failed_records),
+            status_by_image={
+                record.image_path: record.status.value for record in records.values()
+            },
+        )
 
     @property
     def is_running(self) -> bool:

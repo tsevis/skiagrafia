@@ -15,6 +15,7 @@ from models.vlm_client import (
     BACKEND_OLLAMA,
     MAX_PARENTS,
     BaseVLMClient,
+    VLMResponseError,
     create_vlm_client,
 )
 
@@ -253,7 +254,7 @@ class GuidedInterrogator:
         try:
             client = self._get_client(model)
             response = client.query_vision(prepared_image, prompt)
-        except Exception:
+        except (OSError, TimeoutError, ConnectionError, RuntimeError, VLMResponseError):
             logger.warning("Vision interrogation failed for model %s", model, exc_info=True)
             return []
 
@@ -526,7 +527,8 @@ class GuidedInterrogator:
                     continue
                 client = self._get_client(self._settings.primary_vlm)
                 parts = client.get_children(image, candidate.display_label)
-            except Exception:
+            except (OSError, TimeoutError, ConnectionError, RuntimeError, VLMResponseError):
+                logger.warning("Part interrogation failed for '%s'", candidate.display_label, exc_info=True)
                 parts = []
             parts = self._filter_child_parts(parts, candidate.display_label)
             if parts:
@@ -576,7 +578,7 @@ class GuidedInterrogator:
             ranked = self._parse_reasoner_response(response, candidates)
             if ranked:
                 return ranked
-        except Exception:
+        except (OSError, TimeoutError, ConnectionError, RuntimeError, VLMResponseError):
             logger.info("Reasoner model unavailable, using heuristic ranking", exc_info=True)
         return sorted(candidates, key=lambda c: c.confidence, reverse=True)
 
@@ -664,7 +666,7 @@ class GuidedInterrogator:
             start = response.index("{")
             end = response.rindex("}") + 1
             payload = json.loads(response[start:end])
-        except Exception:
+        except (ValueError, json.JSONDecodeError, TypeError):
             return []
         ranked: list[InterrogationCandidate] = []
         by_label = {c.canonical_label: c for c in existing}

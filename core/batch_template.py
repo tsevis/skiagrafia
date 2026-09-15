@@ -1,11 +1,14 @@
 from __future__ import annotations
 
 import datetime
+import json
 import logging
 import re
 from pathlib import Path
 
-from pydantic import BaseModel
+from pydantic import BaseModel, ValidationError
+
+from utils.security import atomic_write_bytes, safe_child_path
 
 logger = logging.getLogger(__name__)
 
@@ -53,8 +56,8 @@ class BatchTemplate(BaseModel):
         d = Path.home() / ".config" / "skiagrafia" / "templates"
         d.mkdir(parents=True, exist_ok=True)
         self.created_at = datetime.datetime.now().isoformat()
-        path = d / f"{_slugify(self.name)}.json"
-        path.write_text(self.model_dump_json(indent=2))
+        path = safe_child_path(d, f"{_slugify(self.name)}.json")
+        atomic_write_bytes(path, self.model_dump_json(indent=2).encode("utf-8"))
         return path
 
     @classmethod
@@ -77,7 +80,7 @@ class BatchTemplate(BaseModel):
         ):
             try:
                 templates.append((p, cls.load(p)))
-            except Exception:
+            except (OSError, UnicodeDecodeError, ValueError, json.JSONDecodeError, ValidationError):
                 # One unreadable template must not hide every other one.
                 logger.warning("Skipping unreadable template %s", p, exc_info=True)
         return templates

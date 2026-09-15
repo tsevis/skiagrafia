@@ -36,10 +36,10 @@ class TestWriteSvg:
         write_svg("<svg/>", target)
         assert target.exists()
 
-    def test_empty_svg_content_is_allowed(self, tmp_path: Path) -> None:
+    def test_empty_svg_content_is_rejected(self, tmp_path: Path) -> None:
         target = tmp_path / "empty.svg"
-        write_svg("", target)
-        assert target.read_text(encoding="utf-8") == ""
+        with pytest.raises(ValueError, match="empty"):
+            write_svg("", target)
 
     def test_very_long_unsafe_filename_raises_oserror(self, tmp_path: Path) -> None:
         """Documents current behaviour: write_svg does not sanitise or
@@ -194,7 +194,7 @@ class TestWritePdf:
 
         class _FakeCairoSvg:
             @staticmethod
-            def svg2pdf(bytestring: bytes, write_to: str) -> None:
+            def svg2pdf(bytestring: bytes, write_to: str, unsafe: bool = False) -> None:
                 calls.append((bytestring.decode("utf-8"), write_to))
                 Path(write_to).write_bytes(b"%PDF-fake")
 
@@ -204,4 +204,4 @@ class TestWritePdf:
         write_pdf("<svg/>", target)
 
         assert target.exists()
-        assert calls == [("<svg/>", str(target))]
+        assert calls and calls[0][0] == "<svg/>"

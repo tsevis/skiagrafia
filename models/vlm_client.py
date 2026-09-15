@@ -28,6 +28,8 @@ import numpy as np
 from numpy.typing import NDArray
 from pydantic import BaseModel
 
+from utils.security import validate_loopback_url
+
 logger = logging.getLogger(__name__)
 
 # Backend identifiers (stored in preferences under "vlm_backend")
@@ -48,6 +50,10 @@ MAX_TOKENS = 200  # cap chat output length for list-style answers
 # first request while the model warms up.
 LLAMACPP_TIMEOUT_S = 300.0
 LLAMACPP_HEALTH_TIMEOUT_S = 5.0
+
+
+class VLMResponseError(ValueError):
+    """A local model responded, but not with usable protocol content."""
 
 
 class DetectedLabel(BaseModel):
@@ -310,11 +316,14 @@ class OllamaVLMClient(BaseVLMClient):
     ) -> None:
         import ollama
 
-        super().__init__(host=host, model=model)
-        self._client = ollama.Client(host=host, timeout=120.0)
+        local_host = validate_loopback_url(host)
+        super().__init__(host=local_host, model=model)
+        self._client = ollama.Client(host=local_host, timeout=120.0)
 
     def health_check(self) -> bool:
         """Check if Ollama is reachable and the model is available."""
+        import ollama
+
         try:
             models = self._client.list()
             available = [m.model or "" for m in models.models]
@@ -324,7 +333,7 @@ class OllamaVLMClient(BaseVLMClient):
                     "Model '%s' not found. Available: %s", self._model, available
                 )
             return found
-        except Exception:
+        except (OSError, TimeoutError, ollama.RequestError, ollama.ResponseError):
             logger.error("Ollama health check failed", exc_info=True)
             return False
 
@@ -334,16 +343,24 @@ class OllamaVLMClient(BaseVLMClient):
         images_b64: list[str] | None = None,
         num_predict: int = MAX_TOKENS,
     ) -> str:
+        import ollama
+
         message: dict[str, object] = {"role": "user", "content": prompt}
         if images_b64:
             message["images"] = images_b64
-        response = self._client.chat(
-            model=self._model,
-            messages=[message],
-            options={"num_predict": num_predict, "temperature": 0, "seed": 42},
-            **({"think": False} if self._model.startswith(("gemma4", "qwen3")) else {}),
-        )
-        return (response.message.content or "").strip()
+        try:
+            response = self._client.chat(
+                model=self._model,
+                messages=[message],
+                options={"num_predict": num_predict, "temperature": 0, "seed": 42},
+                **({"think": False} if self._model.startswith(("gemma4", "qwen3")) else {}),
+            )
+        except (OSError, TimeoutError, ollama.RequestError, ollama.ResponseError) as exc:
+            raise RuntimeError("The local Ollama model request failed.") from exc
+        content = getattr(getattr(response, "message", None), "content", None)
+        if not isinstance(content, str) or not content.strip():
+            raise VLMResponseError("The local model returned an empty response.")
+        return content.strip()
 
 
 class LlamaCppVLMClient(BaseVLMClient):
@@ -365,7 +382,9 @@ class LlamaCppVLMClient(BaseVLMClient):
         model: str = "loaded-model",
         timeout: float = LLAMACPP_TIMEOUT_S,
     ) -> None:
-        super().__init__(host=host, model=model)
+        # ManagedVLMClient starts with an empty host and replaces it with an
+        # app-owned 127.0.0.1 endpoint immediately before a request.
+        super().__init__(host=validate_loopback_url(host) if host else "", model=model)
         self._timeout = timeout
 
     # ── HTTP helpers ─────────────────────────────────────────────────────
@@ -396,7 +415,7 @@ class LlamaCppVLMClient(BaseVLMClient):
             detail = ""
             try:
                 detail = exc.read().decode("utf-8", errors="replace")[:500]
-            except Exception:
+            except (OSError, UnicodeDecodeError):
                 # Best-effort enrichment only; the HTTPError below is still
                 # reported and re-raised, but record why the body was lost.
                 logger.debug(
@@ -405,9 +424,12 @@ class LlamaCppVLMClient(BaseVLMClient):
             log = logger.debug if path == "/health" else logger.error
             log("llama.cpp HTTP %s from %s: %s", exc.code, path, detail)
             raise
-        parsed = json.loads(body)
+        try:
+            parsed = json.loads(body)
+        except json.JSONDecodeError as exc:
+            raise VLMResponseError(f"llama.cpp returned malformed JSON from {path}.") from exc
         if not isinstance(parsed, dict):
-            raise ValueError(f"llama.cpp returned non-object JSON from {path}")
+            raise VLMResponseError(f"llama.cpp returned non-object JSON from {path}")
         return parsed
 
     def loaded_model(self) -> str | None:
@@ -419,7 +441,7 @@ class LlamaCppVLMClient(BaseVLMClient):
             models = payload.get("data", [])
             if models and isinstance(models, list):
                 return str(models[0].get("id", "")) or None
-        except Exception:
+        except (OSError, TimeoutError, urllib.error.URLError, VLMResponseError):
             logger.debug("Could not query llama.cpp /v1/models", exc_info=True)
         return None
 
@@ -431,7 +453,7 @@ class LlamaCppVLMClient(BaseVLMClient):
             # llama.cpp answers 503 while the model is still loading
             logger.warning("llama.cpp server not ready (HTTP %s)", exc.code)
             return False
-        except Exception:
+        except (OSError, TimeoutError, urllib.error.URLError, VLMResponseError):
             logger.error("llama.cpp health check failed", exc_info=True)
             return False
         ok = status.get("status") == "ok"
@@ -474,13 +496,13 @@ class LlamaCppVLMClient(BaseVLMClient):
         response = self._request_json("/v1/chat/completions", payload)
         choices = response.get("choices") or []
         if not choices:
-            raise ValueError(f"llama.cpp returned no choices: {response}")
+            raise VLMResponseError("llama.cpp returned no completion choices.")
         if choices[0].get("finish_reason") == "length":
-            raise ValueError("VLM output exceeded its token budget; incomplete labels rejected")
+            raise VLMResponseError("VLM output exceeded its token budget; incomplete labels rejected")
         message = choices[0].get("message") or {}
         text = message.get("content")
-        if not isinstance(text, str):
-            raise ValueError(f"llama.cpp returned non-text content: {message}")
+        if not isinstance(text, str) or not text.strip():
+            raise VLMResponseError("llama.cpp returned non-text completion content.")
         return text.strip()
 
 

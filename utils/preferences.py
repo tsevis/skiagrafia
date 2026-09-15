@@ -48,7 +48,7 @@ DEFAULT_PREFERENCES: dict[str, Any] = {
     "preferred_text_reasoner": "gemma4:e4b",
     "local_primary_model": "Qwen3-VL-8B-Instruct",
     "local_fallback_model": "gemma-4-12B-it",
-    "segmentation_backend": "auto",
+    "segmentation_backend": "sam2",
     "sam3_confidence": 0.5,
     "quality_profile": "balanced",
     "preserve_path_detail": True,

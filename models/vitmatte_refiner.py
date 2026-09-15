@@ -65,7 +65,7 @@ class VitMatteRefiner:
                 "transformers VitMatte not available — alpha matting disabled."
             )
             raise
-        except Exception:
+        except (AttributeError, OSError, RuntimeError, TypeError, ValueError):
             logger.error("Failed to load VitMatte", exc_info=True)
             raise
 

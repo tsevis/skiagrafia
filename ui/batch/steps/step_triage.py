@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import tkinter as tk
+from pathlib import Path
 from tkinter import ttk
 from typing import TYPE_CHECKING
 
@@ -73,8 +74,10 @@ class StepTriage:
         scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
 
         self._include_vars: dict[str, tk.BooleanVar] = {}
+        self._image_exclude_vars: dict[tuple[str, str], tk.BooleanVar] = {}
         self._tag_data: dict[str, dict] = {}
         self._card_frames: dict[str, ttk.Frame] = {}
+        self._detail_frames: dict[str, ttk.Frame] = {}
 
         # Auto-populate from interrogation results
         self._load_from_interrogation()
@@ -106,7 +109,10 @@ class StepTriage:
             )
             return
         # Persist the human gate alongside the immutable interrogation record.
-        self._view.store_triage_decision(confirmed)
+        self._view.store_triage_decision(
+            confirmed,
+            self.get_excluded_labels_by_image(confirmed),
+        )
         self._view.go_next()
 
     def populate(self, tags: dict[str, dict]) -> None:
@@ -114,8 +120,10 @@ class StepTriage:
         for w in self._cards_frame.winfo_children():
             w.destroy()
         self._include_vars.clear()
+        self._image_exclude_vars.clear()
         self._tag_data = dict(tags)
         self._card_frames.clear()
+        self._detail_frames.clear()
 
         run = self._view.run_settings
         request = (
@@ -134,9 +142,14 @@ class StepTriage:
         parents = {k: v for k, v in tags.items() if v.get("role") == "parent"}
         children = {k: v for k, v in tags.items() if v.get("role") == "child"}
         suggested = {
-            str(value).lower()
+            str(value).casefold()
             for value in getattr(self._view.template, "confirmed_labels", [])
         }
+        prior_approval = {
+            str(value).casefold()
+            for value in getattr(self._view, "confirmed_labels", [])
+        }
+        prior_exclusions = getattr(self._view, "excluded_labels_by_image", {})
 
         for parent_label, parent_data in parents.items():
             display_label = parent_data.get("label", parent_label)
@@ -147,8 +160,14 @@ class StepTriage:
             self._card_frames[parent_label] = card
 
             # Include/skip toggle
-            canonical = str(parent_data.get("canonical_label", parent_label)).lower()
-            include_var = tk.BooleanVar(value=not suggested or canonical in suggested)
+            canonical = str(parent_data.get("canonical_label", parent_label)).strip()
+            include_var = tk.BooleanVar(
+                value=(
+                    canonical.casefold() in prior_approval
+                    if prior_approval
+                    else not suggested or canonical.casefold() in suggested
+                )
+            )
             self._include_vars[parent_label] = include_var
 
             header = ttk.Frame(card)
@@ -168,9 +187,13 @@ class StepTriage:
                 foreground="gray",
             ).pack(side=tk.LEFT, padx=(10, 0))
 
+            detail_frame = ttk.Frame(card)
+            detail_frame.pack(fill=tk.X, pady=(4, 0))
+            self._detail_frames[parent_label] = detail_frame
+
             # Child tag pills
-            child_frame = ttk.Frame(card)
-            child_frame.pack(fill=tk.X, pady=(4, 0))
+            child_frame = ttk.Frame(detail_frame)
+            child_frame.pack(fill=tk.X)
 
             parent_children = {
                 k: v
@@ -190,19 +213,46 @@ class StepTriage:
                     pady=2,
                 ).pack(side=tk.LEFT, padx=2)
 
+            # Global approval handles batch-wide vocabulary.  These controls
+            # make it possible to reject a false positive in one image while
+            # retaining that same label for the inputs where it is correct.
+            image_paths = self._candidate_image_paths(canonical)
+            if image_paths:
+                ttk.Label(
+                    detail_frame,
+                    text="Skip this label in individual images:",
+                    foreground="gray",
+                ).pack(anchor=tk.W, pady=(6, 1))
+                image_frame = ttk.Frame(detail_frame)
+                image_frame.pack(fill=tk.X)
+                for image_path in image_paths:
+                    exclude_var = tk.BooleanVar(
+                        value=canonical.casefold()
+                        in {
+                            str(label).casefold()
+                            for label in prior_exclusions.get(image_path, [])
+                        }
+                    )
+                    self._image_exclude_vars[(image_path, canonical)] = exclude_var
+                    ttk.Checkbutton(
+                        image_frame,
+                        text=f"Skip · {Path(image_path).name}",
+                        variable=exclude_var,
+                    ).pack(anchor=tk.W)
+
     def _on_toggle(self, parent_label: str) -> None:
         """Handle include/skip toggle for a parent card."""
         included = self._include_vars[parent_label].get()
         card = self._card_frames.get(parent_label)
-        if card:
-            # Dim the card when skipped — unfortunately ttk frames
-            # don't support opacity, so we just collapse children
-            for child in card.winfo_children():
-                if isinstance(child, ttk.Frame) and child != card.winfo_children()[0]:
-                    if included:
-                        child.pack(fill=tk.X, pady=(4, 0))
-                    else:
-                        child.pack_forget()
+        detail_frame = self._detail_frames.get(parent_label)
+        if card and detail_frame:
+            # ttk frames do not support opacity, so collapsing the details
+            # makes a batch-wide skip immediately clear without losing a
+            # previously chosen per-image exception.
+            if included:
+                detail_frame.pack(fill=tk.X, pady=(4, 0))
+            else:
+                detail_frame.pack_forget()
 
     def get_confirmed_labels(self) -> list[str]:
         """Return labels that are included (not skipped)."""
@@ -211,3 +261,35 @@ class StepTriage:
             for label, var in self._include_vars.items()
             if var.get()
         ]
+
+    def get_excluded_labels_by_image(
+        self, confirmed_labels: list[str] | None = None
+    ) -> dict[str, list[str]]:
+        """Return only scoped exclusions that still have a global approval."""
+        approved = {
+            str(label).casefold()
+            for label in (
+                confirmed_labels if confirmed_labels is not None else self.get_confirmed_labels()
+            )
+        }
+        exclusions: dict[str, list[str]] = {}
+        for (image_path, canonical), var in self._image_exclude_vars.items():
+            if var.get() and canonical.casefold() in approved:
+                exclusions.setdefault(image_path, []).append(canonical)
+        return {
+            image_path: sorted(set(labels))
+            for image_path, labels in exclusions.items()
+        }
+
+    def _candidate_image_paths(self, canonical: str) -> list[str]:
+        """List source images that proposed this parent candidate."""
+        paths: list[str] = []
+        for image_path, candidates in self._view.interrogation_records.items():
+            if any(
+                str(item.get("canonical_label") or item.get("label") or "").casefold()
+                == canonical.casefold()
+                and item.get("role", "parent") == "parent"
+                for item in candidates
+            ):
+                paths.append(image_path)
+        return sorted(paths)
