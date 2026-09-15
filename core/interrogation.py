@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import logging
+import math
 import re
 from dataclasses import dataclass
 
@@ -52,6 +53,145 @@ _LEADIN_RE = re.compile(
     r"^(the image (shows|features)|there is|there are|visible objects include|objects?:)\s+",
     re.IGNORECASE,
 )
+_TYPOGRAPHY_TERMS = frozenset(
+    {
+        "letter",
+        "letters",
+        "glyph",
+        "glyphs",
+        "character",
+        "characters",
+        "digit",
+        "digits",
+        "numeral",
+        "numerals",
+        "number",
+        "numbers",
+        "text",
+        "typography",
+    }
+)
+_INDIVIDUAL_GLYPH_TERMS = frozenset(
+    {
+        "letter",
+        "letters",
+        "glyph",
+        "glyphs",
+        "character",
+        "characters",
+        "digit",
+        "digits",
+        "numeral",
+        "numerals",
+        "number",
+        "numbers",
+    }
+)
+
+
+@dataclass(frozen=True)
+class TypographyElement:
+    """One visible glyph and its approximate normalized visual location.
+
+    Coordinates use a 0..1000 image-relative coordinate system.  They are a
+    semantic validation hint only: the detector and segmenter still provide
+    the actual, pixel-accurate output geometry.
+    """
+
+    glyph: str
+    bbox: tuple[int, int, int, int]
+
+
+@dataclass(frozen=True)
+class TypographyObservation:
+    """Validated VLM reading for a generic individual-glyph request."""
+
+    elements: tuple[TypographyElement, ...]
+
+    @property
+    def glyphs(self) -> tuple[str, ...]:
+        return tuple(element.glyph for element in self.elements)
+
+
+def _label_words(label: str) -> list[str]:
+    """Return natural-language words without treating ``letterbox`` as letter."""
+    return re.findall(r"[^\W\d_]+|\d+", label.casefold(), flags=re.UNICODE)
+
+
+def is_typography_label(label: str) -> bool:
+    """Whether a label denotes typography rather than a physical object.
+
+    This intentionally uses whole words.  A ``letter opener`` remains a
+    physical object, while a request for ``printed letters`` is typography.
+    """
+    words = _label_words(label)
+    return bool(words) and words[-1] in _TYPOGRAPHY_TERMS
+
+
+def is_individual_glyph_label(label: str) -> bool:
+    """Whether the requested output should be one layer per visible glyph.
+
+    ``text`` can reasonably mean one text block, whereas ``letters`` and
+    ``digits`` explicitly ask for individual visible typographic objects.
+    """
+    words = _label_words(label)
+    if not words or not (set(words) & _INDIVIDUAL_GLYPH_TERMS):
+        return False
+    # Do not mistake physical compounds such as "letter opener" for glyphs.
+    last_typography_word = max(
+        index for index, word in enumerate(words) if word in _INDIVIDUAL_GLYPH_TERMS
+    )
+    return last_typography_word == len(words) - 1
+
+
+def parse_typography_observation(raw: str) -> TypographyObservation | None:
+    """Parse a bounded, fail-closed local-VLM glyph observation.
+
+    The VLM is never allowed to create output geometry.  A malformed answer,
+    a word-level answer, or an unusable normalized box simply disables this
+    optional validator and leaves the normal detector path intact.
+    """
+    content = raw.strip()
+    if content.startswith("```"):
+        content = content.removeprefix("```json").removeprefix("```")
+        if content.endswith("```"):
+            content = content[:-3]
+        content = content.strip()
+    try:
+        payload = json.loads(content)
+    except (TypeError, ValueError):
+        return None
+    if not isinstance(payload, dict):
+        return None
+    items = payload.get("elements")
+    if not isinstance(items, list) or not 1 <= len(items) <= 64:
+        return None
+
+    elements: list[TypographyElement] = []
+    for item in items:
+        if not isinstance(item, dict):
+            return None
+        glyph = item.get("glyph")
+        bbox = item.get("bbox")
+        if (
+            not isinstance(glyph, str)
+            or not (1 <= len(glyph.strip()) <= 12)
+            or not glyph.strip().isprintable()
+            or not isinstance(bbox, list)
+            or len(bbox) != 4
+            or any(
+                isinstance(value, bool)
+                or not isinstance(value, (int, float))
+                or not math.isfinite(value)
+                for value in bbox
+            )
+        ):
+            return None
+        x0, y0, x1, y1 = (max(0, min(1000, int(round(value)))) for value in bbox)
+        if x1 <= x0 or y1 <= y0:
+            return None
+        elements.append(TypographyElement(glyph=glyph.strip(), bbox=(x0, y0, x1, y1)))
+    return TypographyObservation(elements=tuple(elements))
 
 
 class InterrogationCandidate(BaseModel):
@@ -503,7 +643,55 @@ class GuidedInterrogator:
         """Called only after localization, on an individual object's crop."""
         if not self._settings.discover_parts:
             return []
+        # A glyph is already an atomic foreground object for this pipeline.
+        # Asking a generative VLM for its "physical sub-parts" produces
+        # invented stems/bars/counters and corrupts the parent/child tree.
+        # Guide-declared parts remain available through _known_parts(), but
+        # automatic visual part discovery is deliberately not used here.
+        if is_typography_label(candidate.display_label):
+            return []
         return self._children_map([candidate], knowledge_pack, self._prepare_image(image)).get(candidate.display_label, [])
+
+    def inspect_individual_glyphs(
+        self,
+        image: NDArray[np.uint8],
+        candidate: InterrogationCandidate,
+    ) -> TypographyObservation | None:
+        """Return a local-VLM reading usable to validate glyph proposals.
+
+        This applies only to an explicit individual-glyph category such as
+        ``letters`` or ``digits``.  It asks for approximate, normalized boxes
+        so the orchestrator can require agreement with independently detected
+        boxes.  The VLM result never becomes a mask or an output box itself.
+        """
+        if not is_individual_glyph_label(candidate.display_label):
+            return None
+        prompt = (
+            "Inspect the image as individual typography. Return ONLY JSON in this exact shape: "
+            '{"elements":[{"glyph":"visible character","bbox":[x0,y0,x1,y1]}]}. '
+            "List every visible glyph exactly once in reading order, including repeats. "
+            "Each bbox is an approximate 0-to-1000 coordinate box relative to the full image, "
+            "with origin at top left. Do not include background, decorative strokes, word-level "
+            "regions, neighbouring objects, inferred characters, or partial composite regions."
+        )
+        try:
+            client = self._get_client(self._settings.primary_vlm)
+            observation = parse_typography_observation(
+                client.query_vision(self._prepare_image(image), prompt)
+            )
+        except (OSError, TimeoutError, ConnectionError, RuntimeError, VLMResponseError):
+            logger.info("Typography validation unavailable for '%s'", candidate.display_label, exc_info=True)
+            return None
+        if observation:
+            logger.info(
+                "%s typography observation for '%s': %s",
+                self._settings.primary_vlm,
+                candidate.display_label,
+                observation.glyphs,
+            )
+        else:
+            logger.warning("Rejected malformed typography observation for '%s'", candidate.display_label)
+        return observation
 
     def _children_map(
         self,
@@ -523,7 +711,11 @@ class GuidedInterrogator:
                 children[candidate.display_label] = knowledge.parts
                 continue
             try:
-                if candidate.confidence < 0.55 or candidate.display_label.lower() in _VAGUE_TERMS:
+                if (
+                    candidate.confidence < 0.55
+                    or candidate.display_label.lower() in _VAGUE_TERMS
+                    or is_typography_label(candidate.display_label)
+                ):
                     continue
                 client = self._get_client(self._settings.primary_vlm)
                 parts = client.get_children(image, candidate.display_label)

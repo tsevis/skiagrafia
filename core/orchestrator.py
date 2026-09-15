@@ -23,7 +23,11 @@ from numpy.typing import NDArray
 from pydantic import BaseModel, ConfigDict, Field
 
 from core.contracts import CapabilitySet
-from core.interrogation import InterrogationCandidate
+from core.interrogation import (
+    InterrogationCandidate,
+    TypographyObservation,
+    is_individual_glyph_label,
+)
 from core.knowledge import KnowledgePack
 from core.layer_editing import all_objects_alpha, body_alpha
 from models.grounded_sam import DetectionResult
@@ -48,6 +52,9 @@ PARENT_CONTAINMENT_MERGE = 0.75
 BBOX_IOU_MERGE = 0.60
 BBOX_EXPAND_RATIO = 0.30
 MAX_LABEL_FILENAME_LEN = 60  # max chars of a label used in output filenames
+TYPOGRAPHY_BOX_MATCH_MIN_IOU = 0.30
+TYPOGRAPHY_COMPOSITE_MIN_CONTRIBUTION = 0.15
+TYPOGRAPHY_COMPOSITE_MIN_COVERAGE = 0.80
 
 
 def _safe_filename_label(label: str) -> str:
@@ -175,6 +182,65 @@ def _bbox_iou(
     area_b = _bbox_area(b)
     union = area_a + area_b - inter
     return float(inter / union) if union else 0.0
+
+
+def _normalized_bbox_to_image(
+    bbox: tuple[int, int, int, int],
+    width: int,
+    height: int,
+) -> tuple[int, int, int, int]:
+    """Convert a 0..1000 VLM box to the current image dimensions."""
+    x0, y0, x1, y1 = bbox
+    return (
+        int(round(x0 * width / 1000)),
+        int(round(y0 * height / 1000)),
+        int(round(x1 * width / 1000)),
+        int(round(y1 * height / 1000)),
+    )
+
+
+def _rectangle_union_area(rectangles: list[tuple[int, int, int, int]]) -> int:
+    """Return exact union area for a small list of axis-aligned rectangles."""
+    rectangles = [rectangle for rectangle in rectangles if _bbox_area(rectangle)]
+    if not rectangles:
+        return 0
+    x_edges = sorted({edge for rectangle in rectangles for edge in (rectangle[0], rectangle[2])})
+    area = 0
+    for left, right in zip(x_edges, x_edges[1:], strict=False):
+        if right <= left:
+            continue
+        spans = sorted(
+            (rectangle[1], rectangle[3])
+            for rectangle in rectangles
+            if rectangle[0] < right and rectangle[2] > left
+        )
+        covered_y = 0
+        current_start: int | None = None
+        current_end: int | None = None
+        for start, end in spans:
+            if current_start is None:
+                current_start, current_end = start, end
+            elif start > current_end:
+                covered_y += current_end - current_start
+                current_start, current_end = start, end
+            else:
+                current_end = max(current_end, end)
+        if current_start is not None and current_end is not None:
+            covered_y += current_end - current_start
+        area += (right - left) * covered_y
+    return area
+
+
+def _glyph_layer_label(category: str, glyph: str) -> str:
+    """Make a readable output label without trusting a VLM for filenames."""
+    words = set(re.findall(r"[^\W\d_]+|\d+", category.casefold(), flags=re.UNICODE))
+    if words & {"letter", "letters"}:
+        kind = "letter"
+    elif words & {"digit", "digits", "numeral", "numerals", "number", "numbers"}:
+        kind = "digit"
+    else:
+        kind = "glyph"
+    return f"{kind} {glyph}"
 
 
 def _crop_to_bbox(
@@ -317,15 +383,38 @@ class Orchestrator:
         for parent in parents:
             self._report(2, f"Finding instances: {parent.display_label}")
             detections = self._detect_instances(image, parent, manual_lookup)
+            layer_labels = [parent.display_label] * len(detections)
+            if is_individual_glyph_label(parent.display_label) and detections:
+                observation = self._inspect_individual_glyphs(image, parent)
+                matched = (
+                    self._match_typography_detections(image, detections, observation, parent.display_label)
+                    if observation is not None
+                    else None
+                )
+                if matched is not None:
+                    detections, layer_labels = matched
+                else:
+                    detections, rejected = self._reject_cross_glyph_composites(detections)
+                    layer_labels = [parent.display_label] * len(detections)
+                    if rejected:
+                        result.warnings.append(
+                            f"Excluded {rejected} composite typography proposal(s) for "
+                            f"'{parent.display_label}' because each overlapped multiple glyph instances."
+                        )
+                    if observation is not None:
+                        result.warnings.append(
+                            f"Typography reading for '{parent.display_label}' could not be matched "
+                            "one-to-one with local detections; retained only independently detected glyphs."
+                        )
             if not detections:
                 result.warnings.append(f"Could not locate '{parent.display_label}'. Draw a box to select it manually.")
                 continue
-            for detection, is_manual in detections:
+            for (detection, is_manual), layer_label in zip(detections, layer_labels, strict=True):
                 if len(accepted) >= 64:
                     result.warnings.append("Stopped at 64 object instances; narrow the prompt or process a crop.")
                     break
                 self._report(3, f"Object mask: {parent.display_label}")
-                mask = self._detection_mask(image, detection, parent.display_label, is_manual)
+                mask = self._detection_mask(image, detection, layer_label, is_manual)
                 mask[source_alpha == 0] = 0
                 # Keep small legitimate objects; reject only empty/tiny noise.
                 if np.count_nonzero(mask) < 8:
@@ -338,9 +427,9 @@ class Orchestrator:
                     extra = children_by_parent.get(parent.display_label, [])
                     children_by_parent[existing_label] = list(dict.fromkeys(children_by_parent.get(existing_label, []) + extra))
                     continue
-                layer_id = self._layer_id(len(accepted) + 1, parent.display_label)
+                layer_id = self._layer_id(len(accepted) + 1, layer_label)
                 layer = LayerResult(
-                    layer_id=layer_id, label=parent.display_label, role="parent", bbox=detection.bbox,
+                    layer_id=layer_id, label=layer_label, role="parent", bbox=detection.bbox,
                     confidence=detection.confidence, source="manual" if is_manual else detection.source,
                 )
                 masks[layer_id] = refine_mask(mask, min_contour_area=0)
@@ -535,6 +624,105 @@ class Orchestrator:
                     valid = [sorted(valid, key=lambda d: np.count_nonzero(d.mask) if d.mask is not None else _bbox_area(d.bbox))[0 if selection == "smallest" else -1]]
                 return [(detection, False) for detection in valid]
         return []
+
+    def _inspect_individual_glyphs(
+        self,
+        image: NDArray[np.uint8],
+        candidate: InterrogationCandidate,
+    ) -> TypographyObservation | None:
+        """Ask the interrogator for an optional, local semantic glyph check."""
+        inspect = getattr(self._interrogator, "inspect_individual_glyphs", None)
+        if not callable(inspect):
+            return None
+        observation = inspect(image, candidate)
+        return observation if isinstance(observation, TypographyObservation) else None
+
+    def _match_typography_detections(
+        self,
+        image: NDArray[np.uint8],
+        detections: list[tuple[DetectionResult, bool]],
+        observation: TypographyObservation,
+        category: str,
+    ) -> tuple[list[tuple[DetectionResult, bool]], list[str]] | None:
+        """Require a one-to-one match between semantic glyphs and local boxes.
+
+        The local detector/SAM stack remains authoritative for pixel geometry.
+        A VLM observation only selects a detector proposal when the two views
+        overlap enough.  If even one semantic glyph has no independent local
+        match, the method declines to relabel or discard any proposal.
+        """
+        if any(is_manual for _detection, is_manual in detections):
+            return None
+        height, width = image.shape[:2]
+        matches: list[tuple[float, int, int]] = []
+        for element_index, element in enumerate(observation.elements):
+            semantic_bbox = _normalized_bbox_to_image(element.bbox, width, height)
+            for detection_index, (detection, _is_manual) in enumerate(detections):
+                score = _bbox_iou(semantic_bbox, detection.bbox)
+                if score >= TYPOGRAPHY_BOX_MATCH_MIN_IOU:
+                    matches.append((score, element_index, detection_index))
+
+        assigned_elements: set[int] = set()
+        assigned_detections: set[int] = set()
+        assignments: dict[int, int] = {}
+        for _score, element_index, detection_index in sorted(
+            matches,
+            key=lambda match: (-match[0], match[1], match[2]),
+        ):
+            if element_index in assigned_elements or detection_index in assigned_detections:
+                continue
+            assigned_elements.add(element_index)
+            assigned_detections.add(detection_index)
+            assignments[element_index] = detection_index
+
+        if len(assignments) != len(observation.elements):
+            return None
+        ordered_detections = [detections[assignments[index]] for index in range(len(observation.elements))]
+        labels = [
+            _glyph_layer_label(category, observation.elements[index].glyph)
+            for index in range(len(observation.elements))
+        ]
+        return ordered_detections, labels
+
+    def _reject_cross_glyph_composites(
+        self,
+        detections: list[tuple[DetectionResult, bool]],
+    ) -> tuple[list[tuple[DetectionResult, bool]], int]:
+        """Reject a proposal substantially explained by two prior glyph boxes.
+
+        This is the detector-only safety net for when the semantic verifier is
+        unavailable.  It targets the characteristic false positive where one
+        proposal spans pieces of two neighbouring glyphs; it does not reject
+        an ordinary overlapping glyph or any manual box.
+        """
+        kept: list[tuple[DetectionResult, bool]] = []
+        rejected = 0
+        for detection, is_manual in detections:
+            if is_manual:
+                kept.append((detection, is_manual))
+                continue
+            candidate_area = _bbox_area(detection.bbox)
+            intersections: list[tuple[int, int, int, int]] = []
+            for previous, previous_manual in kept:
+                if previous_manual:
+                    continue
+                x0 = max(detection.bbox[0], previous.bbox[0])
+                y0 = max(detection.bbox[1], previous.bbox[1])
+                x1 = min(detection.bbox[2], previous.bbox[2])
+                y1 = min(detection.bbox[3], previous.bbox[3])
+                overlap = (x0, y0, x1, y1)
+                if candidate_area and _bbox_area(overlap) / candidate_area >= TYPOGRAPHY_COMPOSITE_MIN_CONTRIBUTION:
+                    intersections.append(overlap)
+            covered = _rectangle_union_area(intersections)
+            if (
+                len(intersections) >= 2
+                and candidate_area
+                and covered / candidate_area >= TYPOGRAPHY_COMPOSITE_MIN_COVERAGE
+            ):
+                rejected += 1
+                continue
+            kept.append((detection, is_manual))
+        return kept, rejected
 
     def _detection_mask(self, image, detection, label, manual=False):
         mask = detection.mask

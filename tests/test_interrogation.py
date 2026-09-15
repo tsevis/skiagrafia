@@ -17,7 +17,11 @@ from core.interrogation import (
     GuidedInterrogator,
     InterrogationCandidate,
     InterrogationSettings,
+    TypographyElement,
+    is_individual_glyph_label,
+    is_typography_label,
     parse_label_candidates,
+    parse_typography_observation,
     rank_detector_phrases,
 )
 from core.knowledge import KnowledgeDomain, KnowledgePack, ObjectKnowledge
@@ -350,6 +354,26 @@ class TestChildrenMap:
         )
         assert children == {}
 
+    def test_typography_is_never_queried_for_invented_physical_parts(self) -> None:
+        interrogator = GuidedInterrogator(_settings())
+        client = FakeVLMClient(children_response=["top bar", "vertical stem"])
+        interrogator._clients["moondream"] = client
+
+        children = interrogator._children_map(
+            [_candidate("letters", confidence=0.9)], None, _tiny_image()
+        )
+
+        assert children == {}
+        assert client.children_calls == []
+
+    def test_discover_parts_skips_typography_even_without_a_guide(self) -> None:
+        interrogator = GuidedInterrogator(_settings())
+        client = FakeVLMClient(children_response=["top bar"])
+        interrogator._clients["moondream"] = client
+
+        assert interrogator.discover_parts(_tiny_image(), _candidate("letters")) == []
+        assert client.children_calls == []
+
     def test_client_exception_yields_no_children(self) -> None:
         interrogator = GuidedInterrogator(_settings())
         client = FakeVLMClient(children_error=True)
@@ -516,6 +540,52 @@ class TestGenericTermsFromLabel:
         interrogator = GuidedInterrogator(_settings())
         terms = interrogator._generic_terms_from_label("power_cable")
         assert "power cable" in terms
+
+
+class TestTypographyObservation:
+    def test_typography_predicates_use_whole_words(self) -> None:
+        assert is_typography_label("printed letters") is True
+        assert is_individual_glyph_label("printed letters") is True
+        assert is_typography_label("letterbox") is False
+        assert is_individual_glyph_label("letter opener") is False
+        assert is_typography_label("text") is True
+        assert is_individual_glyph_label("text") is False
+
+    def test_parses_repeated_glyphs_and_normalized_boxes(self) -> None:
+        observation = parse_typography_observation(
+            '{"elements":['
+            '{"glyph":"P","bbox":[10,30,250,970]},'
+            '{"glyph":"E","bbox":[260,30,490,970]},'
+            '{"glyph":"T","bbox":[500,30,730,970]},'
+            '{"glyph":"E","bbox":[740,30,970,970]}'
+            ']}'
+        )
+
+        assert observation is not None
+        assert observation.glyphs == ("P", "E", "T", "E")
+        assert observation.elements[0] == TypographyElement("P", (10, 30, 250, 970))
+
+    def test_rejects_malformed_or_non_geometric_observations(self) -> None:
+        assert parse_typography_observation('{"elements":[{"glyph":"P"}]}') is None
+        assert parse_typography_observation('{"elements":[{"glyph":"P","bbox":[1,2,1,4]}]}') is None
+        assert parse_typography_observation('{"elements":[{"glyph":"P","bbox":[NaN,2,3,4]}]}') is None
+        assert parse_typography_observation("not JSON") is None
+
+    def test_inspect_individual_glyphs_uses_one_local_vision_request(self) -> None:
+        interrogator = GuidedInterrogator(_settings())
+        client = FakeVLMClient(
+            vision_responses={
+                "Inspect the image as individual typography":
+                '{"elements":[{"glyph":"A","bbox":[0,0,500,1000]}]}'
+            }
+        )
+        interrogator._clients["moondream"] = client
+
+        observation = interrogator.inspect_individual_glyphs(_tiny_image(), _candidate("letters"))
+
+        assert observation is not None
+        assert observation.glyphs == ("A",)
+        assert len(client.vision_calls) == 1
 
 
 class TestCandidatesFromConfirmedLabels:

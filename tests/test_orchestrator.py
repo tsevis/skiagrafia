@@ -21,7 +21,12 @@ from numpy.typing import NDArray
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from core.contracts import CapabilitySet
-from core.interrogation import InterrogationCandidate, InterrogationResult
+from core.interrogation import (
+    InterrogationCandidate,
+    InterrogationResult,
+    TypographyElement,
+    TypographyObservation,
+)
 from core.knowledge import KnowledgePack, KnowledgeDomain, ObjectKnowledge
 from core.orchestrator import (
     MAX_LABEL_FILENAME_LEN,
@@ -49,9 +54,11 @@ class FakeInterrogator:
         self,
         candidates: list[InterrogationCandidate],
         children_by_parent: dict[str, list[str]] | None = None,
+        typography_observation: TypographyObservation | None = None,
     ) -> None:
         self._candidates = candidates
         self._children = children_by_parent or {}
+        self._typography_observation = typography_observation
         self.calls: list[tuple] = []
         self.confirmed_selections: list[dict[str, str]] = []
 
@@ -64,6 +71,9 @@ class FakeInterrogator:
             candidates=self._candidates,
             children_by_parent=self._children,
         )
+
+    def inspect_individual_glyphs(self, image, candidate):
+        return self._typography_observation
 
 
 class FakeDetector:
@@ -88,6 +98,18 @@ class FakeDetector:
         if self._default is not None:
             return DetectionResult(label=label, bbox=self._default, confidence=0.9)
         return None
+
+
+class MultiInstanceDetector(FakeDetector):
+    """Detector fake that exposes a deterministic ordered proposal set."""
+
+    def __init__(self, instances: list[DetectionResult]) -> None:
+        super().__init__()
+        self._instances = instances
+
+    def detect_instances(self, image, label, box_threshold=0.35, text_threshold=0.25):
+        self.calls.append(label)
+        return list(self._instances)
 
 
 class FakeSegmenter:
@@ -470,6 +492,67 @@ class TestProcessBasicFlow:
         assert Path(result.svg_path).exists()
         assert result.tiff_path is not None
         assert segmenter.clear_cache_called is True
+
+
+class TestProcessIndividualGlyphs:
+    @staticmethod
+    def _glyph_detections() -> list[DetectionResult]:
+        # Four real glyph proposals plus the failure observed in PETE: one
+        # high-area proposal composed of portions of the middle two glyphs.
+        return [
+            DetectionResult(label="letters", bbox=(1, 0, 15, 64), confidence=0.95),
+            DetectionResult(label="letters", bbox=(17, 0, 30, 64), confidence=0.94),
+            DetectionResult(label="letters", bbox=(32, 0, 46, 64), confidence=0.93),
+            DetectionResult(label="letters", bbox=(48, 0, 62, 64), confidence=0.92),
+            DetectionResult(label="letters", bbox=(22, 8, 40, 64), confidence=0.70),
+        ]
+
+    @staticmethod
+    def _observation() -> TypographyObservation:
+        return TypographyObservation(
+            elements=(
+                TypographyElement("P", (0, 0, 230, 1000)),
+                TypographyElement("E", (250, 0, 470, 1000)),
+                TypographyElement("T", (500, 0, 720, 1000)),
+                TypographyElement("E", (750, 0, 970, 1000)),
+            )
+        )
+
+    def test_semantic_reading_selects_and_names_only_matching_glyphs(self, tmp_path: Path) -> None:
+        image_path = _write_image(tmp_path / "glyphs.png")
+        interrogator = FakeInterrogator(
+            [_candidate("letters")],
+            typography_observation=self._observation(),
+        )
+        caps = _make_caps(
+            interrogator,
+            MultiInstanceDetector(self._glyph_detections()),
+            FakeSegmenter(),
+        )
+        result = Orchestrator(capabilities=caps, output_dir=tmp_path / "out", quality="fast").process(image_path)
+
+        assert result.error is None
+        assert [layer.label for layer in result.layers] == [
+            "letter P", "letter E", "letter T", "letter E",
+        ]
+        assert [layer.bbox for layer in result.layers] == [
+            (1, 0, 15, 64), (17, 0, 30, 64), (32, 0, 46, 64), (48, 0, 62, 64),
+        ]
+        assert not any("Typography reading" in warning for warning in result.warnings)
+
+    def test_detector_only_fallback_rejects_composite_cross_glyph_proposal(self, tmp_path: Path) -> None:
+        image_path = _write_image(tmp_path / "glyphs.png")
+        caps = _make_caps(
+            FakeInterrogator([_candidate("letters")]),
+            MultiInstanceDetector(self._glyph_detections()),
+            FakeSegmenter(),
+        )
+        result = Orchestrator(capabilities=caps, output_dir=tmp_path / "out", quality="fast").process(image_path)
+
+        assert result.error is None
+        assert len(result.layers) == 4
+        assert all(layer.label == "letters" for layer in result.layers)
+        assert any("Excluded 1 composite typography proposal" in warning for warning in result.warnings)
 
     def test_confirmed_selections_are_applied_before_confirmed_labels(
         self, tmp_path: Path
