@@ -10,7 +10,6 @@ no singletons, no tkinter references.
 """
 from __future__ import annotations
 
-import sys
 from typing import Any
 
 from core.contracts import CapabilitySet
@@ -195,16 +194,12 @@ def build_detector(prefs: dict[str, Any], mgr: ModelManager | None = None):
         sam_weights=mgr.resolve("sam2.1_hiera_large.pt"),
         gsam_root=mgr.resolve("groundingdino_swint_ogc.pth").parent.parent,
     )
-    backend = str(prefs.get("segmentation_backend", "sam2"))
-    if backend == "mlx-sam3" and sys.version_info < (3, 13):
-        raise RuntimeError(
-            "MLX SAM 3 requires Python 3.13+; select SAM 2.1 for this project runtime."
-        )
-    if backend == "mlx-sam3" or (backend == "auto" and sys.version_info >= (3, 13)):
+    backend = str(prefs.get("segmentation_backend", "auto"))
+    root = get_models_dir(prefs) / "mlx_sam3"
+    checkpoint = root / "sam3-mod-weights/model.safetensors"
+    if backend == "mlx-sam3" or (backend == "auto" and checkpoint.is_file()):
         from models.mlx_sam3 import MLXSAM3
-        root = get_models_dir(prefs) / "mlx_sam3"
-        if backend == "mlx-sam3" or root.is_dir():
-            return MLXSAM3(root, sam, float(prefs.get("sam3_confidence", 0.5)))
+        return MLXSAM3(root, sam, float(prefs.get("sam3_confidence", 0.2)))
     return sam
 
 

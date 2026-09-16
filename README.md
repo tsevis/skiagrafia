@@ -5,7 +5,7 @@
 > A desktop application for AI-powered image segmentation, masking, and vectorization.
 
 [![Version](https://img.shields.io/badge/version-0.3.1-blue.svg)](https://github.com/tsevis/skiagrafia)
-[![Python](https://img.shields.io/badge/python-3.11+-blue.svg)](https://www.python.org/downloads/)
+[![Python](https://img.shields.io/badge/python-3.13-blue.svg)](https://www.python.org/downloads/)
 [![Platform](https://img.shields.io/badge/platform-macOS%20Apple%20Silicon-lightgrey.svg)](https://support.apple.com/en-us/116943)
 [![Architecture](https://img.shields.io/badge/architecture-v5.2-orange.svg)](FILE_STRUCTURE.md)
 [![License](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
@@ -23,7 +23,7 @@
 ```bash
 # Clone and install
 git clone https://github.com/tsevis/skiagrafia.git && cd skiagrafia
-uv sync --group dev
+uv sync --locked --group dev
 
 # VLM backend, option A — Ollama (default)
 ollama serve &
@@ -71,7 +71,8 @@ Skiagrafia addresses a common challenge in design and production workflows: conv
 
 - **Semantic Understanding** — automatically identifies objects and their constituent parts (e.g., a monitor with screen, stand, and bezel)
 - **Two Local VLM Backends** — Ollama (default) or a llama.cpp server, switchable in Preferences
-- **Precision Segmentation** — SAM 2.1 HQ for high-quality mask generation
+- **Precision Segmentation** — MLX SAM 3 text-to-instance masks on Apple
+  Silicon, with GroundingDINO + SAM 2.1 fallback
 - **Alpha Matting** — VitMatte refinement for hair, fur, and soft edges
 - **Vector Output** — VTracer converts bitmaps to clean SVG paths
 - **Batch Processing** — process thousands of images with a wizard-driven workflow
@@ -101,8 +102,8 @@ Skiagrafia addresses a common challenge in design and production workflows: conv
 ### ML Pipeline (10-step)
 
 - **Qwen2.5-VL / Qwen3-VL** — semantic interrogation via Ollama or llama.cpp, with dual-prompt strategy and fallback chain
-- **GroundingDINO** — text-to-bounding-box detection with scan-stage deduplication
-- **SAM 2.1 HQ** — state-of-the-art segmentation with multi-mask output for manual bboxes
+- **MLX SAM 3** — primary text-to-instance masks with reusable image features
+- **GroundingDINO + SAM 2.1** — robust fallback and manual-box segmentation
 - **VitMatte** — high-quality alpha matting
 - **VTracer** — bitmap-to-SVG spline fitting
 
@@ -140,20 +141,21 @@ Skiagrafia addresses a common challenge in design and production workflows: conv
 ### Software
 
 - **macOS** 12.0 (Monterey) or later
-- **Python** 3.11 or later
+- **Python** 3.13 (the locked project runtime)
 - **One VLM backend**:
   - [Ollama](https://ollama.com) at `http://localhost:11434` (default), or
   - [llama.cpp](https://github.com/ggml-org/llama.cpp) `llama-server` at `http://localhost:8080`
 
 ### Model Weights
 
-All downloadable by the first-run wizard (or Preferences → Models → Download missing):
+Core model weights are downloadable by the first-run wizard (or Preferences → Models → Download missing). MLX SAM 3 is a separately verified local bundle:
 
 | Model | Source | Size |
 |-------|--------|-----:|
 | Grounded-SAM-2 source (code + configs) | GitHub archive | ~30 MB |
 | GroundingDINO SwinT-OGC | official release | ~660 MB |
 | SAM 2.1 Hiera Large | official release | ~900 MB |
+| MLX SAM 3 source + checkpoint (optional primary backend) | local verified model bundle | varies |
 | VitMatte ViT-B Composition-1K | HuggingFace | ~380 MB |
 | Qwen2.5-VL 3B (`qwen2.5vl:3b`) | Ollama pull | ~3.2 GB |
 | Gemma 4 E4B (`gemma4:e4b`) — fallback + reasoner | Ollama pull | ~9.6 GB |

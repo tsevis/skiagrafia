@@ -365,10 +365,10 @@ class PreferencesWindow:
     def _build_pipeline_tab(self) -> None:
         tab = self._scrollable_tab("  Pipeline  ")
 
-        self._segmentation_var = tk.StringVar(value=self._prefs.get("segmentation_backend", "sam2"))
+        self._segmentation_var = tk.StringVar(value=self._prefs.get("segmentation_backend", "auto"))
         self._quality_var = tk.StringVar(value=self._prefs.get("quality_profile", "balanced"))
         self._path_detail_var = tk.BooleanVar(value=self._prefs.get("preserve_path_detail", True))
-        self._sam3_confidence_var = tk.DoubleVar(value=self._prefs.get("sam3_confidence", .5))
+        self._sam3_confidence_var = tk.DoubleVar(value=self._prefs.get("sam3_confidence", .2))
         for title, variable, options in [
             ("Segmentation", self._segmentation_var, ["auto", "mlx-sam3", "sam2"]),
             ("Output quality", self._quality_var, ["fast", "balanced", "detailed"]),

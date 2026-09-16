@@ -57,8 +57,8 @@ class BatchConfig(BaseModel):
     enable_tiled_fallback: bool = True
     max_aliases_per_object: int = 4
     models_directory: str = ""
-    segmentation_backend: str = "sam2"
-    sam3_confidence: float = 0.5
+    segmentation_backend: str = "auto"
+    sam3_confidence: float = 0.2
     local_primary_model: str = "Qwen3-VL-8B-Instruct"
     local_fallback_model: str = "gemma-4-12B-it"
     quality_profile: str = "balanced"

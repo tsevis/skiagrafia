@@ -26,6 +26,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from core import factory
 from core.contracts import CapabilitySet
 from core.knowledge import KnowledgePack
+from models import mlx_sam3
 
 
 class _FakeModelManager:
@@ -220,9 +221,51 @@ class TestBuildCapabilities:
         assert instances[0].models_dir == models_dir
 
 
-def test_explicit_mlx_sam3_is_rejected_on_the_python_312_runtime(tmp_path: Path) -> None:
-    with pytest.raises(RuntimeError, match="Python 3.13"):
-        factory.build_detector(_prefs(tmp_path, segmentation_backend="mlx-sam3"))
+def test_explicit_mlx_sam3_constructs_the_local_backend(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    captured: dict[str, object] = {}
+
+    class FakeMLXSAM3:
+        def __init__(self, root, fallback, confidence) -> None:
+            captured.update(root=root, fallback=fallback, confidence=confidence)
+
+    monkeypatch.setattr(mlx_sam3, "MLXSAM3", FakeMLXSAM3)
+
+    detector = factory.build_detector(
+        _prefs(tmp_path, segmentation_backend="mlx-sam3", sam3_confidence=0.61)
+    )
+
+    assert isinstance(detector, FakeMLXSAM3)
+    assert captured["root"] == tmp_path / "models" / "mlx_sam3"
+    assert captured["confidence"] == 0.61
+
+
+def test_auto_backend_uses_mlx_only_when_its_checkpoint_is_present(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    class FakeGroundedSAM:
+        pass
+
+    class FakeMLXSAM3:
+        def __init__(self, root, fallback, confidence) -> None:
+            self.root = root
+            self.fallback = fallback
+            self.confidence = confidence
+
+    monkeypatch.setattr(factory, "GroundedSAM", lambda **_kwargs: FakeGroundedSAM())
+    monkeypatch.setattr(mlx_sam3, "MLXSAM3", FakeMLXSAM3)
+    prefs = _prefs(tmp_path, segmentation_backend="auto")
+
+    assert isinstance(factory.build_detector(prefs), FakeGroundedSAM)
+
+    checkpoint = tmp_path / "models" / "mlx_sam3" / "sam3-mod-weights" / "model.safetensors"
+    checkpoint.parent.mkdir(parents=True)
+    checkpoint.touch()
+    detector = factory.build_detector(prefs)
+
+    assert isinstance(detector, FakeMLXSAM3)
+    assert detector.root == checkpoint.parent.parent
 
 
 class TestFactoryBuildKnowledgePack:

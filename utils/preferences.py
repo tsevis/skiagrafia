@@ -48,8 +48,10 @@ DEFAULT_PREFERENCES: dict[str, Any] = {
     "preferred_text_reasoner": "gemma4:e4b",
     "local_primary_model": "Qwen3-VL-8B-Instruct",
     "local_fallback_model": "gemma-4-12B-it",
-    "segmentation_backend": "sam2",
-    "sam3_confidence": 0.5,
+    # On the supported Python 3.13 runtime, use the local MLX SAM 3 source
+    # when its verified checkpoint exists; otherwise retain SAM 2.1.
+    "segmentation_backend": "auto",
+    "sam3_confidence": 0.2,
     "quality_profile": "balanced",
     "preserve_path_detail": True,
     "object_prompt": "",
@@ -82,10 +84,17 @@ DEFAULT_PREFERENCES: dict[str, Any] = {
 # Saved values that were shipped as defaults in older versions and have a
 # strictly better local replacement now. Only exact old-default values are
 # migrated -- a user's deliberate custom choice is never touched.
-_LEGACY_DEFAULT_UPGRADES: dict[str, dict[str, str]] = {
+_LEGACY_DEFAULT_UPGRADES: dict[str, dict[Any, Any]] = {
     "ollama_model": {"moondream": "qwen2.5vl:3b"},
     "preferred_fallback_vlm": {"minicpm-v": "gemma4:e4b"},
     "preferred_text_reasoner": {"qwen3.5": "gemma4:e4b"},
+    # SAM 2.1 was the former shipped default while the Python 3.12 runtime
+    # could not load MLX. The Python 3.13 runtime's auto mode safely selects
+    # SAM 3 only when its local checkpoint is verified as present.
+    "segmentation_backend": {"sam2": "auto"},
+    # The old generic 0.5 default suppresses valid thin/typographic SAM 3
+    # instances; migrate only the former shipped default, not custom values.
+    "sam3_confidence": {0.5: 0.2},
 }
 
 
@@ -94,11 +103,17 @@ def _migrate_legacy_defaults(saved: dict[str, Any]) -> dict[str, Any]:
     migrated = dict(saved)
     for key, upgrades in _LEGACY_DEFAULT_UPGRADES.items():
         old_value = migrated.get(key)
-        if isinstance(old_value, str) and old_value in upgrades:
-            migrated[key] = upgrades[old_value]
+        try:
+            replacement = upgrades.get(old_value)
+        except TypeError:
+            # Corrupt/unexpected unhashable JSON values are not migration
+            # candidates and must be left for normal preference validation.
+            continue
+        if replacement is not None:
+            migrated[key] = replacement
             logger.info(
                 "Preferences migration: %s '%s' -> '%s'",
-                key, old_value, upgrades[old_value],
+                key, old_value, replacement,
             )
     return migrated
 

@@ -2,7 +2,7 @@
 name = "skiagrafia"
 version = "0.3.1"
 description = "Semantic vectorizing & masking creator"
-requires-python = ">=3.12,<3.13"
+requires-python = ">=3.13,<3.14"
 dependencies = [
     "torch",
     "torchvision",
@@ -20,6 +20,14 @@ dependencies = [
     "vtracer",
     "ollama",
     "lxml",
+    # MLX SAM 3's locally bundled source imports these at inference time.
+    # Keep the runtime dependency set explicit instead of relying on a
+    # separately installed model-source environment.
+    # The bundled SAM 3 custom Metal kernel targets MLX 0.31's callable
+    # kernel contract.  Pin it until its source is updated and re-verified
+    # against a newer MLX API.
+    "mlx==0.31.2",
+    "ftfy>=6.3.1",
     # GroundingDINO's BERT wrapper needs a small compatibility shim for the
     # removed mask helper in transformers 5; use a patched supported line.
     "transformers>=5.10,<6",

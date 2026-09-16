@@ -586,6 +586,22 @@ class GuidedInterrogator:
         normalized = label.replace("_", " ").replace("-", " ").strip()
         if normalized and normalized != label:
             terms.append(normalized)
+        # Text-to-instance models localize an individual ``letter`` prompt
+        # much more reliably than a plural ``letters`` prompt, which can also
+        # yield a whole-word region. Keep the original label as an alias for
+        # other detector backends, but always query the atomic term first.
+        glyph_singulars = {
+            "letters": "letter",
+            "glyphs": "glyph",
+            "characters": "character",
+            "digits": "digit",
+            "numerals": "numeral",
+            "numbers": "digit",
+        }
+        words = normalized.split()
+        if is_individual_glyph_label(normalized) and words:
+            atomic = glyph_singulars.get(words[-1], words[-1])
+            terms.insert(0, atomic)
         broad_aliases = {
             "iphone": ["phone", "smartphone", "mobile phone"],
             "phone": ["smartphone", "mobile phone"],

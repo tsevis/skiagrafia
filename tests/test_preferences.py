@@ -150,6 +150,22 @@ class TestLegacyMigration:
         assert migrated["preferred_fallback_vlm"] == "gemma4:e4b"
         assert migrated["preferred_text_reasoner"] == "gemma4:e4b"
 
+    def test_migrates_old_sam3_default_but_preserves_custom_value(self) -> None:
+        assert preferences._migrate_legacy_defaults({"sam3_confidence": 0.5})[
+            "sam3_confidence"
+        ] == 0.2
+        assert preferences._migrate_legacy_defaults({"sam3_confidence": 0.73})[
+            "sam3_confidence"
+        ] == 0.73
+
+    def test_migrates_old_sam2_default_to_checkpoint_aware_auto(self) -> None:
+        assert preferences._migrate_legacy_defaults({"segmentation_backend": "sam2"})[
+            "segmentation_backend"
+        ] == "auto"
+        assert preferences._migrate_legacy_defaults({"segmentation_backend": "mlx-sam3"})[
+            "segmentation_backend"
+        ] == "mlx-sam3"
+
     def test_non_string_value_is_left_untouched(self) -> None:
         saved = {"ollama_model": 123}
 

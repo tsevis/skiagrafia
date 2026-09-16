@@ -541,6 +541,13 @@ class TestGenericTermsFromLabel:
         terms = interrogator._generic_terms_from_label("power_cable")
         assert "power cable" in terms
 
+    def test_plural_glyph_request_queries_the_atomic_term_first(self) -> None:
+        interrogator = GuidedInterrogator(_settings())
+
+        terms = interrogator._generic_terms_from_label("letters")
+
+        assert terms[:2] == ["letter", "letters"]
+
 
 class TestTypographyObservation:
     def test_typography_predicates_use_whole_words(self) -> None:

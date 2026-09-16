@@ -16,7 +16,7 @@ _MLX_LOCK = threading.RLock()
 
 
 class MLXSAM3:
-    def __init__(self, source_dir: Path, fallback: GroundedSAM, confidence: float = 0.5):
+    def __init__(self, source_dir: Path, fallback: GroundedSAM, confidence: float = 0.2):
         self.source_dir = source_dir
         self.checkpoint = source_dir / "sam3-mod-weights/model.safetensors"
         self.fallback = fallback
