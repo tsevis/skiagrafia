@@ -4,7 +4,7 @@
 >
 > A desktop application for AI-powered image segmentation, masking, and vectorization.
 
-[![Version](https://img.shields.io/badge/version-0.3.1-blue.svg)](https://github.com/tsevis/skiagrafia)
+[![Version](https://img.shields.io/badge/version-0.4.0-blue.svg)](https://github.com/tsevis/skiagrafia)
 [![Python](https://img.shields.io/badge/python-3.13-blue.svg)](https://www.python.org/downloads/)
 [![Platform](https://img.shields.io/badge/platform-macOS%20Apple%20Silicon-lightgrey.svg)](https://support.apple.com/en-us/116943)
 [![Architecture](https://img.shields.io/badge/architecture-v5.2-orange.svg)](FILE_STRUCTURE.md)

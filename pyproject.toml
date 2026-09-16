@@ -1,6 +1,6 @@
 [project]
 name = "skiagrafia"
-version = "0.3.1"
+version = "0.4.0"
 description = "Semantic vectorizing & masking creator"
 requires-python = ">=3.13,<3.14"
 dependencies = [
