@@ -10,7 +10,11 @@
 [![Architecture](https://img.shields.io/badge/architecture-v5.2-orange.svg)](FILE_STRUCTURE.md)
 [![License](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
 
-**Skiagrafia** uses local ML models to automatically segment images into semantic layers (objects and their parts), producing both vector (SVG) and bitmap (TIFF/PNG) outputs. Designed for designers and production workflows. 100% local inference — no cloud APIs.
+**Skiagrafia** uses local ML models to segment images into semantic layers
+(objects and their parts), producing vector (SVG) and bitmap (TIFF/PNG)
+outputs. It is designed for designers and production workflows: model
+inference stays on the machine, and VLM services are restricted to loopback
+endpoints.
 
 <p align="center">
   <img src="docs/skiagrafia-readme.jpg" alt="Skiagrafia desktop interface showing semantic segmentation and masking layers" width="1200">
@@ -23,6 +27,7 @@
 ```bash
 # Clone and install
 git clone https://github.com/tsevis/skiagrafia.git && cd skiagrafia
+# Creates the locked Python 3.13 project environment
 uv sync --locked --group dev
 
 # VLM backend, option A — Ollama (default)
@@ -36,10 +41,11 @@ llama-server -hf Qwen/Qwen3-VL-8B-Instruct-GGUF:Q4_K_M --port 8080 -c 8192
 ./run.sh
 ```
 
-On first launch, a **setup wizard** checks for missing model weights
-(GroundingDINO, SAM 2.1, VitMatte, Grounded-SAM-2 source) and downloads them
-into your models directory with one click. Machines that already have the
-models skip the wizard entirely.
+On first launch, a **setup wizard** checks for the core fallback weights
+(GroundingDINO, SAM 2.1, VitMatte and Grounded-SAM-2 source) and downloads
+them into the models directory with one click. Machines that already have
+them skip the wizard. MLX SAM 3 is an optional, separately verified local
+bundle; its exact on-disk layout is described under [Model Weights](#model-weights).
 
 📖 **New here? Read the [User Manual](docs/MANUAL.md).**
 
@@ -70,13 +76,15 @@ Skiagrafia addresses a common challenge in design and production workflows: conv
 ### Key Capabilities
 
 - **Semantic Understanding** — automatically identifies objects and their constituent parts (e.g., a monitor with screen, stand, and bezel)
-- **Two Local VLM Backends** — Ollama (default) or a llama.cpp server, switchable in Preferences
+- **Local VLM Backends** — Ollama, an existing llama.cpp server, or an
+  app-managed offline llama.cpp server, switchable in Preferences
 - **Precision Segmentation** — MLX SAM 3 text-to-instance masks on Apple
   Silicon, with GroundingDINO + SAM 2.1 fallback
 - **Alpha Matting** — VitMatte refinement for hair, fur, and soft edges
 - **Vector Output** — VTracer converts bitmaps to clean SVG paths
 - **Batch Processing** — process thousands of images with a wizard-driven workflow
-- **First-Run Bootstrap** — fresh installs download everything they need automatically
+- **First-Run Bootstrap** — fresh installs can download the core fallback
+  weights; an optional MLX SAM 3 bundle is verified in place
 
 ---
 
@@ -120,7 +128,7 @@ Skiagrafia addresses a common challenge in design and production workflows: conv
 - Contract-based architecture with Protocol interfaces
 - Dependency injection via CapabilitySet
 - User-configurable model directory
-- Apple Silicon optimized (MPS acceleration)
+- Apple Silicon optimized (MPS and MLX acceleration)
 - Lazy model loading with memory residency
 - ProcessPoolExecutor parallelization
 - SQLiteDict state persistence
@@ -141,14 +149,17 @@ Skiagrafia addresses a common challenge in design and production workflows: conv
 ### Software
 
 - **macOS** 12.0 (Monterey) or later
-- **Python** 3.13 (the locked project runtime)
-- **One VLM backend**:
+- **Python** 3.13 (the locked project runtime; use `uv sync --locked`)
+- **One local VLM backend**:
   - [Ollama](https://ollama.com) at `http://localhost:11434` (default), or
-  - [llama.cpp](https://github.com/ggml-org/llama.cpp) `llama-server` at `http://localhost:8080`
+  - an existing [llama.cpp](https://github.com/ggml-org/llama.cpp) `llama-server` at `http://localhost:8080`, or
+  - the app-managed offline llama.cpp mode using already cached model files
 
 ### Model Weights
 
-Core model weights are downloadable by the first-run wizard (or Preferences → Models → Download missing). MLX SAM 3 is a separately verified local bundle:
+Core fallback weights are downloadable by the first-run wizard (or
+Preferences → Models → Download missing). MLX SAM 3 is a separately verified
+local bundle:
 
 | Model | Source | Size |
 |-------|--------|-----:|
@@ -161,6 +172,23 @@ Core model weights are downloadable by the first-run wizard (or Preferences → 
 | Gemma 4 E4B (`gemma4:e4b`) — fallback + reasoner | Ollama pull | ~9.6 GB |
 | Qwen3-VL 8B GGUF — llama.cpp alternative | llama.cpp `-hf` cache | ~6.5 GB |
 
+With the default **Segmentation: auto** setting, MLX SAM 3 activates only
+when both its local source and checkpoint are present. The model library must
+contain this shape (the model bundle is not downloaded or moved by the
+wizard):
+
+```text
+<models_directory>/
+└── mlx_sam3/
+    ├── sam3/                         # bundled Python source package
+    └── sam3-mod-weights/
+        └── model.safetensors
+```
+
+If the bundle is absent or fails to initialize, Skiagrafia reports the
+condition and uses GroundingDINO + SAM 2.1 instead. MLX SAM 3 currently
+requires the locked `mlx==0.31.2` runtime contract.
+
 ---
 
 ## Installation
@@ -170,7 +198,7 @@ Core model weights are downloadable by the first-run wizard (or Preferences → 
 ```bash
 git clone https://github.com/tsevis/skiagrafia.git
 cd skiagrafia
-uv sync --group dev
+uv sync --locked --group dev
 ```
 
 ### 2. Set Up a VLM Backend
@@ -212,16 +240,16 @@ Preferences → Models.
 
 ## VLM Backends
 
-Semantic interrogation runs on one of two interchangeable local backends,
+Semantic interrogation runs on one of three interchangeable local backends,
 selected in **Preferences → Models → VLM backend**:
 
-| | Ollama | llama.cpp server |
-|---|---|---|
-| API | Ollama HTTP | OpenAI-compatible `/v1/chat/completions` |
-| Default URL | `http://localhost:11434` | `http://localhost:8080` |
-| Default model | `qwen2.5vl:3b` | whatever the server has loaded |
-| Fallback chain | `gemma4:e4b` → `minicpm-v` | — (one loaded model) |
-| Text reasoner | `gemma4:e4b` | the same loaded model |
+| | Ollama | llama.cpp server | Managed local llama.cpp |
+|---|---|---|---|
+| API | Ollama HTTP | OpenAI-compatible `/v1/chat/completions` | App-owned local server |
+| Default URL | `http://localhost:11434` | `http://localhost:8080` | allocated loopback port |
+| Default model | `qwen2.5vl:3b` | whatever the server has loaded | Qwen3-VL 8B from local cache |
+| Fallback chain | `gemma4:e4b` → `minicpm-v` | — (one loaded model) | local Gemma fallback |
+| Text reasoner | `gemma4:e4b` | the same loaded model | local Gemma fallback |
 
 Notes on llama.cpp:
 
@@ -229,6 +257,10 @@ Notes on llama.cpp:
 - Vision requires a model with a multimodal projector (mmproj) — e.g. `Qwen/Qwen3-VL-8B-Instruct-GGUF`.
 - Use `-c 8192` — the server's default context can exhaust Metal GPU memory on vision models.
 - The server answers HTTP 503 while loading; the app's health check handles this.
+
+The managed local option never downloads model files: it starts only an
+app-owned `llama-server` using verified GGUF/mmproj pairs already in the local
+Hugging Face cache.
 
 ---
 
@@ -304,8 +336,8 @@ v5.2 implements contract-based dependency injection with five capability protoco
 | Protocol | Method | Concrete Implementation |
 |----------|--------|------------------------|
 | `Interrogator` | `interrogate()` | `GuidedInterrogator` (Ollama / llama.cpp VLM + fallbacks) |
-| `Detector` | `detect_box()` | `GroundedSAM` (GroundingDINO) |
-| `Segmenter` | `segment()`, `clear_cache()` | `GroundedSAM` (SAM 2.1 HQ) |
+| `Detector` | `detect_box()` | `MLXSAM3` in `auto` when available; `GroundedSAM` fallback |
+| `Segmenter` | `segment()`, `clear_cache()` | `MLXSAM3` native instances with `GroundedSAM` / SAM 2.1 fallback |
 | `AlphaRefiner` | `predict()` | `VitMatteRefiner` |
 | `Vectorizer` | `trace()` | `VTracerVectorizer` |
 
@@ -318,14 +350,14 @@ See [FILE_STRUCTURE.md](FILE_STRUCTURE.md) for the complete module map.
 The `Orchestrator` executes a 10-step structural pipeline:
 
 ```
-Step 1:  Load image as numpy array (BGR → RGB)
+Step 1:  Load oriented source image as RGB plus any existing alpha
 Step 2:  VLM interrogation — get parents, filter against confirmed labels,
          get children per confirmed parent
-Step 3:  GroundingDINO detection — text-to-bounding-box per parent label,
-         scan-stage bbox dedup (IoU + containment)
-Step 4:  SAM 2.1 HQ parent segmentation — mask from bbox prompt, multi-mask
-         output for manual bboxes, tighten bbox from mask contour
-Step 5:  SAM child segmentation — crop region, detect + segment per child,
+Step 3:  Instance detection — MLX SAM 3 text-to-instance masks when its
+         verified bundle is available; otherwise GroundingDINO boxes
+Step 4:  Parent mask construction — native MLX masks or SAM 2.1 from a box;
+         scan-stage dedup (IoU + containment) and mask tightening
+Step 5:  Child segmentation — crop region, detect + segment per child,
          child mask validation, boolean-subtract children from parent body
 Step 6:  Coordinate remapping — child masks from crop space to image space
 Step 7:  VitMatte alpha refinement — soft alpha matte per layer, 4-ch TIFF
@@ -365,6 +397,8 @@ Profiles: `fast` (skip reasoner, 1 child query) · `balanced` (default) · `deep
     "preferred_fallback_vlm": "gemma4:e4b",
     "preferred_text_reasoner": "gemma4:e4b",
     "models_directory": "",
+    "segmentation_backend": "auto",
+    "sam3_confidence": 0.2,
     "output_directory": "~/Desktop/skiagrafia_out",
     "sam_box_threshold": 0.35,
     "sam_text_threshold": 0.25,
@@ -373,9 +407,9 @@ Profiles: `fast` (skip reasoner, 1 child query) · `balanced` (default) · `deep
 }
 ```
 
-Legacy preferences naming the old shipped defaults (`moondream`, `qwen3.5`)
-are migrated automatically to the current defaults once, on load. Deliberate
-custom model choices are never changed.
+Legacy shipped defaults are migrated once on load: `moondream` and `qwen3.5`
+VLM names, `sam2` to checkpoint-aware `auto`, and the former SAM 3 confidence
+default `0.5` to `0.2`. Deliberate custom model choices are never changed.
 
 ### Environment Variables
 
@@ -499,8 +533,20 @@ holding GPU memory (check `ollama ps`) — free it and restart the server.
 
 ```bash
 export PYTORCH_ENABLE_MPS_FALLBACK=1
-python -c "import torch; print(torch.backends.mps.is_available())"
+./.venv/bin/python -c "import torch; print(torch.backends.mps.is_available())"
 ```
+
+### MLX SAM 3 is unavailable
+
+1. Confirm that **Preferences → Pipeline → Segmentation** is `auto` or
+   `mlx-sam3`.
+2. Check the bundle layout under the configured models directory, especially
+   `mlx_sam3/sam3-mod-weights/model.safetensors`.
+3. Recreate the project environment with `uv sync --locked --group dev`; do
+   not substitute a newer MLX release for the pinned `mlx==0.31.2` without a
+   verified model-bundle update.
+4. `auto` remains usable without the bundle: it falls back to GroundingDINO +
+   SAM 2.1.
 
 ### PDF export fails
 

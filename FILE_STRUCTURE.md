@@ -1,393 +1,202 @@
 # Skiagrafia — File Structure
 
-> **Semantic Vectorizing & Masking Creator**
-> A desktop application for AI-powered image segmentation, masking, and vectorization.
+> **v0.4.0 · Python 3.13 · Apple Silicon**
+>
+> A local semantic vectorizing and masking desktop application.
 
-[![Python](https://img.shields.io/badge/python-3.11+-blue.svg)](https://www.python.org/downloads/)
-[![Platform](https://img.shields.io/badge/platform-macOS%20Apple%20Silicon-lightgrey.svg)](https://developer.apple.com/documentation/techdocs/50056847)
-[![Architecture](https://img.shields.io/badge/architecture-v5.2-orange.svg)](docs/CLAUDEv5.md)
-
----
+[![Version](https://img.shields.io/badge/version-0.4.0-blue.svg)](https://github.com/tsevis/skiagrafia)
+[![Python](https://img.shields.io/badge/python-3.13-blue.svg)](https://www.python.org/downloads/)
+[![Platform](https://img.shields.io/badge/platform-macOS%20Apple%20Silicon-lightgrey.svg)](https://support.apple.com/en-us/116943)
+[![Architecture](https://img.shields.io/badge/architecture-v5.2-orange.svg)](README.md#architecture)
 
 ## Overview
 
-Skiagrafia is a Python desktop application that uses local ML models (GroundingDINO, SAM 2.1 HQ, VitMatte, Moondream 2) to semantically segment images and produce vector (SVG) and bitmap (TIFF/PNG) outputs. It features a Tkinter-based GUI with two operating modes: **Single Image** (designer workflow) and **Batch** (production pipeline).
+Skiagrafia has a contract-based pipeline: the orchestrator depends on five
+capabilities, while the factory selects their concrete local implementations
+from the frozen preferences or batch configuration. The `auto` segmentation
+setting prefers MLX SAM 3 when its verified local checkpoint exists; otherwise
+it retains GroundingDINO + SAM 2.1 as the working fallback.
 
-**Architecture v5.2**: Contract-based dependency injection with five capability protocols, multi-level deduplication (scan-stage bbox dedup + pipeline-stage mask/containment dedup), and smart child validation.
+The project is intentionally a flat Python layout. `uv.lock` and `run.sh`
+define the supported Python `>=3.13,<3.14` runtime. Historical audit reports
+under `docs/audits/` are evidence snapshots, not current operational
+instructions.
 
----
+## Repository Map
 
-## Quick Links
-
-| Document | Description |
-|----------|-------------|
-| **[README.md](README.md)** | Full documentation, installation, and usage guide |
-| **[docs/CLAUDE.md](docs/CLAUDE.md)** | Implementation guide for AI assistants |
-| **[docs/CLAUDEv4.md](docs/CLAUDEv4.md)** | v4 implementation notes |
-| **[docs/CLAUDEv5.md](docs/CLAUDEv5.md)** | v5.0 architecture & contracts refactor guide |
-
----
-
-## Directory Structure
-
-```
+```text
 skiagrafia/
+├── main.py                         # Application bootstrap and Tk root
+├── pyproject.toml                  # v0.4.0 metadata, Python/runtime dependencies
+├── uv.lock                         # Locked Python 3.13 dependency resolution
+├── run.sh                          # Validates and launches .venv/bin/python
+├── scripts/
+│   └── verify.sh                   # Locked-runtime test/check entry point
+├── README.md                       # User guide, installation and troubleshooting
+├── FILE_STRUCTURE.md               # This current module map
 │
-├── main.py                          # Application entry point
-├── pyproject.toml                   # Project dependencies and metadata
-├── run.sh                           # Shell script launcher (sets offline env)
-├── README.md                        # Main documentation
-├── FILE_STRUCTURE.md                # This file
-├── LICENSE                          # MIT license
+├── core/                           # Pipeline, contracts, batch and semantic policy
+│   ├── contracts.py                # Five capability Protocols + CapabilitySet
+│   ├── factory.py                  # Preferences → concrete capability wiring
+│   ├── orchestrator.py             # Single-image structural pipeline and outputs
+│   ├── interrogation.py            # VLM candidates, selection policy and glyph logic
+│   ├── knowledge.py                # TOML domain-guide models and normalization
+│   ├── batch_runner.py             # ProcessPoolExecutor runner and persisted metrics
+│   ├── batch_session.py            # Frozen run/guide/interrogation/triage snapshots
+│   ├── batch_template.py           # Reusable Single → Batch configuration template
+│   ├── state_manager.py            # Per-image SQLiteDict state records
+│   ├── layer_editing.py            # Layer edits plus all-objects TIFF recomposition
+│   ├── preset_library.py           # Bundled preset discovery
+│   └── presets/
+│       └── apple_the_first_50_years.toml
 │
-├── core/                            # Core pipeline and state management
-│   ├── __init__.py
-│   ├── orchestrator.py              # 10-step pipeline with injected capabilities
-│   ├── batch_runner.py              # ProcessPoolExecutor batch coordinator
-│   ├── batch_template.py            # Single → Batch template serialization
-│   ├── state_manager.py             # SQLiteDict job state persistence
-│   ├── interrogation.py             # GuidedInterrogator with VLM fallback chain
-│   ├── knowledge.py                 # KnowledgePack and ObjectKnowledge models
-│   ├── contracts.py                 # Five capability Protocol interfaces
-│   └── factory.py                   # CapabilitySet builder from preferences
+├── models/                         # Local model adapters
+│   ├── vlm_client.py               # Ollama and existing llama.cpp HTTP clients
+│   ├── local_vlm.py                # App-managed offline llama.cpp server
+│   ├── mlx_sam3.py                 # MLX SAM 3 instance masks + SAM 2.1 fallback
+│   ├── grounded_sam.py             # GroundingDINO detection and SAM 2.1 masks
+│   ├── vitmatte_refiner.py         # Alpha-matte refinement
+│   └── moondream_client.py         # Legacy import compatibility shim
 │
-├── models/                          # ML model wrappers (protocol implementations)
-│   ├── __init__.py
-│   ├── vlm_client.py                # VLM backends: OllamaVLMClient + LlamaCppVLMClient
-│   ├── moondream_client.py          # Backward-compat shim re-exporting vlm_client
-│   ├── grounded_sam.py              # GroundingDINO + SAM 2.1 HQ (Detector + Segmenter)
-│   └── vitmatte_refiner.py          # VitMatte alpha matting (AlphaRefiner)
+├── processors/                     # Pure image, mask, vector and output operations
+│   ├── source_image.py             # EXIF-aware RGB/alpha loading and detection view
+│   ├── mask_ops.py                 # Mask metrics, cleanup and Boolean operations
+│   ├── image_filter.py             # Image pre-processing helpers
+│   ├── vectorizer.py               # VTracer and safe SVG assembly
+│   └── output_writer.py            # Validated SVG/TIFF/PNG/PDF serialization
 │
-├── processors/                      # Image processing utilities
-│   ├── __init__.py
-│   ├── mask_ops.py                  # Boolean ops, bbox, mask refinement
-│   ├── image_filter.py              # Bilateral filter, K-Means
-│   ├── vectorizer.py                # VTracer wrapper (Vectorizer protocol) + SVG assembly
-│   └── output_writer.py             # TIFF/PNG/SVG/PDF serialization
+├── ui/                             # Tkinter desktop application
+│   ├── main_window.py              # App shell and Single/Batch switching
+│   ├── setup_wizard.py             # Core-model and VLM setup checks/download UI
+│   ├── single/                     # Editable three-panel Single Image workflow
+│   │   ├── left_panel.py           # Labels, scan and pipeline parameters
+│   │   ├── scan_dedup.py           # Detection candidate deduplication
+│   │   ├── canvas_panel.py         # Zoom/pan canvas and overlays
+│   │   ├── canvas_drawing.py       # Manual selection drawing
+│   │   ├── canvas_events.py        # Canvas interaction bindings
+│   │   ├── canvas_overlays.py      # Mask/vector/composite overlays
+│   │   └── right_panel.py          # Layer edits and exports
+│   ├── batch/                      # Six-step Batch workflow
+│   │   ├── batch_view.py           # Session wiring, frozen artifacts and resume
+│   │   ├── sidebar.py              # Step navigation
+│   │   ├── bottom_bar.py           # Progress and navigation controls
+│   │   └── steps/                  # Import, Configure, Interrogate, Triage,
+│   │                               # Progress and Output screens
+│   └── preferences/                # Preferences and domain-guide editor
 │
-├── ui/                              # User interface components
-│   ├── __init__.py
-│   ├── theme.py                     # Color palette and styling
-│   ├── main_window.py               # Main shell: titlebar, mode switcher
-│   ├── mode_switcher.py             # Segmented control for Single/Batch
-│   ├── setup_wizard.py              # First-run setup dialog (model downloads)
-│   │
-│   ├── single/                      # Single image mode UI
-│   │   ├── __init__.py
-│   │   ├── single_view.py           # Three-panel layout manager
-│   │   ├── left_panel.py            # Drop zone, labels, parameters, scan dedup
-│   │   ├── canvas_panel.py          # Canvas with zoom/pan, scrollbars, overlays
-│   │   ├── right_panel.py           # Layers list, controls, export
-│   │   └── canvas_overlays.py       # Mask/vector overlay rendering
-│   │
-│   ├── batch/                       # Batch mode UI
-│   │   ├── __init__.py
-│   │   ├── batch_view.py            # Six-step wizard layout manager
-│   │   ├── sidebar.py               # Numbered step navigation
-│   │   ├── bottom_bar.py            # Status, progress, navigation
-│   │   └── steps/
-│   │       ├── __init__.py
-│   │       ├── step_import.py       # Step 1: Drop zone + recent batches
-│   │       ├── step_configure.py    # Step 2: Output mode + parameters
-│   │       ├── step_interrogate.py  # Step 3: Progress + tag cloud
-│   │       ├── step_triage.py       # Step 4: Human label confirmation
-│   │       ├── step_progress.py     # Step 5: Metrics + thumbnails
-│   │       └── step_output.py       # Step 6: Summary + export
-│   │
-│   └── preferences/                 # Preferences window
-│       ├── __init__.py
-│       ├── preferences_window.py    # Six-tab modal (General, Models, Pipeline, Appearance, Templates, Domain Guides)
-│       └── guide_editor.py          # Domain guide TOML editor component
+├── utils/                          # Runtime, model and I/O safeguards
+│   ├── preferences.py              # Defaults and exact-old-default migrations
+│   ├── model_manager.py            # Core model registry, verified downloads/paths
+│   ├── bootstrap.py                # First-run readiness detection
+│   ├── security.py                 # URL, archive/output path and atomic-write guards
+│   ├── coord_math.py               # Crop, remap and bounding-box transforms
+│   ├── mps_utils.py                # PyTorch MPS/CPU selection
+│   ├── cairo_support.py            # Optional Cairo export support
+│   └── thumbnail.py                # Source and SVG thumbnail utilities
 │
-├── utils/                           # Utility modules
-│   ├── __init__.py
-│   ├── mps_utils.py                 # MPS/CPU device detection
-│   ├── model_manager.py             # ModelManager: registry, downloads (file/hf/zip)
-│   ├── bootstrap.py                 # First-run setup detection + Ollama pulls
-│   ├── coord_math.py                # Affine remap, crop, bbox helpers
-│   ├── thumbnail.py                 # 32×32 SVG thumbnail renderer
-│   └── preferences.py               # JSON preferences load/save + legacy migration
+├── tests/                          # Deterministic unit, pipeline and GUI tests
+│   ├── test_factory.py             # Backend selection and MLX wiring
+│   ├── test_interrogation.py       # Candidate policy and glyph observations
+│   ├── test_batch_*.py             # Batch runner/session/template behavior
+│   ├── test_gui_*.py               # Fast smoke + opt-in window integration coverage
+│   ├── test_security_boundaries.py # I/O, path, URL, archive and SVG guards
+│   └── test_*.py                   # Model, output, state and pipeline regressions
 │
-├── tests/                           # Test suite
-│   ├── test_contracts.py            # Protocol conformance and instantiation tests
-│   ├── test_knowledge_interrogation.py  # KnowledgePack, interrogation helpers
-│   ├── test_vlm_client.py           # VLM backends: parsing, llama.cpp transport
-│   └── test_backend_config.py       # Backend wiring, prefs migration, bootstrap
-│
-└── docs/                            # Documentation and planning
-    ├── skiagrafia-readme.jpg        # README hero image
-    └── Skiagrafia.png               # Application icon
+└── docs/
+    ├── MANUAL.md                   # User workflow manual
+    ├── quality-pipeline.md         # Historical quality-pipeline report
+    ├── audits/                     # Dated audit and QA evidence
+    │   └── 2026-09-16/
+    │       └── PYTHON313_MLX_SAM3_MIGRATION.md
+    ├── skiagrafia-readme.jpg       # README interface image
+    └── Skiagrafia.png              # Application icon
 ```
 
----
+## Runtime and Models
 
-## Module Descriptions
+| Concern | Source of truth | Behaviour |
+|---|---|---|
+| Python/runtime | `pyproject.toml`, `uv.lock`, `run.sh` | Python 3.13 only; `run.sh` refuses a missing or incompatible `.venv` |
+| VLM | `models/vlm_client.py`, `models/local_vlm.py` | Ollama, existing llama.cpp, or app-managed local llama.cpp; service URLs must be loopback roots |
+| Instance detection | `core/factory.py`, `models/mlx_sam3.py` | `auto` selects MLX SAM 3 only with `mlx_sam3/sam3-mod-weights/model.safetensors` |
+| Fallback segmentation | `models/grounded_sam.py` | GroundingDINO produces boxes and SAM 2.1 produces masks when MLX is unavailable or unsuitable |
+| Alpha/vector output | `models/vitmatte_refiner.py`, `processors/vectorizer.py` | Soft alpha mattes and structurally validated SVG paths |
+| Core weights | `utils/model_manager.py`, `utils/bootstrap.py` | Wizard may acquire registered fallback weights; it does not download the optional MLX SAM 3 bundle |
 
-### Entry Point
-
-| File | Purpose |
-|------|---------|
-| `main.py` | Application bootstrap: environment setup (offline mode), logging, VLM backend health check (Ollama or llama.cpp), first-run setup check, TkinterDnD root window, MainWindow instantiation |
-| `pyproject.toml` | Project metadata and dependencies (torch, torchvision, tkinterdnd2, pillow, opencv-python-headless, etc.) |
-| `run.sh` | Shell script launcher that sets environment variables for offline inference and disables bytecode caching |
-
-### Core Pipeline
-
-| File | Purpose |
-|------|---------|
-| `orchestrator.py` | **10-step pipeline** with injected `CapabilitySet`. Knows only Protocol interfaces. Includes multi-level parent dedup (mask IoU, mask containment, bbox IoU) and child validation (parent-similarity rejection, child-child dedup). Pipeline: Load → Interrogate → Detect → Segment parent → Segment children → Remap → Alpha refine → Mask refine → Vectorize → SVG assembly |
-| `batch_runner.py` | Coordinates parallel processing via `ProcessPoolExecutor`; uses factory to build capabilities in worker processes |
-| `batch_template.py` | Pydantic model for serializing Single mode parameters into reusable Batch templates |
-| `state_manager.py` | SQLiteDict-based persistence for batch job state (pending, running, complete, failed) |
-| `interrogation.py` | `GuidedInterrogator` with VLM fallback chain (primary → fallback → reasoner), tiled fallback for high-res images, configurable child parts cap per profile |
-| `knowledge.py` | `KnowledgePack` and `ObjectKnowledge` Pydantic models for semantic label normalization and detector phrase ranking |
-| `contracts.py` | Five `@runtime_checkable` Protocol interfaces (Interrogator, Detector, Segmenter, AlphaRefiner, Vectorizer) + `CapabilitySet` bundle |
-| `factory.py` | `build_capabilities()` function that reads preferences and constructs wired `CapabilitySet` with concrete clients |
-
-### ML Model Clients (Protocol Implementations)
-
-| File | Purpose |
-|------|---------|
-| `vlm_client.py` | `BaseVLMClient` shared prompt/parsing logic; `OllamaVLMClient` (Ollama API) and `LlamaCppVLMClient` (OpenAI-compatible llama.cpp server); `create_vlm_client()` backend factory |
-| `moondream_client.py` | Backward-compat shim: re-exports `MoondreamClient` (= `OllamaVLMClient`) from `vlm_client` |
-| `grounded_sam.py` | `GroundedSAM`: GroundingDINO (text→bbox) + SAM 2.1 HQ (bbox→mask); `prefer_full_box` multi-mask mode for manual bboxes; synonym retry for ambiguous labels; implements `Detector` + `Segmenter` protocols |
-| `vitmatte_refiner.py` | `VitMatteRefiner`: Alpha matting for fine edge detail; implements `AlphaRefiner` protocol |
-
-### Processors
-
-| File | Purpose |
-|------|---------|
-| `mask_ops.py` | Boolean operations (subtract, union, intersect), bounding box calculations, mask refinement (bilateral, morphology, contour filtering), coverage metrics |
-| `image_filter.py` | Bilateral filtering for edge-preserving smoothing, K-Means color quantization |
-| `vectorizer.py` | `VTracerVectorizer` class (implements `Vectorizer` protocol) + `trace_mask()` + `assemble_svg()` multi-layer composition |
-| `output_writer.py` | Serialization to TIFF (4-channel), PNG, SVG, PDF formats |
-
-### UI Components
-
-| Directory/File | Purpose |
-|----------------|---------|
-| `ui/theme.py` | Color palette (mirrors macOS system colors), ttk style configuration |
-| `ui/main_window.py` | Top-level shell: title bar, mode switcher, content area swap, preferences access |
-| `ui/mode_switcher.py` | Custom ttk.Frame with segmented control buttons for Single/Batch mode |
-| `ui/single/single_view.py` | Three-panel layout manager coordinating left/center/right panels |
-| `ui/single/left_panel.py` | Drop zone, label list, VTracer parameters, Process/Export buttons, **scan-stage bbox dedup** (filters duplicate detections before they reach the UI) |
-| `ui/single/canvas_panel.py` | Canvas with zoom/pan, **horizontal and vertical scrollbars**, overlay rendering for masks/vectors, manual box drawing, compare slider |
-| `ui/single/right_panel.py` | Hierarchical layer list with visibility toggles and export controls |
-| `ui/single/canvas_overlays.py` | Mask and vector overlay rendering utilities |
-| `ui/batch/batch_view.py` | Six-step wizard layout manager |
-| `ui/batch/sidebar.py` | Numbered step navigation with completion indicators |
-| `ui/batch/bottom_bar.py` | Status display, progress bar, navigation buttons |
-| `ui/batch/steps/step_import.py` | Step 1: Folder selection, template loading, recursion depth |
-| `ui/batch/steps/step_configure.py` | Step 2: Output format, VTracer parameters, naming conventions |
-| `ui/batch/steps/step_interrogate.py` | Step 3: Moondream scanning progress with tag cloud preview |
-| `ui/batch/steps/step_triage.py` | Step 4: Human label review and confirmation (mandatory gate) |
-| `ui/batch/steps/step_progress.py` | Step 5: Real-time progress with per-image status and thumbnails |
-| `ui/batch/steps/step_output.py` | Step 6: Summary statistics, export bundles, retry failed jobs |
-| `ui/preferences/preferences_window.py` | Six-tab preferences modal: General, Models & Ollama, Pipeline, Appearance, Templates, Domain Guides |
-| `ui/preferences/guide_editor.py` | Domain guide TOML editor component with scrollable form and live preview |
-
-### Utilities
-
-| File | Purpose |
-|------|---------|
-| `mps_utils.py` | PyTorch MPS device detection with CPU fallback |
-| `model_manager.py` | `ModelManager` class for model lifecycle (discovery, download, path resolution, device residency tracking) |
-| `coord_math.py` | Coordinate transformations: crop with padding, mask remapping, tight bounding box (`y0,x0,y1,x1` format) |
-| `thumbnail.py` | CairoSVG-based 32×32 SVG thumbnail rendering with LRU cache |
-| `preferences.py` | JSON file I/O for user preferences stored in `~/.config/skiagrafia/`; `get_models_dir()` helper |
-
-### Tests
-
-| File | Purpose |
-|------|---------|
-| `test_contracts.py` | Protocol conformance (all concrete classes satisfy their protocols), CapabilitySet construction, ModelManager, Orchestrator instantiation and signature tests |
-| `test_knowledge_interrogation.py` | KnowledgePack loading/validation, child parts filtering, composition prompts, candidate parsing, detector phrase ranking, reasoner gating |
-
----
+The bundled MLX source currently needs `mlx==0.31.2`. Newer MLX releases must
+not be substituted without independently updating and testing the bundle's
+custom Metal kernel contract.
 
 ## Data Flow
 
-### Architecture Overview
-
-```
-┌─────────────────────────────────────────────────────────────────┐
-│                     UI Layer                                    │
-│  main_window.py · left_panel.py · step_progress.py              │
-│  batch_runner.py                                                │
-│                                                                 │
-│  Reads preferences → builds concrete clients → injects          │
-│  them into Orchestrator via CapabilitySet                       │
-└────────────────────────┬────────────────────────────────────────┘
-                         │ passes CapabilitySet
-                         ▼
-┌─────────────────────────────────────────────────────────────────┐
-│                   Orchestrator                                  │
-│  Knows ONLY the Protocol interfaces.                            │
-│  Never imports a concrete model client.                         │
-│  Multi-level dedup: mask IoU, containment, bbox IoU.            │
-│  Child validation: parent-similarity, child-child dedup.        │
-└────────────────────────┬────────────────────────────────────────┘
-                         │ calls Protocol methods
-                         ▼
-┌─────────────────────────────────────────────────────────────────┐
-│              Capability Protocols (contracts.py)                │
-│  Interrogator · Detector · Segmenter · AlphaRefiner ·           │
-│  Vectorizer                                                     │
-└─────────────────────────────────────────────────────────────────┘
-                         │ implemented by
-                         ▼
-┌─────────────────────────────────────────────────────────────────┐
-│              Concrete Model Clients (models/)                   │
-│  vlm_client.py · grounded_sam.py · vitmatte_refiner.py          │
-│                                                                 │
-│  Each receives its model path from ModelManager.                │
-└────────────────────────┬────────────────────────────────────────┘
-                         │ paths resolved by
-                         ▼
-┌─────────────────────────────────────────────────────────────────┐
-│              ModelManager (model_manager.py)                    │
-│  User-configurable models_dir from preferences.                 │
-│  Registry of known models with download URLs.                   │
-│  Device residency tracking and memory-aware unload.             │
-└─────────────────────────────────────────────────────────────────┘
+```text
+Single Image UI / Batch UI
+            │ user settings, Selection Request, Domain Guide
+            ▼
+       core.factory
+            │ CapabilitySet: Interrogator · Detector · Segmenter · AlphaRefiner · Vectorizer
+            ▼
+    core.orchestrator
+      ├── VLM semantic interrogation
+      ├── MLX SAM 3 native instances OR GroundingDINO + SAM 2.1 fallback
+      ├── parent/child containment, repeated-instance and glyph validation
+      ├── VitMatte alpha refinement and VTracer SVG assembly
+      └── per-layer TIFF/SVG + RGBA all-objects TIFF
 ```
 
-### Single Image Mode Pipeline
+Every successful image writes an `*_all-objects.tiff` sidecar. Its RGB comes
+from the original image and its alpha is the pixel-wise union of accepted layer
+alpha mattes; an intentionally empty
+selection remains transparent rather than fabricating foreground. Layer edits
+recompute the sidecar through `core/layer_editing.py`.
 
-```
-[Image Drop] ──► [Moondream Scan] ──► [GroundingDINO Boxes]
-                                              │
-                                    ┌─────────▼──────────┐
-                                    │  Scan-Stage Dedup   │
-                                    │  bbox IoU + contain │
-                                    │  (left_panel.py)    │
-                                    └─────────┬──────────┘
-                                              │
-                                    [Label Selection]
-                                              │
-                                              ▼
-┌─────────────────────────────────────────────────────────────────┐
-│                 ORCHESTRATOR (10 steps)                          │
-│                                                                  │
-│  1.  Load Image (RGB conversion, metadata)                      │
-│  2.  Moondream Interrogation → parent/child labels              │
-│  3.  GroundingDINO Detection → bounding boxes                   │
-│      ├── Manual bbox: prefer_full_box + clip to bbox            │
-│      └── Pipeline-stage dedup: mask IoU, containment, bbox IoU  │
-│  4.  SAM 2.1 HQ Parent Segmentation → parent mask               │
-│  5.  SAM 2.1 HQ Child Segmentation → child masks                │
-│      ├── Reject if child IoU > 0.85 with parent (same object)  │
-│      └── Reject if child IoU > 0.80 with sibling (duplicate)   │
-│  6.  Coordinate Remapping (crop → full canvas)                  │
-│  7.  VitMatte Alpha Refinement → soft alpha mattes              │
-│  8.  Mask Refinement (bilateral, morphology, contour filter)    │
-│  9.  VTracer Vectorization → SVG path data                      │
-│  10. SVG Assembly + Export (TIFF/SVG)                           │
-└─────────────────────────────────────────────────────────────────┘
-                         │
-                         ▼
-    [Canvas Preview] ◄──► [Layer Controls] ──► [Export]
-```
+## Batch Persistence and Resume
 
-### Batch Mode Pipeline
+`ui/batch/batch_view.py` uses `core/batch_session.py` and `BatchRunner` as one
+processing path. A resumable run directory contains:
 
-```
-Step 1: Import    ──► Select folder or load template
-Step 2: Configure ──► Output mode, recursion depth, VTracer params
-Step 3: Interrogate ──► Moondream scans all images (parallel)
-Step 4: Triage    ──► Human confirms/rejects labels (mandatory gate)
-Step 5: Progress  ──► Orchestrator runs on all images (ProcessPoolExecutor)
-Step 6: Output    ──► Summary, export bundles, retry failed
-```
+| Artifact | Contents |
+|---|---|
+| `run.json` | Input/output locations, Selection Request and captured Domain Guide |
+| `guide.toml` | Frozen guide copy, when a guide was used |
+| `interrogation.json` | Per-image VLM candidates and instance policies |
+| `triage.json` | Approved labels and per-image label exclusions |
+| `processing.json` | Effective immutable `BatchConfig` after Triage |
+| `state.db` | Per-image status, successful outputs and metrics |
 
----
+The GUI exposes Resume only after validating all of these artifacts together.
+A bare, stale or corrupt `state.db` is never shown as resumable; a saved run
+that cannot prove this parity is restored only as a new editable batch.
 
-## Key Classes
+## Verification Commands
 
-| Class | Module | Description |
-|-------|--------|-------------|
-| `Orchestrator` | `core/orchestrator.py` | 10-step pipeline executor; receives `CapabilitySet` via constructor injection; multi-level parent dedup and child validation |
-| `PipelineResult` | `core/orchestrator.py` | Pydantic model for pipeline output (layers, paths, errors) |
-| `LayerResult` | `core/orchestrator.py` | Pydantic model for a single layer result (label, role, bbox, svg_data) |
-| `CapabilitySet` | `core/contracts.py` | Pydantic bundle of all five capability protocols for dependency injection |
-| `Interrogator` | `core/contracts.py` | Protocol: `interrogate(image, confirmed_labels, knowledge_pack)` |
-| `Detector` | `core/contracts.py` | Protocol: `detect_box(image, label, box_threshold, text_threshold)` |
-| `Segmenter` | `core/contracts.py` | Protocol: `segment(image, bbox, label, prefer_full_box)` + `clear_cache()` |
-| `AlphaRefiner` | `core/contracts.py` | Protocol: `predict(image, mask)` |
-| `Vectorizer` | `core/contracts.py` | Protocol: `trace(mask)` |
-| `GuidedInterrogator` | `core/interrogation.py` | VLM interrogation with fallback chain, tiled processing, configurable child parts cap |
-| `InterrogationCandidate` | `core/interrogation.py` | Pydantic model: canonical/display labels, detector phrases, confidence, role |
-| `KnowledgePack` | `core/knowledge.py` | TOML-based label taxonomy with detector phrase rankings and child parts |
-| `GroundedSAM` | `models/grounded_sam.py` | GroundingDINO + SAM 2.1 HQ wrapper; `prefer_full_box` multi-mask selection; synonym retry; implements Detector + Segmenter |
-| `OllamaVLMClient` / `LlamaCppVLMClient` | `models/vlm_client.py` | Interchangeable VLM transports; shared multi-prompt child detection with numbering cleanup |
-| `VitMatteRefiner` | `models/vitmatte_refiner.py` | Alpha matting model wrapper |
-| `VTracerVectorizer` | `processors/vectorizer.py` | VTracer wrapper implementing Vectorizer protocol |
-| `CanvasPanel` | `ui/single/canvas_panel.py` | Tkinter canvas with zoom/pan, scrollbars, overlay rendering, manual box drawing |
-| `ModelManager` | `utils/model_manager.py` | Model lifecycle management with user-configurable directory |
-| `BatchTemplate` | `core/batch_template.py` | Pydantic model for reusable batch configurations |
-| `MainWindow` | `ui/main_window.py` | Application shell; manages mode switching |
-| `SingleView` | `ui/single/single_view.py` | Three-panel layout for single image mode |
-| `BatchView` | `ui/batch/batch_view.py` | Six-step wizard for batch mode |
-
----
-
-## Configuration
-
-| Location | Purpose |
-|----------|---------|
-| `.claude/settings.local.json` | Claude Code assistant project settings |
-| `~/.config/skiagrafia/preferences.json` | User preferences (theme, defaults, paths, models_directory) |
-| `~/.config/skiagrafia/templates/*.json` | Saved batch templates |
-| `~/.config/skiagrafia/skiagrafia.log` | Application log file |
-| `~/ai/claudecode/mozaix/models/` | Default shared ML model weights directory (configurable) |
-
----
-
-## Dependencies
-
-| Package | Purpose |
-|---------|---------|
-| `torch`, `torchvision` | PyTorch with MPS support |
-| `tkinterdnd2` | Drag-and-drop support for Tkinter |
-| `pillow`, `opencv-python-headless` | Image processing |
-| `numpy`, `scipy` | Numerical operations |
-| `pydantic` | Data validation and settings |
-| `sqlitedict` | Persistent state storage |
-| `tqdm`, `rich` | Progress bars and logging |
-| `cairosvg` | SVG rendering and PDF export |
-| `vtracer` | Bitmap to vector conversion |
-| `ollama` | Ollama Python client |
-| `lxml` | XML/SVG parsing |
-| `transformers`, `accelerate` | HuggingFace transformers (offline mode) |
-
----
-
-## Model Weights
-
-| Model | Filename | Purpose | Size |
-|-------|----------|---------|------|
-| GroundingDINO | `groundingdino_swint_ogc.pth` | Text → bounding box detection | ~660 MB |
-| SAM 2.1 HQ | `sam2.1_hiera_large.pt` | Precision segmentation | ~2.4 GB |
-| VitMatte ViT-B | `vitmatte-base-composition-1k/` | Alpha matting | ~350 MB |
-| Moondream 2 | via Ollama | Semantic interrogation | ~1.5 GB |
-
----
-
-## Execution
+Use the isolated project interpreter for every Python command:
 
 ```bash
-# Run the application
-python main.py
-
-# Or use the shell script (recommended — sets env vars)
-./run.sh
+./.venv/bin/python -m pytest -q
+./.venv/bin/python -m pytest -q -m gui
+./.venv/bin/python -m ruff check .
+./.venv/bin/python -m compileall -q .
+./.venv/bin/python -m pip check
+uv lock --check
+git diff --check
 ```
 
----
+The `gui` marker is deliberately the fast real-window smoke gate. Full
+windowed integration tests use `-m gui_integration` and are opt-in, rather
+than part of ordinary development checks.
 
-## Related Documentation
+## Operational Limits
 
-- **[README.md](README.md)** — Full user documentation with installation and usage guide
-- **[docs/CLAUDE.md](docs/CLAUDE.md)** — Implementation guide for AI assistants
-- **[docs/CLAUDEv5.md](docs/CLAUDEv5.md)** — v5.0 architecture and contracts refactor notes
-- **[docs/CLAUDEv4.md](docs/CLAUDEv4.md)** — v4 implementation notes and historical reference
+- MLX SAM 3 improves text-to-instance segmentation, but semantic recognition
+  remains model output. Ambiguous material needs Triage and per-image
+  exceptions.
+- `sqlitedict 2.1.0` has unresolved advisory `PYSEC-2026-1939`; there is no
+  fixed release currently available.
+- The download registry restricts source hosts and the output paths/SVGs are
+  validated, but model weights are external artifacts and are not yet pinned
+  to immutable SHA-256 values.
+
+See [README.md](README.md) for installation and user-facing operation, and
+[the Python 3.13 / MLX SAM 3 migration audit](docs/audits/2026-09-16/PYTHON313_MLX_SAM3_MIGRATION.md)
+for the verified runtime evidence.
