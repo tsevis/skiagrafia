@@ -154,8 +154,7 @@ def parse_typography_observation(raw: str) -> TypographyObservation | None:
     content = raw.strip()
     if content.startswith("```"):
         content = content.removeprefix("```json").removeprefix("```")
-        if content.endswith("```"):
-            content = content[:-3]
+        content = content.removesuffix("```")
         content = content.strip()
     try:
         payload = json.loads(content)
@@ -187,7 +186,7 @@ def parse_typography_observation(raw: str) -> TypographyObservation | None:
             )
         ):
             return None
-        x0, y0, x1, y1 = (max(0, min(1000, int(round(value)))) for value in bbox)
+        x0, y0, x1, y1 = (max(0, min(1000, round(value))) for value in bbox)
         if x1 <= x0 or y1 <= y0:
             return None
         elements.append(TypographyElement(glyph=glyph.strip(), bbox=(x0, y0, x1, y1)))
@@ -625,9 +624,7 @@ class GuidedInterrogator:
         high_conf = [c for c in candidates if c.confidence >= 0.65]
         if not high_conf:
             return True
-        if all(c.display_label.lower() in _VAGUE_TERMS for c in candidates):
-            return True
-        return False
+        return bool(all(c.display_label.lower() in _VAGUE_TERMS for c in candidates))
 
     def _merge_candidates(
         self,

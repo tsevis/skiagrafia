@@ -131,7 +131,7 @@ Skiagrafia addresses a common challenge in design and production workflows: conv
 - Apple Silicon optimized (MPS and MLX acceleration)
 - Lazy model loading with memory residency
 - ProcessPoolExecutor parallelization
-- SQLiteDict state persistence
+- SQLite state persistence (JSON records, no pickle)
 
 ---
 

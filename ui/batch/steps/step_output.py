@@ -7,7 +7,7 @@ from pathlib import Path
 from tkinter import ttk
 from typing import TYPE_CHECKING
 
-from ui.theme import is_macos
+from ui.theme import MACOS_OPEN, is_macos
 from utils.security import SecurityError, atomic_write_bytes, safe_child_path
 
 if TYPE_CHECKING:
@@ -163,9 +163,10 @@ class StepOutput:
     def _reveal_in_finder(self) -> None:
         output_dir = self._output_dir()
         if is_macos():
-            subprocess.run(["open", str(output_dir)], check=False)
+            subprocess.run([MACOS_OPEN, str(output_dir)], check=False)  # noqa: S603 — fixed argv, no shell
         else:
-            subprocess.run(["xdg-open", str(output_dir)], check=False)
+            # No absolute path exists for xdg-open across distributions.
+            subprocess.run(["xdg-open", str(output_dir)], check=False)  # noqa: S603,S607
 
     def _export_svg_bundle(self) -> None:
         self._export_bundle("*.svg", "SVG")

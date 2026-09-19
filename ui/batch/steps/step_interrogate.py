@@ -136,7 +136,7 @@ class StepInterrogate:
             from core.factory import build_interrogation_settings
             from core.interrogation import GuidedInterrogator
             from core.knowledge import KnowledgePack
-            from processors.source_image import load_source_image, detection_image
+            from processors.source_image import detection_image, load_source_image
 
             settings_config = getattr(self._view, "interrogation_settings", {}) or {}
             guide_path = settings_config.get("guide_path") or self._view.knowledge_pack_path

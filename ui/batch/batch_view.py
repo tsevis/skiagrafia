@@ -3,7 +3,7 @@ from __future__ import annotations
 import tkinter as tk
 from pathlib import Path
 from tkinter import ttk
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, ClassVar
 
 if TYPE_CHECKING:
     from ui.main_window import MainWindow
@@ -15,7 +15,7 @@ class BatchView:
     Left sidebar (210px) + main content area + bottom bar.
     """
 
-    STEP_TITLES = [
+    STEP_TITLES: ClassVar[list[str]] = [
         "Import",
         "Configure",
         "Interrogate",
@@ -117,12 +117,12 @@ class BatchView:
 
     def _create_step_view(self, index: int) -> object:
         """Create a step view by index."""
-        from ui.batch.steps.step_import import StepImport
         from ui.batch.steps.step_configure import StepConfigure
+        from ui.batch.steps.step_import import StepImport
         from ui.batch.steps.step_interrogate import StepInterrogate
-        from ui.batch.steps.step_triage import StepTriage
-        from ui.batch.steps.step_progress import StepProgress
         from ui.batch.steps.step_output import StepOutput
+        from ui.batch.steps.step_progress import StepProgress
+        from ui.batch.steps.step_triage import StepTriage
 
         step_classes = [
             StepImport,
@@ -424,10 +424,10 @@ class BatchView:
 
     def resume_run(self, resumable: object) -> None:
         """Restore a verified immutable run without reopening human approval."""
-        settings = getattr(resumable, "run_settings")
-        interrogation = getattr(resumable, "interrogation")
-        triage = getattr(resumable, "triage")
-        processing = getattr(resumable, "processing")
+        settings = resumable.run_settings
+        interrogation = resumable.interrogation
+        triage = resumable.triage
+        processing = resumable.processing
         self._template = None
         self.run_settings = settings
         self.selection_request = settings.selection_request

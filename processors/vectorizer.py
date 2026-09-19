@@ -181,7 +181,7 @@ def _extract_svg_content(svg_str: str) -> str:
     if not content:
         return ""
     try:
-        root = ET.fromstring(content if "<svg" in content else f"<svg>{content}</svg>")
+        root = ET.fromstring(content if "<svg" in content else f"<svg>{content}</svg>")  # noqa: S314 — DTDs and entities are rejected and the input is size-capped above
     except ET.ParseError as exc:
         raise ValueError("VTracer returned malformed SVG.") from exc
 
@@ -208,7 +208,7 @@ def _strip_vtracer_fills(svg_content: str) -> str:
     content = _extract_svg_content(svg_content)
     if not content:
         return ""
-    root = ET.fromstring(f"<svg>{content}</svg>")
+    root = ET.fromstring(f"<svg>{content}</svg>")  # noqa: S314 — content already passed _extract_svg_content()
     visible: list[str] = []
     for element in root:
         fill = element.attrib.get("fill", "").lower()
@@ -243,7 +243,9 @@ def _safe_path_element(element: ET.Element) -> str:
 def _safe_svg_number(value: object) -> str:
     """Format numeric transforms without allowing attribute injection."""
     if not isinstance(value, (int, float)) or isinstance(value, bool):
-        raise ValueError("SVG translation must be numeric.")
+        raise ValueError(  # noqa: TRY004 — every SVG validation failure is a ValueError
+            "SVG translation must be numeric."
+        )
     if not np.isfinite(value) or abs(value) > 10_000_000:
         raise ValueError("SVG translation is out of range.")
     return f"{value:g}"

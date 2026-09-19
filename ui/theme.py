@@ -8,6 +8,11 @@ def is_macos() -> bool:
     return platform.system() == "Darwin"
 
 
+# Revealing a folder in Finder runs this binary.  Spelled absolutely so PATH
+# cannot decide which `open` executes.
+MACOS_OPEN = "/usr/bin/open"
+
+
 # macOS system colour names — resolved at render time, auto-adapt to dark/light
 MACOS_PALETTE: dict[str, str] = {
     "entry_bg": "systemTextBackgroundColor",

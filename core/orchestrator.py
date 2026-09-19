@@ -11,11 +11,12 @@ All inference runs locally. VLM clients communicate with local services.
 """
 from __future__ import annotations
 
+import itertools
 import logging
 import re
+from collections.abc import Callable
 from hashlib import sha256
 from pathlib import Path
-from typing import Callable
 
 import cv2
 import numpy as np
@@ -32,9 +33,9 @@ from core.knowledge import KnowledgePack
 from core.layer_editing import all_objects_alpha, body_alpha
 from models.grounded_sam import DetectionResult
 from processors.mask_ops import refine_mask
-from processors.vectorizer import assemble_svg
 from processors.output_writer import write_svg, write_tiff
-from processors.source_image import load_source_image, detection_image
+from processors.source_image import detection_image, load_source_image
+from processors.vectorizer import assemble_svg
 from utils.coord_math import tight_bbox
 from utils.security import SecurityError, safe_child_path
 
@@ -192,10 +193,10 @@ def _normalized_bbox_to_image(
     """Convert a 0..1000 VLM box to the current image dimensions."""
     x0, y0, x1, y1 = bbox
     return (
-        int(round(x0 * width / 1000)),
-        int(round(y0 * height / 1000)),
-        int(round(x1 * width / 1000)),
-        int(round(y1 * height / 1000)),
+        round(x0 * width / 1000),
+        round(y0 * height / 1000),
+        round(x1 * width / 1000),
+        round(y1 * height / 1000),
     )
 
 
@@ -206,7 +207,7 @@ def _rectangle_union_area(rectangles: list[tuple[int, int, int, int]]) -> int:
         return 0
     x_edges = sorted({edge for rectangle in rectangles for edge in (rectangle[0], rectangle[2])})
     area = 0
-    for left, right in zip(x_edges, x_edges[1:], strict=False):
+    for left, right in itertools.pairwise(x_edges):
         if right <= left:
             continue
         spans = sorted(
@@ -345,7 +346,7 @@ class Orchestrator:
             )
         except (OSError, ValueError, RuntimeError, SecurityError) as exc:
             result.error = str(exc)
-            logger.error("Pipeline failed for %s: %s", image_path, exc, exc_info=True)
+            logger.exception("Pipeline failed for %s: %s", image_path, exc)
 
         finally:
             self._segmenter.clear_cache()

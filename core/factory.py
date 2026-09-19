@@ -57,7 +57,7 @@ def build_interrogation_settings(
 
     backend = str(prefs.get("vlm_backend", BACKEND_OLLAMA))
     if backend == BACKEND_LOCAL:
-        from models.local_vlm import LOCAL_PRIMARY, LOCAL_FALLBACK
+        from models.local_vlm import LOCAL_FALLBACK, LOCAL_PRIMARY
         host = ""
         default_model = str(prefs.get("local_primary_model", LOCAL_PRIMARY))
         fallback_vlms = [str(prefs.get("local_fallback_model", LOCAL_FALLBACK))]

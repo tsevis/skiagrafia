@@ -220,7 +220,7 @@ class CanvasPanel(CanvasDrawingMixin, CanvasEventsMixin):
             self._auto_cover = True
             self._root.after(50, self.zoom_to_cover)
         except Exception:
-            logger.error("Failed to load image: %s", path, exc_info=True)
+            logger.exception("Failed to load image: %s", path)
 
     def _zoom_at(
         self,

@@ -9,9 +9,9 @@ from __future__ import annotations
 import logging
 import os
 import sys
+from collections.abc import Iterable
 from pathlib import Path
 from types import ModuleType
-from typing import Iterable
 
 
 def configure_cairo_library_path(

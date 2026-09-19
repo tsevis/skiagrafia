@@ -3,15 +3,15 @@ from __future__ import annotations
 import functools
 import hashlib
 import json
-import sys
 import logging
 import os
 import re
+import sys
 import time
 import uuid
-from concurrent.futures import ProcessPoolExecutor, Future
+from collections.abc import Callable
+from concurrent.futures import Future, ProcessPoolExecutor
 from pathlib import Path
-from typing import Callable
 
 from pydantic import BaseModel, Field
 
@@ -162,7 +162,7 @@ def _worker_orchestrator(config_json: str):
             "selection_request": config.selection_request,
         },
     )
-    orchestrator = Orchestrator(
+    return Orchestrator(
         capabilities=caps,
         quality=config.quality_profile,
         output_dir=Path(config.output_dir) / config.batch_id,
@@ -172,7 +172,6 @@ def _worker_orchestrator(config_json: str):
         text_threshold=config.text_threshold,
         knowledge_pack=build_knowledge_pack(config.guide_path),
     )
-    return orchestrator
 
 
 class BatchRunner:
@@ -327,7 +326,7 @@ class BatchRunner:
             self._state.update_status(
                 image_id, JobStatus.FAILED, error=str(exc)
             )
-            logger.error("Image %s failed: %s", image_id, exc, exc_info=True)
+            logger.exception("Image %s failed: %s", image_id, exc)
 
         self._futures.pop(image_id, None)
 

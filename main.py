@@ -34,7 +34,6 @@ from rich.logging import RichHandler  # noqa: E402 — must follow configure_cai
 
 from utils.security import SecurityError  # noqa: E402 — configured before imports above
 
-
 # Log rotation — the file handler runs at DEBUG, so an unbounded file grows
 # without limit. Cap total on-disk history at LOG_BACKUP_COUNT + 1 files.
 LOG_MAX_BYTES = 2 * 1024 * 1024
@@ -123,7 +122,7 @@ def check_vlm_backend() -> None:
         )
 
 
-def check_first_run(root: "tk.Misc") -> None:
+def check_first_run(root: tk.Misc) -> None:
     """Open the setup wizard when required components are missing.
 
     The readiness probe does disk and network I/O, so it runs on a worker
@@ -185,7 +184,7 @@ def main() -> None:
 
     from ui.main_window import MainWindow
 
-    _app = MainWindow(root)  # noqa: F841 — must stay referenced for Tk callbacks
+    _app = MainWindow(root)
 
     logger.info("Skiagrafia ready")
     root.mainloop()

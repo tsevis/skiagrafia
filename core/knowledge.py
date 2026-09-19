@@ -218,5 +218,5 @@ def load_knowledge_pack(folder: str | Path) -> KnowledgePack | None:
     try:
         return KnowledgePack.load(guide_path)
     except (OSError, UnicodeDecodeError, ValueError, tomllib.TOMLDecodeError):
-        logger.error("Failed to load knowledge pack %s", guide_path, exc_info=True)
+        logger.exception("Failed to load knowledge pack %s", guide_path)
         return None

@@ -98,7 +98,7 @@ class SetupWizard:
         try:
             status: SetupStatus = check_setup(self._prefs)
         except Exception:
-            logger.error("Setup check failed", exc_info=True)
+            logger.exception("Setup check failed")
             return
         for row in self._tree.get_children():
             self._tree.delete(row)
@@ -148,7 +148,7 @@ class SetupWizard:
                 try:
                     pull_ollama_model(host, model_name, _pull_report)
                 except Exception:
-                    logger.error("Ollama pull failed: %s", model_name, exc_info=True)
+                    logger.exception("Ollama pull failed: %s", model_name)
                     failures.append(model_name)
 
             message = (
@@ -157,7 +157,7 @@ class SetupWizard:
                 else f"Finished with errors: {', '.join(failures)}"
             )
         except Exception:
-            logger.error("Setup downloads failed", exc_info=True)
+            logger.exception("Setup downloads failed")
             message = "Setup failed — see log for details."
         self._win.after(0, self._finish, message)
 
