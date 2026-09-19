@@ -12,7 +12,6 @@ dependencies = [
     "numpy",
     "scipy",
     "pydantic>=2.0",
-    "sqlitedict",
     "dask[distributed]",
     "tqdm",
     "rich",
@@ -66,14 +65,6 @@ addopts = ["-m", "not gui and not gui_integration"]
 markers = [
     "gui: fast real-window smoke test; the fast set stays under five seconds",
     "gui_integration: full real-window integration test; excluded from the default and smoke runs",
-]
-# find_incomplete_batches deliberately opens a corrupt state.db to prove it
-# skips one. sqlitedict connects from a daemon writer thread, so the failure
-# also surfaces there, asynchronously -- pytest blames whichever test happens
-# to be running, which is why this cannot be scoped per-test. Matched on the
-# sqlite message so any other unhandled thread exception still fails loudly.
-filterwarnings = [
-    "ignore:(?s).*file is not a database.*:pytest.PytestUnhandledThreadExceptionWarning",
 ]
 
 [dependency-groups]

@@ -5,6 +5,9 @@ real user config or output directory.
 """
 from __future__ import annotations
 
+import json
+import pickle
+import sqlite3
 import sys
 from pathlib import Path
 
@@ -56,6 +59,66 @@ class TestPutAndGet:
         assert record is not None
         assert record.status == JobStatus.MASKING
         sm2.close()
+
+
+class TestOnDiskFormat:
+    """A state.db may arrive from anywhere -- a copied or shared batch folder.
+
+    Reading one must never deserialise executable payloads, so the stored
+    values are JSON text and are parsed as JSON only.
+    """
+
+    def test_records_are_stored_as_json_text(self, tmp_path: Path) -> None:
+        db_path = tmp_path / "batch" / "state.db"
+        sm = StateManager(db_path)
+        sm.put("foo", JobRecord(image_path="/a.png", status=JobStatus.MASKING))
+        sm.close()
+
+        with sqlite3.connect(db_path) as conn:
+            rows = conn.execute("SELECT image_id, record FROM jobs").fetchall()
+
+        assert len(rows) == 1
+        image_id, record = rows[0]
+        assert image_id == "foo"
+        assert isinstance(record, str)
+        assert json.loads(record)["image_path"] == "/a.png"
+
+    def test_a_pickle_payload_is_rejected_instead_of_deserialised(
+        self, tmp_path: Path
+    ) -> None:
+        db_path = tmp_path / "batch" / "state.db"
+        sm = StateManager(db_path)
+        sm.put("foo", JobRecord(image_path="/a.png"))
+        sm.close()
+
+        payload = pickle.dumps({"image_path": "/evil.png"})
+        with sqlite3.connect(db_path) as conn:
+            conn.execute(
+                "UPDATE jobs SET record = ? WHERE image_id = ?", (payload, "foo")
+            )
+
+        sm = StateManager(db_path)
+        with pytest.raises(ValueError):
+            sm.get("foo")
+        sm.close()
+
+    def test_a_malformed_record_fails_loudly_rather_than_silently(
+        self, tmp_path: Path
+    ) -> None:
+        db_path = tmp_path / "batch" / "state.db"
+        sm = StateManager(db_path)
+        sm.put("foo", JobRecord(image_path="/a.png"))
+        sm.close()
+
+        with sqlite3.connect(db_path) as conn:
+            conn.execute(
+                "UPDATE jobs SET record = ? WHERE image_id = ?", ("{not json", "foo")
+            )
+
+        sm = StateManager(db_path)
+        with pytest.raises(ValueError):
+            sm.all_records()
+        sm.close()
 
 
 class TestUpdateStatus:
