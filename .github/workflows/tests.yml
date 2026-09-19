@@ -1,0 +1,73 @@
+name: tests
+
+# THIS REPOSITORY HAD NO CI AT ALL, and 589 tests nobody was running.
+#
+# Measured 2026-09-19 on `main`: `pytest -q` answers `589 passed, 248
+# deselected in 4.21s`. The 248 are the windowed tests, which pyproject
+# already keeps out of a default run — `addopts = ["-m", "not gui and not
+# gui_integration"]` — so this gate opens no windows and needs no display.
+# That exclusion is the repository's own and is not repeated here: a second
+# copy of a rule is a second thing to forget.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  # A REPOSITORY NOBODY IS TOUCHING IS WHERE A NIGHTLY EARNS MOST. Nothing
+  # here has a runner on anyone's machine, and the dependency set is torch,
+  # torchvision, opencv and a pinned mlx — the things that break because
+  # something ELSE was upgraded, which no commit causes and no path filter
+  # matches. 04:23 rather than the hour: GitHub queues everything scheduled
+  # on it.
+  schedule:
+    - cron: "23 4 * * *"
+  workflow_dispatch:
+
+# A literal prefix, not `github.workflow`. Measured on tsevis/Penelope
+# 2026-09-16: three reusable workflows called from one nightly each computed
+# `github.workflow` as the CALLER's name, landed in one group with
+# `cancel-in-progress: true`, and cancelled each other one second in. There is
+# one workflow here and no caller, so this is habit rather than necessity —
+# but the habit costs nothing and the failure was silent.
+concurrency:
+  group: tests-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+permissions:
+  contents: read
+
+jobs:
+  pytest:
+    # HOSTED macOS, AND NOT A CHOICE BETWEEN RUNNERS. `mlx==0.31.2` is pinned
+    # in `dependencies` and builds only on Apple Silicon, so `uv sync` cannot
+    # complete on a Linux runner at all. The collection does not IMPORT mlx —
+    # measured: it loads torch, torchvision, cv2 and vtracer and nothing else —
+    # but installing the declared set is what a lock file is for, and curating
+    # a shorter one by hand is a list that drifts.
+    #
+    # And not a self-hosted Mac: this repository is public, so a fork's pull
+    # request would run its author's code on the owner's machine. Free here —
+    # measured 2026-09-16 across three sibling public repositories,
+    # `/actions/runs/<id>/timing` answered `total_ms: 0` for UBUNTU, WINDOWS
+    # and MACOS alike.
+    runs-on: macos-15
+    # Not a budget, a wall. The suite is four seconds; what this bounds is an
+    # install that wedges, which is the failure dimitris had with no ceiling at
+    # all and GitHub's own six-hour default behind it.
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v6
+        with:
+          enable-cache: true
+
+      # `--frozen`, so a lock that has drifted from pyproject FAILS here rather
+      # than being silently re-resolved into something nobody reviewed.
+      # `uv lock --check` passes on this commit: 133 packages.
+      - name: Install the declared environment
+        run: uv sync --frozen
+
+      - name: Run the suite
+        run: uv run pytest -q -p no:cacheprovider --durations=10
