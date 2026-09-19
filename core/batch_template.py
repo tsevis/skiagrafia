@@ -55,7 +55,7 @@ class BatchTemplate(BaseModel):
     def save(self) -> Path:
         d = Path.home() / ".config" / "skiagrafia" / "templates"
         d.mkdir(parents=True, exist_ok=True)
-        self.created_at = datetime.datetime.now().isoformat()
+        self.created_at = datetime.datetime.now().astimezone().isoformat()
         path = safe_child_path(d, f"{_slugify(self.name)}.json")
         atomic_write_bytes(path, self.model_dump_json(indent=2).encode("utf-8"))
         return path

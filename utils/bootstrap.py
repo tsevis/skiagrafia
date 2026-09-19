@@ -93,7 +93,12 @@ def check_setup(prefs: dict[str, Any]) -> SetupStatus:
     # 2. VLM backend
     backend = str(prefs.get("vlm_backend", "ollama"))
     if backend == "local":
-        from models.local_vlm import resolve_local_model, server_binary, LOCAL_PRIMARY, LOCAL_FALLBACK
+        from models.local_vlm import (
+            LOCAL_FALLBACK,
+            LOCAL_PRIMARY,
+            resolve_local_model,
+            server_binary,
+        )
         for model in dict.fromkeys([prefs.get("local_primary_model", LOCAL_PRIMARY), prefs.get("local_fallback_model", LOCAL_FALLBACK)]):
             try:
                 binary = server_binary()
@@ -217,9 +222,12 @@ def download_missing_weights(
     failures: list[str] = []
     for name in manager.missing():
         try:
-            def _cb(done: int, total: int | None) -> None:
+            # Bind this iteration's name rather than closing over the loop
+            # variable; the callback only runs inside ensure() below, but the
+            # binding keeps that true if the call ever becomes deferred.
+            def _cb(done: int, total: int | None, model_name: str = name) -> None:
                 if progress_callback is not None:
-                    progress_callback(name, done, total)
+                    progress_callback(model_name, done, total)
 
             manager.ensure(name, progress_callback=_cb)
         except (
@@ -231,6 +239,6 @@ def download_missing_weights(
             TimeoutError,
             ValueError,
         ):
-            logger.error("Failed to download %s", name, exc_info=True)
+            logger.exception("Failed to download %s", name)
             failures.append(name)
     return failures
