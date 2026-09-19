@@ -8,7 +8,6 @@ import sys
 from pathlib import Path
 from unittest.mock import MagicMock
 
-
 # Ensure project root is on sys.path for imports
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
@@ -20,8 +19,7 @@ from core.contracts import (
     Segmenter,
     Vectorizer,
 )
-from utils.model_manager import ModelManager, ModelInfo, REGISTRY
-
+from utils.model_manager import REGISTRY, ModelInfo, ModelManager
 
 # ── Protocol conformance ──────────────────────────────────────────────────
 
@@ -164,8 +162,9 @@ class TestOrchestratorInstantiation:
 
     def test_process_signature_unchanged(self) -> None:
         """Verify process() still accepts (image_path, confirmed_labels, manual_detections)."""
-        from core.orchestrator import Orchestrator
         import inspect
+
+        from core.orchestrator import Orchestrator
 
         sig = inspect.signature(Orchestrator.process)
         params = list(sig.parameters.keys())

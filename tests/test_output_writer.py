@@ -16,9 +16,8 @@ from PIL import Image
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-import processors.output_writer as output_writer
+from processors import output_writer
 from processors.output_writer import write_pdf, write_png, write_svg, write_tiff
-
 
 # ── write_svg ────────────────────────────────────────────────────────────────
 

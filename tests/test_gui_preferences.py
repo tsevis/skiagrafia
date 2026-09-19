@@ -27,8 +27,10 @@ Never called from here, and why:
 """
 from __future__ import annotations
 
+import contextlib
 import json
 import sys
+import tkinter as tk
 from pathlib import Path
 
 import pytest
@@ -78,10 +80,8 @@ def prefs_window(prefs_app, tk_root):
     window = PreferencesWindow(prefs_app)
     tk_root.update()
     yield window
-    try:
+    with contextlib.suppress(tk.TclError):  # _save may already have destroyed it
         window._win.destroy()
-    except Exception:
-        pass  # _save already destroyed it
 
 
 # ── Isolation ───────────────────────────────────────────────────────────────

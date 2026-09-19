@@ -16,7 +16,6 @@ from utils import bootstrap
 from utils.model_manager import REGISTRY, ModelManager
 from utils.preferences import DEFAULT_PREFERENCES, _migrate_legacy_defaults
 
-
 # ── build_interrogation_settings ────────────────────────────────────────────
 
 

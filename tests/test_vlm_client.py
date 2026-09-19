@@ -27,7 +27,6 @@ from models.vlm_client import (
     create_vlm_client,
 )
 
-
 # ── Shared parsing logic ────────────────────────────────────────────────────
 
 
@@ -263,9 +262,11 @@ class TestLlamaCppErrorBodyHandling:
         self, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
     ) -> None:
         client = self._client_with_failing_body(monkeypatch, OSError("socket closed"))
-        with caplog.at_level(logging.DEBUG, logger="models.vlm_client"):
-            with pytest.raises(urllib.error.HTTPError):
-                client._request_json("/completion", payload={"prompt": "hi"})
+        with (
+            caplog.at_level(logging.DEBUG, logger="models.vlm_client"),
+            pytest.raises(urllib.error.HTTPError),
+        ):
+            client._request_json("/completion", payload={"prompt": "hi"})
 
         # The failure itself is reported at ERROR ...
         assert any(
@@ -293,9 +294,11 @@ class TestLlamaCppErrorBodyHandling:
             "models.vlm_client.urllib.request.urlopen", fake_urlopen
         )
         client = LlamaCppVLMClient(host="http://localhost:8080", model="qwen3-vl")
-        with caplog.at_level(logging.ERROR, logger="models.vlm_client"):
-            with pytest.raises(urllib.error.HTTPError):
-                client._request_json("/completion", payload={"prompt": "hi"})
+        with (
+            caplog.at_level(logging.ERROR, logger="models.vlm_client"),
+            pytest.raises(urllib.error.HTTPError),
+        ):
+            client._request_json("/completion", payload={"prompt": "hi"})
 
         assert any(
             "mmproj file not found" in r.getMessage() for r in caplog.records

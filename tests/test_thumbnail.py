@@ -124,7 +124,6 @@ class TestThumbnailCache:
 
         def fake_get_cairosvg():
             calls["n"] += 1
-            return None
 
         monkeypatch.setattr(thumbnail, "_get_cairosvg", fake_get_cairosvg)
 
@@ -174,7 +173,6 @@ class TestGetCairosvgLazyLoad:
 
         def fake_load_cairosvg(logger):
             calls["n"] += 1
-            return None
 
         monkeypatch.setattr(thumbnail, "load_cairosvg", fake_load_cairosvg)
         monkeypatch.setattr(thumbnail, "_cairosvg_checked", False)

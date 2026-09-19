@@ -31,7 +31,6 @@ from models.grounded_sam import (
     _patch_onnx_ml_dtypes,
 )
 
-
 IMG_SIZE = 64
 
 
@@ -282,7 +281,7 @@ class TestLoadDinoFailurePath:
         # directory) is never consulted -- only the missing `grounding_dino`
         # import is exercised.
         gsam = GroundedSAM(dino_weights=tmp_path / "fake.pth", gsam_root=tmp_path)
-        with pytest.raises(Exception):
+        with pytest.raises(ModuleNotFoundError, match="grounding_dino"):
             gsam._load_dino()
         assert gsam._dino_model is None
 
@@ -304,7 +303,7 @@ class TestEnsureGsamOnPath:
         assert str(missing) not in sys.path
 
     def test_does_not_duplicate_existing_entry(self, tmp_path: Path, monkeypatch) -> None:
-        monkeypatch.setattr(sys, "path", list(sys.path) + [str(tmp_path)])
+        monkeypatch.setattr(sys, "path", [*list(sys.path), str(tmp_path)])
         before = list(sys.path)
         _ensure_gsam_on_path(tmp_path)
         assert sys.path == before

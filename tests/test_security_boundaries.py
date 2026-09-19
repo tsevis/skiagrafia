@@ -57,18 +57,22 @@ def test_archive_extraction_rejects_traversal_and_symlinks(tmp_path: Path) -> No
     traversal = io.BytesIO()
     with zipfile.ZipFile(traversal, "w") as archive:
         archive.writestr("root/../../outside.txt", "bad")
-    with zipfile.ZipFile(io.BytesIO(traversal.getvalue())) as archive:
-        with pytest.raises(SecurityError):
-            ModelManager._extract_archive_safely(archive, tmp_path, "root")
+    with (
+        zipfile.ZipFile(io.BytesIO(traversal.getvalue())) as archive,
+        pytest.raises(SecurityError),
+    ):
+        ModelManager._extract_archive_safely(archive, tmp_path, "root")
 
     symlink = io.BytesIO()
     with zipfile.ZipFile(symlink, "w") as archive:
         entry = zipfile.ZipInfo("root/link")
         entry.external_attr = (stat.S_IFLNK | 0o777) << 16
         archive.writestr(entry, "../../outside")
-    with zipfile.ZipFile(io.BytesIO(symlink.getvalue())) as archive:
-        with pytest.raises(SecurityError):
-            ModelManager._extract_archive_safely(archive, tmp_path, "root")
+    with (
+        zipfile.ZipFile(io.BytesIO(symlink.getvalue())) as archive,
+        pytest.raises(SecurityError),
+    ):
+        ModelManager._extract_archive_safely(archive, tmp_path, "root")
 
 
 def test_svg_assembly_and_writer_reject_active_markup(tmp_path: Path) -> None:

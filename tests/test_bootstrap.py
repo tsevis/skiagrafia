@@ -17,7 +17,6 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from utils import bootstrap
 from utils.model_manager import ModelManager
 
-
 # ── _list_ollama_models ──────────────────────────────────────────────────────
 
 
@@ -164,7 +163,6 @@ class TestCheckSetupOllamaBackend:
 
         def fake_list(host: str):
             captured["host"] = host
-            return None
 
         monkeypatch.setattr(bootstrap, "_list_ollama_models", fake_list)
 

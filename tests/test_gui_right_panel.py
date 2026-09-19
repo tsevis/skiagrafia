@@ -13,6 +13,7 @@ Never called from here:
 """
 from __future__ import annotations
 
+import contextlib
 import sys
 import tkinter as tk
 import warnings
@@ -119,10 +120,8 @@ class TestLayerRows:
         texts: list[str] = []
         for child in row.winfo_children():
             for widget in (child, *child.winfo_children()):
-                try:
+                with contextlib.suppress(tk.TclError):
                     texts.append(str(widget.cget("text")))
-                except tk.TclError:
-                    pass
         return texts
 
     def test_parent_row_is_badged_p(self, populated) -> None:
@@ -204,7 +203,7 @@ class TestThumbnails:
         boxes: list[tuple[int, int, int, int]] = []
         original = Image.Image.crop
 
-        def _spy(self, box=None):  # noqa: ANN001, ANN202
+        def _spy(self, box=None):
             boxes.append(box)
             return original(self, box)
 

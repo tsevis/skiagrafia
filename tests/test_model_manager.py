@@ -10,6 +10,7 @@ import io
 import sys
 import zipfile
 from pathlib import Path
+from typing import ClassVar
 
 import pytest
 
@@ -17,7 +18,6 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from utils import model_manager
 from utils.model_manager import ModelInfo, ModelManager, _entry_files, _hf_dir_available
-
 
 # ── _entry_files / _hf_dir_available (pure helpers) ─────────────────────────
 
@@ -39,7 +39,7 @@ class TestEntryFiles:
 
 
 class TestHfDirAvailable:
-    ENTRY = {
+    ENTRY: ClassVar[dict[str, object]] = {
         "hf_files": ["config.json", "preprocessor_config.json"],
         "hf_weight_alternatives": ["model.safetensors", "pytorch_model.bin"],
     }
@@ -329,7 +329,7 @@ class TestDownloadFile:
 
 
 class TestDownloadHfFiles:
-    ENTRY = {
+    ENTRY: ClassVar[dict[str, object]] = {
         "url": "https://huggingface.co/org/repo",
         "hf_files": ["config.json", "preprocessor_config.json"],
         "hf_weight_alternatives": ["model.safetensors", "pytorch_model.bin"],
@@ -400,7 +400,7 @@ class _FakeResponse:
             return b""
         return self._chunks.pop(0)
 
-    def __enter__(self) -> "_FakeResponse":
+    def __enter__(self) -> _FakeResponse:
         return self
 
     def __exit__(self, *exc: object) -> None:

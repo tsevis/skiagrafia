@@ -8,6 +8,7 @@ smoke set remains available for fast local feedback.
 """
 from __future__ import annotations
 
+import contextlib
 from pathlib import Path
 
 import pytest
@@ -62,10 +63,10 @@ def tk_root():
         # Drop pending after() callbacks before teardown so a scheduled
         # redraw cannot fire against half-destroyed widgets.
         for after_id in root.tk.eval("after info").split():
-            try:
+            # The callback already fired or the id went stale; either way
+            # there is nothing left to cancel.
+            with contextlib.suppress(tk.TclError):
                 root.after_cancel(after_id)
-            except Exception:
-                pass
         root.destroy()
 
 

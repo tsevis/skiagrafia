@@ -1,23 +1,30 @@
 """Regression tests for output identity, localization, transparency and topology."""
 import io
+import logging
 import xml.etree.ElementTree as ET
 from types import SimpleNamespace
 from unittest.mock import Mock
 
-import logging
 import numpy as np
 from PIL import Image
+from test_grounded_sam import FakeSamPredictor
+from test_orchestrator import (
+    FakeDetector,
+    FakeInterrogator,
+    FakeSegmenter,
+    _candidate,
+    _make_caps,
+    _write_image,
+)
+from test_vitmatte_refiner import _wired_refiner
 
 from core.interrogation import GuidedInterrogator, InterrogationSettings
 from core.orchestrator import Orchestrator
 from models.grounded_sam import DetectionResult, GroundedSAM
-from models.local_vlm import LOCAL_PRIMARY, LOCAL_FALLBACK, resolve_local_model
-from models.vlm_client import OllamaVLMClient, LlamaCppVLMClient
+from models.local_vlm import LOCAL_FALLBACK, LOCAL_PRIMARY, resolve_local_model
+from models.vlm_client import LlamaCppVLMClient, OllamaVLMClient
 from processors.mask_ops import refine_mask
 from processors.vectorizer import VTracerVectorizer, assemble_svg
-from test_orchestrator import FakeInterrogator, FakeDetector, FakeSegmenter, _make_caps, _candidate, _write_image
-from test_grounded_sam import FakeSamPredictor
-from test_vitmatte_refiner import _wired_refiner
 
 
 class Instances(FakeDetector):
@@ -250,8 +257,9 @@ def test_uncertain_sam3_parts_are_not_promoted_to_layers(tmp_path):
 
 
 def test_mlx_adapter_reuses_encoding_and_returns_all_masks(tmp_path, monkeypatch):
-    import types
     import sys
+    import types
+
     from models.mlx_sam3 import MLXSAM3
     mlx = types.ModuleType("mlx")
     core = types.ModuleType("mlx.core")

@@ -6,6 +6,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
+from core.batch_runner import BatchConfig
 from core.batch_session import (
     BatchInterrogationSnapshot,
     BatchProcessingSnapshot,
@@ -21,7 +22,6 @@ from core.batch_session import (
     write_processing_snapshot,
     write_snapshot,
 )
-from core.batch_runner import BatchConfig
 from core.state_manager import JobRecord, JobStatus, StateManager
 
 

@@ -11,6 +11,7 @@ import sys
 from pathlib import Path
 
 import pytest
+from pydantic import ValidationError
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
@@ -18,19 +19,19 @@ from core.batch_template import BatchTemplate
 
 
 def _make_template(name: str = "My Template", **overrides: object) -> BatchTemplate:
-    fields: dict[str, object] = dict(
-        name=name,
-        source_image="/images/source.png",
-        confirmed_labels=["cross", "chalice"],
-        confirmed_children={"chalice": ["cup", "stem"]},
-        output_mode="vector+bitmap",
-        recursion_depth=2,
-        corner_threshold=60,
-        speckle=8,
-        smoothing=4,
-        length_threshold=4.0,
-        vtracer_quality="balanced",
-    )
+    fields: dict[str, object] = {
+        "name": name,
+        "source_image": "/images/source.png",
+        "confirmed_labels": ["cross", "chalice"],
+        "confirmed_children": {"chalice": ["cup", "stem"]},
+        "output_mode": "vector+bitmap",
+        "recursion_depth": 2,
+        "corner_threshold": 60,
+        "speckle": 8,
+        "smoothing": 4,
+        "length_threshold": 4.0,
+        "vtracer_quality": "balanced",
+    }
     fields.update(overrides)
     return BatchTemplate(**fields)
 
@@ -156,7 +157,7 @@ class TestLoad:
         bad_file = tmp_path / "broken.json"
         bad_file.write_text("{not valid json,,,")
 
-        with pytest.raises(Exception):
+        with pytest.raises(ValidationError):
             BatchTemplate.load(bad_file)
 
     def test_load_valid_json_missing_required_field_raises(
@@ -166,7 +167,7 @@ class TestLoad:
         incomplete = tmp_path / "incomplete.json"
         incomplete.write_text('{"name": "x", "confirmed_labels": []}')
 
-        with pytest.raises(Exception):
+        with pytest.raises(ValidationError):
             BatchTemplate.load(incomplete)
 
     def test_legacy_template_without_selection_request_loads_with_empty_default(

@@ -17,7 +17,6 @@ from processors.image_filter import (
     kmeans_quantize,
 )
 
-
 # ── bilateral_smooth ─────────────────────────────────────────────────────────
 
 

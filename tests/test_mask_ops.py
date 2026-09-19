@@ -22,7 +22,6 @@ from processors.mask_ops import (
     refine_mask,
 )
 
-
 # ── Boolean mask algebra ─────────────────────────────────────────────────────
 
 

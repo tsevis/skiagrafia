@@ -13,7 +13,6 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from utils.coord_math import crop_with_padding, remap_mask, tight_bbox
 
-
 # ── remap_mask ───────────────────────────────────────────────────────────────
 
 
