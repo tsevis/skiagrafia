@@ -4,7 +4,7 @@
 >
 > A desktop application for AI-powered image segmentation, masking, and vectorization.
 
-[![Version](https://img.shields.io/badge/version-0.4.0-blue.svg)](https://github.com/tsevis/skiagrafia)
+[![Version](https://img.shields.io/badge/version-0.5.0-blue.svg)](https://github.com/tsevis/skiagrafia)
 [![Python](https://img.shields.io/badge/python-3.13-blue.svg)](https://www.python.org/downloads/)
 [![Platform](https://img.shields.io/badge/platform-macOS%20Apple%20Silicon-lightgrey.svg)](https://support.apple.com/en-us/116943)
 [![Architecture](https://img.shields.io/badge/architecture-v5.2-orange.svg)](FILE_STRUCTURE.md)
@@ -132,6 +132,9 @@ Skiagrafia addresses a common challenge in design and production workflows: conv
 - Lazy model loading with memory residency
 - ProcessPoolExecutor parallelization
 - SQLite state persistence (JSON records, no pickle)
+- SHA-256 verification of a downloaded model before it is installed
+- Typed throughout: pyright, ruff and a CVE audit gate every pull
+  request, every push to `main`, and a nightly run
 
 ---
 
@@ -171,6 +174,18 @@ local bundle:
 | Qwen2.5-VL 3B (`qwen2.5vl:3b`) | Ollama pull | ~3.2 GB |
 | Gemma 4 E4B (`gemma4:e4b`) — fallback + reasoner | Ollama pull | ~9.6 GB |
 | Qwen3-VL 8B GGUF — llama.cpp alternative | llama.cpp `-hf` cache | ~6.5 GB |
+
+**Download integrity.** Every download is restricted to an allow-listed host
+over HTTPS, and a registry entry may additionally pin an immutable SHA-256
+that is checked before the file is moved into place; a mismatch is discarded
+and reported. Only `vitmatte-base-composition-1k` is pinned today, because it
+is the only one of these whose publisher provides a digest to pin it to.
+`groundingdino_swint_ogc.pth` and `sam2.1_hiera_large.pt` are served without
+one, and the Grounded-SAM-2 source archive tracks a moving branch, so no
+fixed digest can describe it. Hashing the copies already on a given machine
+would record whatever those copies are, which is trust-on-first-use rather
+than an integrity check, so it is not done. See
+[FILE_STRUCTURE.md](FILE_STRUCTURE.md#operational-limits).
 
 With the default **Segmentation: auto** setting, MLX SAM 3 activates only
 when both its local source and checkpoint are present. The model library must
@@ -522,6 +537,18 @@ curl http://localhost:8080/v1/models  # confirm the loaded model
 Vision requires a model with a multimodal projector (mmproj); text-only GGUFs
 fail on images. If requests return "Compute error", another model may be
 holding GPU memory (check `ollama ps`) — free it and restart the server.
+
+### A download fails an integrity check
+
+```
+Integrity check failed for pytorch_model.bin: expected sha256 ..., got ...
+```
+
+The file that arrived is not the one the registry pins. It is discarded
+rather than installed, so nothing partial is left behind. Retry first — a
+truncated transfer looks the same. If it repeats, the copy being served no
+longer matches the digest recorded from the publisher, and the download
+should not be trusted until that is explained.
 
 ### Model weights missing
 
