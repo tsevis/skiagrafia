@@ -37,10 +37,8 @@ class BatchTemplate(BaseModel):
     confirmed_labels: list[str]
     confirmed_children: dict[str, list[str]]
     output_mode: str  # "vector+bitmap" | "vector" | "bitmap"
-    recursion_depth: int  # 1 | 2 | 3
     corner_threshold: int  # 30–90
     speckle: int  # 2–20
-    smoothing: int  # 1–10
     length_threshold: float  # 2.0–8.0
     vtracer_quality: str  # "draft" | "balanced" | "maximum"
     guide_path: str | None = None
