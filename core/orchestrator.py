@@ -16,7 +16,7 @@ import re
 from collections.abc import Callable
 from hashlib import sha256
 from pathlib import Path
-from typing import cast
+from typing import Any, Protocol, cast
 
 import cv2
 import numpy as np
@@ -53,6 +53,13 @@ from utils.coord_math import tight_bbox
 from utils.security import SecurityError, safe_child_path
 
 logger = logging.getLogger(__name__)
+
+
+class DetectionSizeLike(Protocol):
+    """What instance_size() needs from a detection: a box, maybe a mask."""
+
+    bbox: tuple[int, int, int, int]
+    mask: NDArray[np.uint8] | None
 
 MIN_CHILD_COVERAGE_PCT = 0.5
 # Parts are model suggestions, so use a stricter SAM 3 acceptance threshold.
@@ -113,6 +120,24 @@ PIPELINE_STEPS = STRUCTURAL_STEPS
 
 
 
+
+
+def instance_size(detections: list[DetectionSizeLike]) -> Callable[[Any], int]:
+    """A size metric that is comparable across ALL of these detections.
+
+    Mask pixels are the better measure of how big an object actually is, so
+    they are used when every detection carries a mask. The moment one does
+    not, the whole list falls back to bounding-box area.
+
+    Mixing the two per element -- which is what this replaced -- compares a
+    silhouette against the rectangle drawn around a different object. A mask
+    is far smaller than its own box, so a list mixing detector sources (MLX
+    SAM 3 populates a mask, the GroundingDINO fallback does not) made
+    "largest" pick the unmasked detection whatever its real size.
+    """
+    if all(detection.mask is not None for detection in detections):
+        return lambda detection: int(np.count_nonzero(detection.mask))
+    return lambda detection: bbox_area(detection.bbox)
 
 
 class Orchestrator:
@@ -765,7 +790,8 @@ class Orchestrator:
                 if selection in {"leftmost", "rightmost"}:
                     valid = [sorted(valid, key=lambda d: (d.bbox[0] + d.bbox[2]) / 2)[0 if selection == "leftmost" else -1]]
                 elif selection in {"largest", "smallest"}:
-                    valid = [sorted(valid, key=lambda d: np.count_nonzero(d.mask) if d.mask is not None else bbox_area(d.bbox))[0 if selection == "smallest" else -1]]
+                    ordered = sorted(valid, key=instance_size(valid))
+                    valid = [ordered[0 if selection == "smallest" else -1]]
                 return [(detection, False) for detection in valid]
         return []
 

@@ -492,3 +492,49 @@ class TestInstanceCeiling:
         assert len(detector.calls) == 1, (
             "detection ran for parents that could never be accepted"
         )
+
+
+class TestInstanceSizeComparison:
+    def test_largest_compares_one_metric_across_all_detections(self) -> None:
+        """The sort key switched units per element.
+
+        It read mask pixels when a detection carried a mask and bounding-box
+        area when it did not. A mask is far smaller than the box around it,
+        so in a list mixing detector sources -- MLX SAM 3 populates a mask,
+        the GroundingDINO fallback does not -- "largest" reliably picked the
+        UNMASKED detection, whatever its real size.
+        """
+        from core.orchestrator import instance_size
+
+        # A sparse mask inside a large box is what makes the two keys
+        # disagree: the old key scored this 100 (mask pixels) against the
+        # other's 3600 (box area) and called the smaller object larger.
+        sparse = np.zeros((100, 100), dtype=np.uint8)
+        sparse[:10, :10] = 255
+        big_box = DetectionResult(
+            label="a", bbox=(0, 0, 100, 100), confidence=0.9, mask=sparse,
+        )
+        unmasked = DetectionResult(label="b", bbox=(0, 0, 60, 60), confidence=0.9)
+
+        size = instance_size([big_box, unmasked])
+
+        assert size(big_box) > size(unmasked), (
+            "with one detection unmasked, every size must be a box area"
+        )
+
+    def test_mask_pixels_are_used_when_every_detection_has_one(self) -> None:
+        """A mask is the better measure, so it is used when all of them have it."""
+        from core.orchestrator import instance_size
+
+        wide_box_thin_object = DetectionResult(
+            label="a", bbox=(0, 0, 100, 100), confidence=0.9,
+            mask=np.pad(np.ones((2, 2), dtype=np.uint8) * 255, ((0, 98), (0, 98))),
+        )
+        small_box_solid = DetectionResult(
+            label="b", bbox=(0, 0, 10, 10), confidence=0.9,
+            mask=(np.ones((10, 10), dtype=np.uint8) * 255),
+        )
+
+        size = instance_size([wide_box_thin_object, small_box_solid])
+
+        assert size(small_box_solid) > size(wide_box_thin_object)
