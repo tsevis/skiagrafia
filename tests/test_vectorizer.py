@@ -154,7 +154,7 @@ class TestVTracerVectorizer:
 
         def fake_trace_mask(mask, mode="spline", corner_threshold=60,
                              length_threshold=4.0, splice_threshold=45,
-                             filter_speckle=8):
+                             filter_speckle=8) -> str:
             captured.update(
                 corner_threshold=corner_threshold,
                 length_threshold=length_threshold,

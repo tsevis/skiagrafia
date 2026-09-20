@@ -30,7 +30,7 @@ class FakeProcessor:
         self._out_w = out_w
         self.calls: list[tuple] = []
 
-    def __call__(self, images, trimaps, return_tensors="pt"):
+    def __call__(self, images, trimaps, return_tensors="pt") -> dict[str, torch.Tensor]:
         self.calls.append((images, trimaps, return_tensors))
         return {
             "pixel_values": torch.zeros(1, 3, self._out_h, self._out_w),
@@ -45,7 +45,7 @@ class FakeMattingModel:
         self._alpha = alpha
         self.forward_calls = 0
 
-    def __call__(self, **inputs):
+    def __call__(self, **inputs) -> SimpleNamespace:
         self.forward_calls += 1
         return SimpleNamespace(alphas=self._alpha)
 

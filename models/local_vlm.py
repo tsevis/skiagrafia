@@ -164,7 +164,12 @@ class ManagedVLMClient(LlamaCppVLMClient):
             logger.exception("Managed local VLM unavailable")
             return False
 
-    def _chat(self, prompt, images_b64=None, num_predict=200) -> str:
+    def _chat(
+        self,
+        prompt: str,
+        images_b64: list[str] | None = None,
+        num_predict: int = 200,
+    ) -> str:
         with _SERVER.lock:
             if _SERVER.timer:
                 _SERVER.timer.cancel()

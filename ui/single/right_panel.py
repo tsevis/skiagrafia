@@ -356,7 +356,7 @@ class RightPanel:
         self._view.canvas_panel.set_active_layer(layer.get("label", ""))
         self._view.canvas_panel.refresh_overlays()
 
-    def _on_preview_opacity(self, *_):
+    def _on_preview_opacity(self, *_: str) -> None:
         result = getattr(self._view, "_last_result", None)
         if result and self._selected_index is not None and self._selected_index < len(result.layers):
             result.layers[self._selected_index].preview_opacity = self._opacity_var.get() / 100
@@ -387,18 +387,18 @@ class RightPanel:
         answers = queue.Queue()
         self._edit_status.config(text="Updating layer…")
 
-        def work():
+        def work() -> None:
             try:
                 from core.factory import build_capabilities
                 from core.layer_editing import replace_layer_mask
-                from core.orchestrator import _clip_mask_to_bbox
+                from core.pipeline_geometry import clip_mask_to_bbox
                 from processors.mask_ops import edge_refine
                 from processors.source_image import detection_image, load_source_image
                 image, alpha_limit, icc_profile = load_source_image(updated.image_path)
                 caps = build_capabilities(prefs)
                 try:
                     mask = caps.segmenter.segment(detection_image(image, alpha_limit), layer.bbox, name, prefer_full_box=True) if resegment else layer.mask
-                    mask = edge_refine(_clip_mask_to_bbox(mask, layer.bbox), iterations=edge)
+                    mask = edge_refine(clip_mask_to_bbox(mask, layer.bbox), iterations=edge)
                     layer.label = name
                     for child in updated.layers:
                         if child.parent_id == layer.layer_id:
@@ -411,7 +411,7 @@ class RightPanel:
                 logger.exception("Layer update failed")
                 answers.put((False, str(exc)))
 
-        def poll():
+        def poll() -> None:
             try:
                 ok, value = answers.get_nowait()
             except queue.Empty:

@@ -18,12 +18,16 @@ import sys
 import tkinter as tk
 import warnings
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 import numpy as np
 import pytest
 from PIL import Image
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+
+if TYPE_CHECKING:
+    from ui.single.right_panel import RightPanel
 
 
 def _layer(label: str, role: str = "parent", **extra: object) -> dict:
@@ -39,13 +43,13 @@ def _write_image(path: Path, size: tuple[int, int] = (120, 90)) -> Path:
 
 
 @pytest.fixture
-def right_panel(single_view, tk_root):
+def right_panel(single_view, tk_root) -> RightPanel:
     tk_root.update()
     return single_view.right_panel
 
 
 @pytest.fixture
-def populated(right_panel, tk_root):
+def populated(right_panel, tk_root) -> RightPanel:
     """A panel showing one parent and two children."""
     right_panel.update_layers(
         [
@@ -203,7 +207,7 @@ class TestThumbnails:
         boxes: list[tuple[int, int, int, int]] = []
         original = Image.Image.crop
 
-        def _spy(self, box: tuple[int, int, int, int] | None = None):
+        def _spy(self, box: tuple[int, int, int, int] | None = None) -> Image.Image:
             # right_panel always crops with an explicit bbox; this test
             # exists to check what that bbox is, so a None here is a bug.
             assert box is not None

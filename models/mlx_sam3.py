@@ -7,6 +7,7 @@ import threading
 from pathlib import Path
 
 import numpy as np
+from numpy.typing import NDArray
 from PIL import Image
 
 from models.grounded_sam import DetectionResult, GroundedSAM
@@ -17,7 +18,7 @@ _MLX_LOCK = threading.RLock()
 
 
 class MLXSAM3:
-    def __init__(self, source_dir: Path, fallback: GroundedSAM, confidence: float = 0.2):
+    def __init__(self, source_dir: Path, fallback: GroundedSAM, confidence: float = 0.2) -> None:
         self.source_dir = source_dir
         self.checkpoint = source_dir / "sam3-mod-weights/model.safetensors"
         self.fallback = fallback
@@ -66,7 +67,14 @@ class MLXSAM3:
         self._processor = processor
         return processor
 
-    def detect_instances(self, image, label, box_threshold=0.35, text_threshold=0.25, allow_fallback=True):
+    def detect_instances(
+        self,
+        image: NDArray[np.uint8],
+        label: str,
+        box_threshold: float = 0.35,
+        text_threshold: float = 0.25,
+        allow_fallback: bool = True,
+    ) -> list[DetectionResult]:
         with _MLX_LOCK:
             if not self._failed:
                 try:
@@ -118,17 +126,35 @@ class MLXSAM3:
                 return self.fallback.detect_instances(image, label, box_threshold, text_threshold)
             return []
 
-    def detect_part_instances(self, image, label, box_threshold=0.35, text_threshold=0.25):
+    def detect_part_instances(
+        self,
+        image: NDArray[np.uint8],
+        label: str,
+        box_threshold: float = 0.35,
+        text_threshold: float = 0.25,
+    ) -> list[DetectionResult]:
         return self.detect_instances(image, label, box_threshold, text_threshold, allow_fallback=False)
 
-    def detect_box(self, image, label, box_threshold=0.35, text_threshold=0.25):
+    def detect_box(
+        self,
+        image: NDArray[np.uint8],
+        label: str,
+        box_threshold: float = 0.35,
+        text_threshold: float = 0.25,
+    ) -> DetectionResult | None:
         results = self.detect_instances(image, label, box_threshold, text_threshold)
         return max(results, key=lambda d: d.confidence) if results else None
 
-    def segment(self, image, bbox, label="", prefer_full_box=False):
+    def segment(
+        self,
+        image: NDArray[np.uint8],
+        bbox: tuple[int, int, int, int],
+        label: str = "",
+        prefer_full_box: bool = False,
+    ) -> NDArray[np.uint8]:
         return self.fallback.segment(image, bbox, label, prefer_full_box)
 
-    def clear_cache(self):
+    def clear_cache(self) -> None:
         with _MLX_LOCK:
             self._image = self._state = None
             self.fallback.clear_cache()

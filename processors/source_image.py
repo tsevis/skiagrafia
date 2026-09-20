@@ -1,11 +1,16 @@
 """Load oriented RGB and preserve any existing transparency."""
 from __future__ import annotations
 
+from pathlib import Path
+
 import numpy as np
+from numpy.typing import NDArray
 from PIL import Image, ImageOps
 
 
-def load_source_image(path):
+def load_source_image(
+    path: str | Path,
+) -> tuple[NDArray[np.uint8], NDArray[np.uint8], bytes | None]:
     try:
         with Image.open(path) as source:
             source = ImageOps.exif_transpose(source)
@@ -17,7 +22,7 @@ def load_source_image(path):
         raise FileNotFoundError(f"Cannot read image: {path}") from exc
 
 
-def detection_image(rgb, alpha):
+def detection_image(rgb: NDArray[np.uint8], alpha: NDArray[np.uint8]) -> NDArray[np.uint8]:
     """Composite transparency over white for recognition, preserving source RGB for export."""
     if np.all(alpha == 255):
         return rgb

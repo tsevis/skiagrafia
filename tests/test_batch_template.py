@@ -258,7 +258,7 @@ class TestSaveDoesNotMutate:
         assert written.created_at != ""
 
 
-def test_a_template_saved_before_the_inert_fields_were_removed_still_loads(tmp_path):
+def test_a_template_saved_before_the_inert_fields_were_removed_still_loads(tmp_path) -> None:
     """Templates already on disk carry recursion_depth and smoothing, which the
     pipeline never read. Removing the fields must not make a person's saved
     configurations unreadable."""

@@ -325,7 +325,7 @@ class GuideEditorTab:
         ttk.Label(row_can, text="Canonical", width=14).pack(side=tk.LEFT)
         can_var = tk.StringVar(value=obj["canonical"])
 
-        def _on_canonical_change(*_, i: int = idx, v: tk.StringVar = can_var) -> None:
+        def _on_canonical_change(*_: str, i: int = idx, v: tk.StringVar = can_var) -> None:
             self._objects[i]["canonical"] = v.get()
             chev = "\u25bc" if self._objects[i]["open"] else "\u25b6"
             header_btn.config(text=f"{chev}  {v.get() or '(unnamed)'}")
@@ -342,7 +342,7 @@ class GuideEditorTab:
         ttk.Label(row_desc, text="Description", width=14).pack(side=tk.LEFT)
         desc_var = tk.StringVar(value=obj["description"])
 
-        def _on_desc_change(*_, i: int = idx, v: tk.StringVar = desc_var) -> None:
+        def _on_desc_change(*_: str, i: int = idx, v: tk.StringVar = desc_var) -> None:
             self._objects[i]["description"] = v.get()
             self._render_toml()
 

@@ -75,7 +75,7 @@ class TestRenderSvgThumbnailWithCairo:
     ) -> None:
         captured: dict = {}
 
-        def fake_svg2png(**kwargs):
+        def fake_svg2png(**kwargs) -> bytes:
             captured.update(kwargs)
             return _png_bytes(8, (1, 2, 3, 255))
 
@@ -93,7 +93,7 @@ class TestRenderSvgThumbnailWithCairo:
     def test_render_failure_falls_back_to_solid_placeholder(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        def boom(**kwargs):
+        def boom(**kwargs) -> None:
             raise ValueError("bad svg")
 
         monkeypatch.setattr(
@@ -135,7 +135,7 @@ class TestThumbnailCache:
     ) -> None:
         calls = {"n": 0}
 
-        def fake_get_cairosvg():
+        def fake_get_cairosvg() -> None:
             calls["n"] += 1
 
         monkeypatch.setattr(thumbnail, "_get_cairosvg", fake_get_cairosvg)
@@ -164,7 +164,7 @@ class TestGetCairosvgLazyLoad:
         sentinel = SimpleNamespace(svg2png=lambda **_: b"")
         calls = {"n": 0}
 
-        def fake_load_cairosvg(logger):
+        def fake_load_cairosvg(logger) -> SimpleNamespace:
             calls["n"] += 1
             return sentinel
 
@@ -184,7 +184,7 @@ class TestGetCairosvgLazyLoad:
     ) -> None:
         calls = {"n": 0}
 
-        def fake_load_cairosvg(logger):
+        def fake_load_cairosvg(logger) -> None:
             calls["n"] += 1
 
         monkeypatch.setattr(thumbnail, "load_cairosvg", fake_load_cairosvg)

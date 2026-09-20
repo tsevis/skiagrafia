@@ -86,9 +86,16 @@ select = [
     "DTZ",                  # naive datetimes
     "S",                    # bandit ruleset; the security gate lives here
     "TRY004",               # wrong exception type for a type check
+    "ANN",                  # missing annotations; pyright basic does not police these
     "RUF",
 ]
 ignore = [
+    # `Any` is a last resort, not a banned word. Every use in this codebase
+    # carries a comment saying why no narrower type exists -- tkinter option
+    # passthroughs, and vendored model surfaces that cannot be imported at
+    # check time. A blanket ban would push those towards worse types, not
+    # better ones.
+    "ANN401",
     "RUF059",  # unused unpacked variable -- fires on deliberate tuple unpacking
     "PYI063",  # positional-only stub style; this project ships no stubs
     # This codebase writes real typography: en dashes in prose, curly quotes in
@@ -102,7 +109,15 @@ ignore = [
 # Tests assert, build fixtures from literals, and bind names purely to keep a
 # context object alive; none of that is a finding in a test.
 # S314: the SVG a test parses is the one the test just built.
-"tests/*" = ["S101", "S105", "S106", "S108", "S311", "S314"]
+"tests/*" = [
+    "S101", "S105", "S106", "S108", "S311", "S314",
+    # A test parameter is a FIXTURE REQUEST: the name is what selects it, and
+    # the type follows from the fixture rather than from the signature.
+    # Annotating 611 of them would restate what conftest already says.
+    # Return types are still required here -- those say whether a test
+    # function is a test or a generator-based fixture.
+    "ANN001", "ANN002", "ANN003",
+]
 
 [dependency-groups]
 dev = [

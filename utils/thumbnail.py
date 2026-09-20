@@ -3,6 +3,7 @@ from __future__ import annotations
 import io
 import logging
 from functools import lru_cache
+from types import ModuleType
 
 from PIL import Image, ImageDraw, ImageTk
 
@@ -14,7 +15,7 @@ _cairosvg = None
 _cairosvg_checked = False
 
 
-def _get_cairosvg():
+def _get_cairosvg() -> ModuleType | None:
     """Lazy-load cairosvg, returning None if libcairo is missing."""
     global _cairosvg, _cairosvg_checked
     if not _cairosvg_checked:

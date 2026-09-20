@@ -39,9 +39,11 @@ def test_transformers_v5_invert_attention_mask_compatibility() -> None:
     class LegacyBert:
         dtype = torch.float32
 
+    # LegacyBert stands in for transformers' BertModel here, so it is cast to
+    # No cast on the way in: the patcher takes a class, and LegacyBert is
+    # one. The cast below is still needed, for the instance, where
+    # invert_attention_mask is added dynamically by the patch call.
     _patch_bert_invert_attention_mask(LegacyBert)
-    # invert_attention_mask is added dynamically by the patch above, so the
-    # instance is cast to Any purely for the type checker.
     output = cast(Any, LegacyBert()).invert_attention_mask(torch.tensor([[1, 0]]))
     assert output.shape == (1, 1, 1, 2)
     assert output[0, 0, 0, 0] == 0
@@ -60,7 +62,7 @@ class FakeSamPredictor:
         self.predict_calls: list[dict] = []
         self._masks = masks
 
-    def reset_predictor(self):
+    def reset_predictor(self) -> None:
         pass
 
     def set_image(self, image: NDArray) -> None:
@@ -92,7 +94,7 @@ def _install_fake_grounding_dino(monkeypatch: pytest.MonkeyPatch, predict_fn) ->
         def __init__(self, transforms) -> None:
             self.transforms = transforms
 
-        def __call__(self, image, target):
+        def __call__(self, image, target) -> tuple[Any, Any]:
             return image, target
 
     class _NoOpTransform:
@@ -178,7 +180,7 @@ class TestPatchOnnxMlDtypes:
 
 
 class TestPatchBertHeadMask:
-    def _fake_bert_module(self, monkeypatch: pytest.MonkeyPatch):
+    def _fake_bert_module(self, monkeypatch: pytest.MonkeyPatch) -> tuple[types.ModuleType, type[Any]]:
         class FakeBertModel:
             # Annotation only, deliberately never assigned: _patch_bert_head_mask
             # installs this at runtime, and its `hasattr` guard must still see
@@ -237,13 +239,15 @@ class TestPatchBertHeadMask:
 
 
 class TestPatchGetExtendedAttentionMask:
-    def _fake_module_utils_module(self, monkeypatch: pytest.MonkeyPatch):
+    def _fake_module_utils_module(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> tuple[types.ModuleType, type[Any], list[tuple]]:
         calls: list[tuple] = []
 
         class FakeModuleUtilsMixin:
             def get_extended_attention_mask(
                 self, attention_mask, input_shape, dtype=None
-            ):
+            ) -> str:
                 calls.append((attention_mask, input_shape, dtype))
                 return "extended"
 
@@ -334,7 +338,7 @@ class TestEnsureGsamOnPath:
 
 class TestDetectBox:
     def test_returns_none_when_no_boxes_found(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        def fake_predict(**kwargs):
+        def fake_predict(**kwargs) -> tuple[torch.Tensor, torch.Tensor, list[str]]:
             return torch.empty(0, 4), torch.empty(0), []
 
         _install_fake_grounding_dino(monkeypatch, fake_predict)
@@ -346,7 +350,7 @@ class TestDetectBox:
     def test_converts_best_box_to_absolute_pixel_coords(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        def fake_predict(**kwargs):
+        def fake_predict(**kwargs) -> tuple[torch.Tensor, torch.Tensor, list[str]]:
             boxes = torch.tensor([[0.5, 0.5, 0.5, 0.5]])  # centered, half image
             logits = torch.tensor([0.9])
             return boxes, logits, ["widget"]
@@ -360,7 +364,7 @@ class TestDetectBox:
         assert result.confidence == pytest.approx(0.9)
 
     def test_picks_highest_confidence_box(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        def fake_predict(**kwargs):
+        def fake_predict(**kwargs) -> tuple[torch.Tensor, torch.Tensor, list[str]]:
             boxes = torch.tensor(
                 [[0.2, 0.2, 0.2, 0.2], [0.5, 0.5, 0.4, 0.4]]
             )
@@ -380,7 +384,7 @@ class TestDetectBox:
     ) -> None:
         captions: list[str] = []
 
-        def fake_predict(**kwargs):
+        def fake_predict(**kwargs) -> tuple[torch.Tensor, torch.Tensor, list[str]]:
             captions.append(kwargs["caption"])
             return torch.empty(0, 4), torch.empty(0), []
 
@@ -396,7 +400,7 @@ class TestDetectBox:
     ) -> None:
         calls: list[str] = []
 
-        def fake_predict(**kwargs):
+        def fake_predict(**kwargs) -> tuple[torch.Tensor, torch.Tensor, list[str]]:
             calls.append(kwargs["caption"])
             if kwargs["caption"] == "computer mouse.":
                 return (
@@ -417,7 +421,7 @@ class TestDetectBox:
     def test_no_detection_after_exhausting_synonyms_returns_none(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        def fake_predict(**kwargs):
+        def fake_predict(**kwargs) -> tuple[torch.Tensor, torch.Tensor, list[str]]:
             return torch.empty(0, 4), torch.empty(0), []
 
         _install_fake_grounding_dino(monkeypatch, fake_predict)
@@ -431,7 +435,7 @@ class TestDetectBox:
     ) -> None:
         calls: list[str] = []
 
-        def fake_predict(**kwargs):
+        def fake_predict(**kwargs) -> tuple[torch.Tensor, torch.Tensor, list[str]]:
             calls.append(kwargs["caption"])
             return torch.empty(0, 4), torch.empty(0), []
 
@@ -493,7 +497,7 @@ class TestBestMaskForBbox:
 
 class TestDetectAndSegment:
     def test_returns_none_when_detection_fails(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        def fake_predict(**kwargs):
+        def fake_predict(**kwargs) -> tuple[torch.Tensor, torch.Tensor, list[str]]:
             return torch.empty(0, 4), torch.empty(0), []
 
         _install_fake_grounding_dino(monkeypatch, fake_predict)
@@ -505,7 +509,7 @@ class TestDetectAndSegment:
     def test_returns_detection_and_mask_on_success(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        def fake_predict(**kwargs):
+        def fake_predict(**kwargs) -> tuple[torch.Tensor, torch.Tensor, list[str]]:
             return (
                 torch.tensor([[0.5, 0.5, 0.5, 0.5]]),
                 torch.tensor([0.9]),

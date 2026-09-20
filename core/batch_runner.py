@@ -126,7 +126,7 @@ def _process_single(
 
 
 @functools.lru_cache(maxsize=1)
-def _worker_orchestrator(config_json: str):
+def _worker_orchestrator(config_json: str) -> Orchestrator:
     """Keep model weights resident for successive images in this worker."""
     config = BatchConfig.model_validate_json(config_json)
 

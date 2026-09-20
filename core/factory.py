@@ -10,7 +10,7 @@ no singletons, no tkinter references.
 """
 from __future__ import annotations
 
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from core.contracts import CapabilitySet
 from core.interrogation import GuidedInterrogator, InterrogationSettings
@@ -27,6 +27,11 @@ from models.vlm_client import (
 from processors.vectorizer import VTracerVectorizer
 from utils.model_manager import ModelManager
 from utils.preferences import get_models_dir
+
+if TYPE_CHECKING:
+    # mlx is an Apple-silicon-only optional dependency, imported lazily at
+    # runtime inside build_detector() so this module loads without it.
+    from models.mlx_sam3 import MLXSAM3
 
 
 def build_interrogation_settings(
@@ -187,7 +192,9 @@ def build_capabilities(
     )
 
 
-def build_detector(prefs: dict[str, Any], mgr: ModelManager | None = None):
+def build_detector(
+    prefs: dict[str, Any], mgr: ModelManager | None = None
+) -> GroundedSAM | MLXSAM3:
     mgr = mgr or ModelManager(get_models_dir(prefs))
     sam = GroundedSAM(
         dino_weights=mgr.resolve("groundingdino_swint_ogc.pth"),

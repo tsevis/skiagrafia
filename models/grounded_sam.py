@@ -4,6 +4,7 @@ import logging
 import os
 import sys
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 import numpy as np
 import torch
@@ -13,6 +14,12 @@ from pydantic import BaseModel, ConfigDict
 from models.vendored_contracts import SamPredictorLike
 from utils.model_manager import model_path
 from utils.mps_utils import DEVICE
+
+if TYPE_CHECKING:
+    # transformers is an optional runtime dependency guarded by try/except
+    # below; the type is only needed for static analysis of the monkeypatch
+    # helpers, so importing it here creates no hard runtime dependency.
+    from transformers.models.bert.modeling_bert import BertModel
 
 logger = logging.getLogger(__name__)
 
@@ -62,11 +69,11 @@ def _patch_bert_head_mask() -> None:
         return
 
     def get_head_mask(
-        self,
-        head_mask,
+        self: BertModel,
+        head_mask: torch.Tensor | None,
         num_hidden_layers: int,
         is_attention_chunked: bool = False,
-    ):
+    ) -> torch.Tensor | list[None]:
         if head_mask is None:
             return [None] * num_hidden_layers
         if head_mask.dim() == 1:
@@ -83,12 +90,20 @@ def _patch_bert_head_mask() -> None:
     logger.info("Patched BertModel.get_head_mask for GroundingDINO compatibility")
 
 
-def _patch_bert_invert_attention_mask(bert_model_type) -> None:
-    """Restore the historical BERT encoder-mask helper removed in v5."""
+def _patch_bert_invert_attention_mask(bert_model_type: type) -> None:
+    """Restore the historical BERT encoder-mask helper removed in v5.
+
+    `type` rather than `type[BertModel]`: all this needs is a class to test
+    an attribute on and install one onto. Naming the concrete class would be
+    a promise the function does not rely on, and it would force every caller
+    that passes a stand-in to cast around it.
+    """
     if hasattr(bert_model_type, "invert_attention_mask"):
         return
 
-    def invert_attention_mask(self, encoder_attention_mask):
+    def invert_attention_mask(
+        self: BertModel, encoder_attention_mask: torch.Tensor
+    ) -> torch.Tensor:
         if encoder_attention_mask.dim() == 3:
             extended = encoder_attention_mask[:, None, :, :]
         elif encoder_attention_mask.dim() == 2:
@@ -120,12 +135,12 @@ def _patch_get_extended_attention_mask() -> None:
         return
 
     def get_extended_attention_mask(
-        self,
-        attention_mask,
-        input_shape,
-        device=None,
-        dtype=None,
-    ):
+        self: ModuleUtilsMixin,
+        attention_mask: torch.Tensor,
+        input_shape: tuple[int, ...],
+        device: torch.device | torch.dtype | None = None,
+        dtype: torch.dtype | None = None,
+    ) -> torch.Tensor:
         if isinstance(device, torch.dtype) and dtype is None:
             dtype, device = device, None
         elif not isinstance(device, torch.device) and device is not None and dtype is None:
@@ -361,12 +376,21 @@ class GroundedSAM:
         return detections
 
     @staticmethod
-    def _box_iou(a, b):
+    def _box_iou(
+        a: tuple[int, int, int, int], b: tuple[int, int, int, int]
+    ) -> float:
         inter = max(0, min(a[2], b[2]) - max(a[0], b[0])) * max(0, min(a[3], b[3]) - max(a[1], b[1]))
         union = (a[2]-a[0])*(a[3]-a[1]) + (b[2]-b[0])*(b[3]-b[1]) - inter
         return inter / union if union else 0.0
 
-    def detect_box(self, image, label, box_threshold=0.35, text_threshold=0.25, skip_synonyms=False):
+    def detect_box(
+        self,
+        image: NDArray[np.uint8],
+        label: str,
+        box_threshold: float = 0.35,
+        text_threshold: float = 0.25,
+        skip_synonyms: bool = False,
+    ) -> DetectionResult | None:
         results = self.detect_instances(image, label, box_threshold, text_threshold, skip_synonyms)
         return max(results, key=lambda d: d.confidence) if results else None
 

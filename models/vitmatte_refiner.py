@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import logging
 from pathlib import Path
+from typing import cast
 
 import cv2
 import numpy as np
@@ -104,7 +105,9 @@ class VitMatteRefiner:
         trimap[bg_inv < 127] = 0  # definite background
         return trimap
 
-    def _infer(self, image, trimap):
+    def _infer(
+        self, image: NDArray[np.uint8], trimap: NDArray[np.uint8]
+    ) -> NDArray[np.float64]:
         from PIL import Image
 
         processor, model = self._load()
@@ -119,7 +122,9 @@ class VitMatteRefiner:
             alpha = cv2.resize(alpha, (w, h), interpolation=cv2.INTER_LINEAR)
         return np.nan_to_num(alpha, nan=0.0).clip(0, 1)
 
-    def predict(self, image, mask):
+    def predict(
+        self, image: NDArray[np.uint8], mask: NDArray[np.uint8]
+    ) -> NDArray[np.uint8]:
         """Matte the object ROI; detailed mode refines boundary tiles at native resolution.
 
         Known foreground/background are enforced after inference and resizing.
@@ -158,8 +163,13 @@ class VitMatteRefiner:
             scale = min(1.0, self._max_side / max(ch, cw))
             if scale < 1:
                 size = (max(1, round(cw*scale)), max(1, round(ch*scale)))
-                predicted = self._infer(cv2.resize(crop, size, interpolation=cv2.INTER_AREA),
-                                        cv2.resize(tri, size, interpolation=cv2.INTER_NEAREST))
+                # cv2's stubs type resize() as MatLike regardless of input
+                # dtype; crop/tri are already uint8, and resize preserves
+                # dtype, so this narrows the stub rather than the value.
+                predicted = self._infer(
+                    cast("NDArray[np.uint8]", cv2.resize(crop, size, interpolation=cv2.INTER_AREA)),
+                    cast("NDArray[np.uint8]", cv2.resize(tri, size, interpolation=cv2.INTER_NEAREST)),
+                )
                 alpha = cv2.resize(predicted, (cw, ch), interpolation=cv2.INTER_LINEAR)
             else:
                 alpha = self._infer(crop, tri)

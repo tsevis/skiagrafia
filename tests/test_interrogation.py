@@ -17,14 +17,16 @@ from core.interrogation import (
     GuidedInterrogator,
     InterrogationCandidate,
     InterrogationSettings,
-    TypographyElement,
-    is_individual_glyph_label,
-    is_typography_label,
     parse_label_candidates,
-    parse_typography_observation,
     rank_detector_phrases,
 )
 from core.knowledge import KnowledgeDomain, KnowledgePack, ObjectKnowledge
+from core.typography_labels import (
+    TypographyElement,
+    is_individual_glyph_label,
+    is_typography_label,
+    parse_typography_observation,
+)
 from models.vlm_client import BaseVLMClient
 
 # ── Fakes ────────────────────────────────────────────────────────────────
@@ -303,7 +305,7 @@ class TestEscalationChain:
             def __init__(self) -> None:
                 super().__init__(host="http://raising", model="raising")
 
-            def query_vision(self, image, prompt):
+            def query_vision(self, image, prompt) -> None:
                 raise RuntimeError("network down")
 
         interrogator._clients["moondream"] = RaisingClient()
@@ -446,7 +448,7 @@ class TestReasonerRanking:
             def __init__(self) -> None:
                 super().__init__(host="http://raising", model="raising")
 
-            def query_text(self, prompt, *, num_predict=256):
+            def query_text(self, prompt, *, num_predict=256) -> None:
                 raise RuntimeError("down")
 
         interrogator._clients["qwen3.5"] = RaisingClient()

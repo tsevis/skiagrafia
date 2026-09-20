@@ -17,6 +17,7 @@ from PIL import Image
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 if TYPE_CHECKING:
+    from ui.batch.batch_view import BatchView
     from ui.main_window import MainWindow
 
 
@@ -26,7 +27,7 @@ def _write_image(path: Path) -> Path:
 
 
 @pytest.fixture
-def batch_smoke_view(tk_root, tmp_path):
+def batch_smoke_view(tk_root, tmp_path) -> BatchView:
     """A real BatchView whose reads and writes stay inside tmp_path."""
     from tkinter import ttk
 

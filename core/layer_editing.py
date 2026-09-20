@@ -2,14 +2,22 @@
 from __future__ import annotations
 
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 import numpy as np
+from numpy.typing import NDArray
 
 from processors.output_writer import write_svg, write_tiff
 from processors.vectorizer import assemble_svg
 
+if TYPE_CHECKING:
+    from core.contracts import CapabilitySet
+    from core.pipeline_results import LayerResult, PipelineResult
 
-def all_objects_alpha(alphas, shape):
+
+def all_objects_alpha(
+    alphas: list[NDArray[np.uint8]], shape: tuple[int, int]
+) -> NDArray[np.uint8]:
     """Return the alpha union of every accepted layer at *shape*.
 
     The all-objects asset is deliberately a union, not a stack of body
@@ -25,15 +33,21 @@ def all_objects_alpha(alphas, shape):
     return np.maximum.reduce(alphas).astype(np.uint8, copy=False)
 
 
-def body_alpha(parent, children):
+def body_alpha(
+    parent: NDArray[np.uint8], children: list[NDArray[np.uint8]]
+) -> NDArray[np.uint8]:
     """Alpha for a body that recomposes correctly beneath its visible parts."""
     child = np.maximum.reduce(children).astype(np.float32) / 255
-    parent = parent.astype(np.float32) / 255
-    body = np.divide(parent - child, 1 - child, out=np.zeros_like(parent), where=child < 1)
+    parent_f = parent.astype(np.float32) / 255
+    body = np.divide(parent_f - child, 1 - child, out=np.zeros_like(parent_f), where=child < 1)
     return np.rint(body.clip(0, 1) * 255).astype(np.uint8)
 
 
-def save_layer_outputs(result, image=None, icc_profile=None):
+def save_layer_outputs(
+    result: PipelineResult,
+    image: NDArray[np.uint8] | None = None,
+    icc_profile: bytes | None = None,
+) -> None:
     """Write exactly this result's layers; never glob a shared output folder."""
     if result.svg_path:
         write_svg(assemble_svg(result.width, result.height, [
@@ -71,7 +85,41 @@ def save_layer_outputs(result, image=None, icc_profile=None):
     result.tiff_files = files
 
 
-def replace_layer_mask(result, layer_id, mask, image, capabilities, alpha_limit=None, icc_profile=None):
+def _segmented_mask(layer: LayerResult) -> NDArray[np.uint8]:
+    """A layer's mask, or a ValueError naming the layer that lacks one.
+
+    LayerResult.mask is Optional because a layer can exist without ever
+    having been segmented. Reclipping against such a layer used to hand None
+    to numpy, which answers `'<=' not supported between instances of 'int'
+    and 'NoneType'` -- naming neither the layer nor the field.
+    """
+    if layer.mask is None:
+        raise ValueError(
+            f"Layer '{layer.layer_id}' has no mask: it was never segmented, "
+            "so a replacement cannot be reclipped against it."
+        )
+    return layer.mask
+
+
+def _refined_alpha(layer: LayerResult) -> NDArray[np.uint8]:
+    """A layer's alpha matte, or a ValueError naming the layer that lacks one."""
+    if layer.alpha is None:
+        raise ValueError(
+            f"Layer '{layer.layer_id}' has no alpha matte: it was never "
+            "refined, so a child matte cannot be limited to it."
+        )
+    return layer.alpha
+
+
+def replace_layer_mask(
+    result: PipelineResult,
+    layer_id: str,
+    mask: NDArray[np.uint8],
+    image: NDArray[np.uint8],
+    capabilities: CapabilitySet,
+    alpha_limit: NDArray[np.uint8] | None = None,
+    icc_profile: bytes | None = None,
+) -> None:
     """Apply a replacement and reclip any descendants to the new silhouette."""
     by_id = {layer.layer_id: layer for layer in result.layers}
     layer = by_id[layer_id]
@@ -81,16 +129,21 @@ def replace_layer_mask(result, layer_id, mask, image, capabilities, alpha_limit=
     if alpha_limit is not None:
         layer.mask[alpha_limit == 0] = 0
     if layer.parent_id:
-        layer.mask = np.minimum(layer.mask, by_id[layer.parent_id].mask)
+        layer.mask = np.minimum(layer.mask, _segmented_mask(by_id[layer.parent_id]))
     affected = [layer] + [child for child in result.layers if child.parent_id == layer_id]
     for target in affected:
         if target.parent_id:
-            target.mask = np.minimum(target.mask, by_id[target.parent_id].mask)
-        target.svg_data = capabilities.vectorizer.trace(target.mask)
+            target.mask = np.minimum(
+                _segmented_mask(target), _segmented_mask(by_id[target.parent_id])
+            )
+        target_mask = _segmented_mask(target)
+        target.svg_data = capabilities.vectorizer.trace(target_mask)
         if target.alpha_path:
-            target.alpha = capabilities.alpha_refiner.predict(image, target.mask)
+            target.alpha = capabilities.alpha_refiner.predict(image, target_mask)
             if alpha_limit is not None:
                 target.alpha = np.minimum(target.alpha, alpha_limit)
             if target.parent_id:
-                target.alpha = np.minimum(target.alpha, by_id[target.parent_id].alpha)
+                target.alpha = np.minimum(
+                    target.alpha, _refined_alpha(by_id[target.parent_id])
+                )
     save_layer_outputs(result, image, icc_profile)
