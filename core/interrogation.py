@@ -27,6 +27,11 @@ from models.vlm_client import (
 
 logger = logging.getLogger(__name__)
 
+# Smallest quadrant worth sending to a vision model on its own. Tiling splits
+# an image in half on both axes, so an image must be twice this on its shorter
+# side before the four extra passes can show anything the whole image did not.
+MIN_TILE_EDGE_PX = 256
+
 # MAX_TOKENS is sized for a short list answer and is far too small for one
 # JSON object per visible glyph. Measured with Qwen3-VL-8B-Instruct on
 # synthetic grids: 8 glyphs answered in 325 characters and fitted inside the
@@ -228,7 +233,12 @@ class GuidedInterrogator:
                 if not self._should_escalate(candidates):
                     break
 
-        if self._settings.enable_tiling and self._allows_tiling() and self._should_escalate(candidates):
+        if (
+            self._settings.enable_tiling
+            and self._allows_tiling()
+            and self._tiles_are_useful(image)
+            and self._should_escalate(candidates)
+        ):
             stage = "tiled"
             for tile in self._iter_tiles(image):
                 tiled = self._run_vision_stage(
@@ -707,6 +717,16 @@ class GuidedInterrogator:
 
     def _allows_tiling(self) -> bool:
         return self._settings.profile in {"balanced", "deep"}
+
+    def _tiles_are_useful(self, image: NDArray[np.uint8]) -> bool:
+        """True when splitting this image into quadrants can add detail.
+
+        A tile is half the width and half the height, so below this size
+        each quadrant carries LESS than the whole picture already showed --
+        and the run pays four full model round-trips to learn nothing. The
+        threshold keeps a quadrant at or above MIN_TILE_EDGE_PX.
+        """
+        return min(image.shape[:2]) >= MIN_TILE_EDGE_PX * 2
 
     def _max_child_query_parents(self) -> int:
         if self._settings.profile == "fast":

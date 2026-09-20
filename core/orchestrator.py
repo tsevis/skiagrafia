@@ -56,6 +56,17 @@ MAX_CHILD_PARENT_IOU = 0.85
 MAX_CHILD_CHILD_IOU = 0.80
 MIN_PARENT_COVERAGE_PCT = 0.5
 MIN_CONFIRMED_COVERAGE_PCT = 0.05
+# Ceiling on accepted parent instances for one image. Reaching it means the
+# prompt was too broad, and the run says so rather than growing without end.
+MAX_OBJECT_INSTANCES = 64
+# Below this many lit pixels a mask is noise, not an object.
+MIN_MASK_PIXELS = 8
+# Two masks overlapping this much are the same object detected twice.
+DUPLICATE_MASK_IOU = 0.90
+# A part must fall at least this far inside its parent to belong to it.
+MIN_PART_CONTAINMENT = 0.90
+# Context kept around a parent's box when cropping for part detection.
+PART_CROP_PADDING = 8
 PARENT_IOU_MERGE = 0.50
 PARENT_CONTAINMENT_MERGE = 0.75
 BBOX_IOU_MERGE = 0.60
@@ -291,18 +302,21 @@ class Orchestrator:
             if not detections:
                 continue
             for (detection, is_manual), layer_label in zip(detections, layer_labels, strict=True):
-                if len(accepted) >= 64:
-                    result.warnings.append("Stopped at 64 object instances; narrow the prompt or process a crop.")
+                if len(accepted) >= MAX_OBJECT_INSTANCES:
+                    result.warnings.append(
+                        f"Stopped at {MAX_OBJECT_INSTANCES} object instances; "
+                        "narrow the prompt or process a crop."
+                    )
                     break
                 self._report(3, f"Object mask: {parent.display_label}")
                 mask = self._detection_mask(image, detection, layer_label, is_manual)
                 mask[source.alpha == 0] = 0
                 # Keep small legitimate objects; reject only empty/tiny noise.
-                if np.count_nonzero(mask) < 8:
+                if np.count_nonzero(mask) < MIN_MASK_PIXELS:
                     result.warnings.append(f"Empty or tiny mask for '{parent.display_label}'.")
                     continue
                 # Containment and overlapping boxes alone do not imply duplication.
-                duplicate = next((entry for entry in accepted if mask_iou(mask, masks[entry[0].layer_id]) > 0.9), None)
+                duplicate = next((entry for entry in accepted if mask_iou(mask, masks[entry[0].layer_id]) > DUPLICATE_MASK_IOU), None)
                 if duplicate:
                     existing_label = duplicate[1].display_label
                     extra = children_by_parent.get(parent.display_label, [])
@@ -410,7 +424,7 @@ class Orchestrator:
             result.layers.append(layer)
             parent_mask = masks[layer.layer_id]
             y0, x0, y1, x1 = tight_bbox(parent_mask, padding=0)
-            crop, dx, dy = crop_to_bbox(image, (x0, y0, x1, y1), padding=8)
+            crop, dx, dy = crop_to_bbox(image, (x0, y0, x1, y1), padding=PART_CROP_PADDING)
             parts = self._parts_for(
                 parent, children_by_parent, crop, query_parts, parent_index, part_limit
             )
@@ -446,10 +460,10 @@ class Orchestrator:
         mask = np.zeros((source.height, source.width), dtype=np.uint8)
         mask[dy:dy + crop.shape[0], dx:dx + crop.shape[1]] = local
         area = np.count_nonzero(mask)
-        if area < 8:
+        if area < MIN_MASK_PIXELS:
             return None
         intersection = as_uint8(cv2.bitwise_and(mask, parent_mask))
-        if np.count_nonzero(intersection) / area < 0.90:
+        if np.count_nonzero(intersection) / area < MIN_PART_CONTAINMENT:
             return None
         mask = intersection
         if mask_iou(mask, parent_mask) > MAX_CHILD_PARENT_IOU:
