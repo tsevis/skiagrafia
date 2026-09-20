@@ -69,5 +69,57 @@ jobs:
       - name: Install the declared environment
         run: uv sync --frozen
 
+      # THE GATES `scripts/verify.sh all` ALREADY RAN, AND CI DID NOT. That
+      # script runs ruff, compileall, pip check and pip-audit alongside
+      # pytest, so every one of them was enforced only by somebody
+      # remembering to type it on the machine the code was written on — which
+      # is the exact gap this workflow exists to close, and closing it for
+      # pytest alone left the lint gate and the CVE check outside.
+      #
+      # NO RULE IS REPEATED HERE. The ruff rule set, its ignores and the
+      # per-file exemptions for tests all live in `[tool.ruff]` in
+      # pyproject.toml; this step only runs it. Same reason pytest's marker
+      # exclusion is not restated above.
+      #
+      # Each gate is its own step. A single combined `run:` reports one red X
+      # and makes you open the log to learn which of four things broke.
+      - name: Lint
+        run: uv run ruff check .
+
+      # Basic mode, configured in [tool.pyright] in pyproject.toml — including
+      # venvPath/venv, without which pyright resolves against its own
+      # interpreter and reports numpy, torch, pydantic and cv2 as missing.
+      # `uv run` puts the synced .venv on the path, so those settings resolve
+      # here the same way they do locally.
+      #
+      # The pyright wheel fetches its own Node runtime the first time it runs,
+      # so this step reaches the network even though nothing else after the
+      # install does.
+      - name: Type-check
+        run: uv run pyright
+
+      # Catches a module that does not parse at all, including one nothing
+      # imports: the default run deselects the windowed tests, so a syntax
+      # error inside one of those is invisible to pytest here.
+      - name: Byte-compile every module
+        run: uv run python -m compileall -q .
+
+      - name: Check the installed dependency graph
+        run: uv run python -m pip check
+
       - name: Run the suite
         run: uv run pytest -q -p no:cacheprovider --durations=10
+
+      # LAST, AND NOT GATED ON THE STEPS ABOVE. An advisory is published by
+      # somebody else, on their schedule — it has no relation to whether this
+      # commit's lint or tests pass, and it is what the nightly is mostly
+      # here to catch. `!cancelled()` rather than `always()`: a cancelled run
+      # should stay cancelled.
+      #
+      # It audits the INSTALLED environment, not the lock file, so it is
+      # meaningful only after `uv sync --frozen` above. A local `.venv` that
+      # has drifted from the lock reports packages the project no longer
+      # declares.
+      - name: Audit dependencies for known advisories
+        if: ${{ !cancelled() }}
+        run: uv run pip-audit
