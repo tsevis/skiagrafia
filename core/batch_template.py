@@ -52,12 +52,30 @@ class BatchTemplate(BaseModel):
     selection_request: str = ""
     guide_name: str | None = None
 
+    def stamped(self) -> BatchTemplate:
+        """A copy carrying the current local time; the receiver is unchanged.
+
+        The offset is recorded alongside the wall clock, so a template saved
+        in one timezone still says when it was written.
+        """
+        return self.model_copy(
+            update={"created_at": datetime.datetime.now().astimezone().isoformat()}
+        )
+
     def save(self) -> Path:
+        """Write a timestamped copy of this template and return its path.
+
+        The copy is what gets written; THIS OBJECT IS NOT MODIFIED. It used
+        to stamp `created_at` onto the caller's own instance, so writing a
+        template to disk silently edited an object the caller still held --
+        and saving twice changed it twice. Use `stamped()` when the written
+        form is what you want in hand.
+        """
         d = Path.home() / ".config" / "skiagrafia" / "templates"
         d.mkdir(parents=True, exist_ok=True)
-        self.created_at = datetime.datetime.now().astimezone().isoformat()
-        path = safe_child_path(d, f"{_slugify(self.name)}.json")
-        atomic_write_bytes(path, self.model_dump_json(indent=2).encode("utf-8"))
+        record = self.stamped()
+        path = safe_child_path(d, f"{_slugify(record.name)}.json")
+        atomic_write_bytes(path, record.model_dump_json(indent=2).encode("utf-8"))
         return path
 
     @classmethod
