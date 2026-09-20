@@ -63,7 +63,7 @@ class _FakeVLM(BaseVLMClient):
         self._responses = list(responses)
         self.prompts: list[str] = []
 
-    def _chat(self, prompt, images_b64=None, num_predict=200):  # type: ignore[override]
+    def _chat(self, prompt, images_b64=None, num_predict=200) -> str:  # type: ignore[override]
         self.prompts.append(prompt)
         return self._responses.pop(0) if self._responses else ""
 
@@ -105,7 +105,7 @@ class TestLlamaCppClient:
         client = LlamaCppVLMClient(host="http://localhost:8080", model="qwen3-vl")
         captured: dict = {}
 
-        def fake_request(path, payload=None, timeout=None):
+        def fake_request(path, payload=None, timeout=None) -> dict:
             captured["path"] = path
             captured["payload"] = payload
             return {"choices": [{"message": {"content": "  mug, plate  "}}]}
@@ -125,7 +125,7 @@ class TestLlamaCppClient:
         client = LlamaCppVLMClient()
         captured: dict = {}
 
-        def fake_request(path, payload=None, timeout=None):
+        def fake_request(path, payload=None, timeout=None) -> dict:
             captured["payload"] = payload
             return {"choices": [{"message": {"content": "ok"}}]}
 
@@ -160,10 +160,10 @@ class TestLlamaCppClient:
             def read(self) -> bytes:
                 return b"{not json"
 
-            def __enter__(self):
+            def __enter__(self) -> _Response:
                 return self
 
-            def __exit__(self, *args):
+            def __exit__(self, *args) -> bool:
                 return False
 
         monkeypatch.setattr("models.vlm_client.urllib.request.urlopen", lambda *a, **k: _Response())
@@ -173,7 +173,7 @@ class TestLlamaCppClient:
     def test_health_check_ok(self) -> None:
         client = LlamaCppVLMClient()
 
-        def fake_request(path, payload=None, timeout=None):
+        def fake_request(path, payload=None, timeout=None) -> dict:
             if path == "/health":
                 return {"status": "ok"}
             return {"data": [{"id": "qwen3-vl-8b"}]}
@@ -184,7 +184,7 @@ class TestLlamaCppClient:
     def test_health_check_false_while_loading(self) -> None:
         client = LlamaCppVLMClient()
 
-        def fake_request(path, payload=None, timeout=None):
+        def fake_request(path, payload=None, timeout=None) -> None:
             raise urllib.error.HTTPError(path, 503, "loading", {}, None)  # type: ignore[arg-type]
 
         client._request_json = fake_request  # type: ignore[method-assign]
@@ -193,7 +193,7 @@ class TestLlamaCppClient:
     def test_health_check_false_when_down(self) -> None:
         client = LlamaCppVLMClient(host="http://localhost:1")
 
-        def fake_request(path, payload=None, timeout=None):
+        def fake_request(path, payload=None, timeout=None) -> None:
             raise urllib.error.URLError("connection refused")
 
         client._request_json = fake_request  # type: ignore[method-assign]

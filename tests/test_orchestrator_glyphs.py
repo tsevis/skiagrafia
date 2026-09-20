@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import sys
 from pathlib import Path
+from typing import NoReturn
 
 import numpy as np
 from PIL import Image
@@ -158,7 +159,7 @@ class TestProcessIndividualGlyphs:
 
     def test_failed_alpha_refinement_has_a_clear_pipeline_error(self, tmp_path: Path) -> None:
         class FailingAlpha:
-            def predict(self, image, mask):
+            def predict(self, image, mask) -> NoReturn:
                 raise RuntimeError("backend unavailable")
 
         image_path = _write_image(tmp_path / "img.png")
@@ -174,7 +175,7 @@ class TestProcessIndividualGlyphs:
 
     def test_unsafe_vector_output_has_a_clear_export_error(self, tmp_path: Path) -> None:
         class UnsafeVectorizer:
-            def trace(self, mask):
+            def trace(self, mask) -> str:
                 return '<script>alert(1)</script>'
 
         image_path = _write_image(tmp_path / "img.png")

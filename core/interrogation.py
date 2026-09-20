@@ -513,13 +513,22 @@ class GuidedInterrogator:
     def part_query_limit(self) -> int:
         return self._max_child_query_parents() if self._settings.discover_parts else 0
 
-    def _known_parts(self, candidates, knowledge_pack):
+    def _known_parts(
+        self,
+        candidates: list[InterrogationCandidate],
+        knowledge_pack: KnowledgePack | None,
+    ) -> dict[str, list[str]]:
         if not self._settings.discover_parts or knowledge_pack is None:
             return {}
         return {c.display_label: obj.parts for c in candidates
                 if (obj := knowledge_pack.find_object(c.canonical_label)) and obj.parts}
 
-    def discover_parts(self, image, candidate, knowledge_pack=None) -> list[str]:
+    def discover_parts(
+        self,
+        image: NDArray[np.uint8],
+        candidate: InterrogationCandidate,
+        knowledge_pack: KnowledgePack | None = None,
+    ) -> list[str]:
         """Called only after localization, on an individual object's crop."""
         if not self._settings.discover_parts:
             return []

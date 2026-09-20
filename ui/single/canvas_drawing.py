@@ -22,6 +22,8 @@ from ui.single.canvas_overlays import (
 from ui.theme import is_macos
 
 if TYPE_CHECKING:
+
+    from core.pipeline_results import LayerResult
     from ui.main_window import MainWindow
     from ui.single.single_view import SingleView
 
@@ -83,7 +85,7 @@ class CanvasDrawingMixin:
         if mode in {"vectors", "composite"}:
             self._draw_vector_overlay(display_w, display_h)
 
-    def _visible_result_layers(self):
+    def _visible_result_layers(self) -> list[LayerResult]:
         result = getattr(self._view, "_last_result", None)
         layers = getattr(result, "layers", [])
         panel = getattr(self._view, "_right_panel", None)
@@ -91,7 +93,7 @@ class CanvasDrawingMixin:
         return [layer for i, layer in enumerate(layers)
                 if i not in visibility or visibility[i].get()]
 
-    def _draw_alpha_preview(self, display_w, display_h):
+    def _draw_alpha_preview(self, display_w: int, display_h: int) -> None:
         import numpy as np
         if self._source_image is None:
             return
@@ -103,9 +105,17 @@ class CanvasDrawingMixin:
             layers = [result.layers[selected]]
         else:
             layers = [layer for layer in layers if layer.role == "parent"]
-        mattes = [np.rint((layer.alpha if getattr(layer, "alpha", None) is not None else layer.mask)
-                           * getattr(layer, "preview_opacity", 1.0)).astype(np.uint8)
-                  for layer in layers if getattr(layer, "mask", None) is not None]
+        # Attributes, not getattr: `mask`, `alpha` and `preview_opacity` are
+        # declared fields of LayerResult with defaults, so the indirection
+        # bought nothing and hid the None-guard from the type checker.
+        mattes = [
+            np.rint(
+                (layer.alpha if layer.alpha is not None else layer.mask)
+                * layer.preview_opacity
+            ).astype(np.uint8)
+            for layer in layers
+            if layer.mask is not None
+        ]
         if not mattes:
             return
         alpha = Image.fromarray(np.maximum.reduce(mattes))

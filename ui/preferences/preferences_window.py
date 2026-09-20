@@ -56,12 +56,12 @@ class PreferencesWindow:
             side=tk.RIGHT
         )
 
-    def _scroll_active_tab(self, event):
+    def _scroll_active_tab(self, event: tk.Event) -> None:
         canvas = self._scroll_canvases.get(self._notebook.select())
         if canvas is not None:
             canvas.yview_scroll(-1 * (event.delta // 120 or event.delta), "units")
 
-    def _scrollable_tab(self, title):
+    def _scrollable_tab(self, title: str) -> ttk.Frame:
         outer = ttk.Frame(self._notebook)
         self._notebook.add(outer, text=title)
         canvas = tk.Canvas(outer, highlightthickness=0)

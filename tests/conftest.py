@@ -19,7 +19,11 @@ import pytest
 from PIL import Image
 
 if TYPE_CHECKING:
+    from collections.abc import Iterator
+
+    from ui.batch.batch_view import BatchView
     from ui.main_window import MainWindow
+    from ui.single.single_view import SingleView
 
 # Any test requesting one of these fixtures builds a real window, so it is
 # integration coverage unless an author deliberately marks it as fast `gui`.
@@ -89,7 +93,7 @@ def pytest_collection_modifyitems(
 
 
 @pytest.fixture
-def tk_root():
+def tk_root() -> Iterator[tk.Tk]:
     """A real Tk root window. Destroyed even if the test fails."""
     import tkinter as tk
 
@@ -113,7 +117,7 @@ def tk_root():
 
 
 @pytest.fixture
-def stub_app(tk_root):
+def stub_app(tk_root) -> SimpleNamespace:
     """Minimal stand-in for MainWindow.
 
     The panels only ever reach for `root`, `prefs` and `switch_to_batch`
@@ -130,7 +134,7 @@ def stub_app(tk_root):
 
 
 @pytest.fixture
-def single_view(tk_root, stub_app):
+def single_view(tk_root, stub_app) -> SingleView:
     """A real three-panel SingleView, laid out and realised."""
     import tkinter as tk
     from tkinter import ttk
@@ -159,7 +163,7 @@ def _write_image(path: Path) -> Path:
 
 
 @pytest.fixture
-def batch_view(tk_root, tmp_path):
+def batch_view(tk_root, tmp_path) -> BatchView:
     """A real BatchView with all filesystem access sandboxed to tmp_path."""
     from tkinter import ttk
 
@@ -183,7 +187,7 @@ def batch_view(tk_root, tmp_path):
 
 
 @pytest.fixture
-def image_folder(tmp_path):
+def image_folder(tmp_path) -> Path:
     """A folder holding three images and two files that must be ignored."""
     folder = tmp_path / "input"
     folder.mkdir()

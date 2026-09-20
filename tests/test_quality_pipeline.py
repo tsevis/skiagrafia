@@ -7,6 +7,8 @@ from typing import cast
 from unittest.mock import Mock
 
 import numpy as np
+import pytest
+from numpy.typing import NDArray
 from PIL import Image
 from test_grounded_sam import FakeSamPredictor
 from test_orchestrator import (
@@ -35,7 +37,7 @@ def _not_none[T](value: T | None) -> T:
 
 
 class Instances(FakeDetector):
-    def detect_instances(self, image, label, *args):
+    def detect_instances(self, image, label, *args) -> list[DetectionResult]:
         if label == "bag":
             return [DetectionResult(label=label, bbox=box, confidence=.9)
                     for box in [(2, 2, 28, 60), (34, 2, 62, 60)]]
@@ -44,7 +46,7 @@ class Instances(FakeDetector):
         return []
 
 
-def test_repeated_objects_and_parts_have_independent_exports(tmp_path):
+def test_repeated_objects_and_parts_have_independent_exports(tmp_path) -> None:
     result = Orchestrator(_make_caps(FakeInterrogator([_candidate("bag")], {"bag": ["handle"]}), Instances(), FakeSegmenter()),
                           output_dir=tmp_path / "out").process(_write_image(tmp_path / "in.png"))
     assert result.error is None
@@ -65,16 +67,16 @@ def test_repeated_objects_and_parts_have_independent_exports(tmp_path):
     assert len(ids) == len(set(ids))
 
 
-def test_nested_objects_are_not_deleted_as_duplicates(tmp_path):
+def test_nested_objects_are_not_deleted_as_duplicates(tmp_path) -> None:
     detector = FakeDetector(boxes={"tray": (0, 0, 64, 64), "cup": (15, 15, 30, 30)})
     result = Orchestrator(_make_caps(FakeInterrogator([_candidate("tray"), _candidate("cup")]), detector, FakeSegmenter()),
                           output_dir=tmp_path).process(_write_image(tmp_path / "image.png"))
     assert [x.label for x in result.layers] == ["tray", "cup"]
 
 
-def test_child_overlapping_neighbor_is_rejected(tmp_path):
+def test_child_overlapping_neighbor_is_rejected(tmp_path) -> None:
     class LeakySegmenter(FakeSegmenter):
-        def segment(self, image, bbox, label="", prefer_full_box=False):
+        def segment(self, image, bbox, label="", prefer_full_box=False) -> NDArray[np.uint8]:
             if label == "handle":
                 # Crop includes 8 px of neighboring background. Most of this
                 # supposed part is outside the actual parent's silhouette.
@@ -88,7 +90,7 @@ def test_child_overlapping_neighbor_is_rejected(tmp_path):
     assert [x.role for x in result.layers] == ["parent"]
 
 
-def test_spatial_selector_returns_one_requested_instance():
+def test_spatial_selector_returns_one_requested_instance() -> None:
     orch = Orchestrator(_make_caps(FakeInterrogator([]), Instances(), FakeSegmenter()))
     candidate = _candidate("bag")
     candidate.selection = "rightmost"
@@ -96,7 +98,7 @@ def test_spatial_selector_returns_one_requested_instance():
     assert len(found) == 1 and found[0][0].bbox[0] == 34
 
 
-def test_prompt_json_preserves_attributes_and_selector():
+def test_prompt_json_preserves_attributes_and_selector() -> None:
     settings = InterrogationSettings("", LOCAL_PRIMARY, [], LOCAL_FALLBACK, user_prompt="Only the leftmost red bag", discover_parts=False)
     interrogator = GuidedInterrogator(settings)
     client = Mock()
@@ -108,7 +110,7 @@ def test_prompt_json_preserves_attributes_and_selector():
     assert not client.get_children.called
 
 
-def test_encoding_reused_for_multiple_boxes_but_reset_between_images():
+def test_encoding_reused_for_multiple_boxes_but_reset_between_images() -> None:
     sam = GroundedSAM()
     predictor = FakeSamPredictor()
     sam._sam_predictor = predictor
@@ -121,7 +123,7 @@ def test_encoding_reused_for_multiple_boxes_but_reset_between_images():
     assert len(predictor.set_image_calls) == 2
 
 
-def test_cleanup_preserves_hole_and_one_pixel_wire():
+def test_cleanup_preserves_hole_and_one_pixel_wire() -> None:
     mask = np.zeros((64, 64), np.uint8)
     mask[8:50, 8:50] = 255
     mask[20:30, 20:30] = 0
@@ -129,7 +131,7 @@ def test_cleanup_preserves_hole_and_one_pixel_wire():
     assert np.array_equal(refine_mask(mask, min_contour_area=0), mask)
 
 
-def test_matte_known_regions_stay_opaque_or_transparent():
+def test_matte_known_regions_stay_opaque_or_transparent() -> None:
     refiner, _ = _wired_refiner((64, 64))
     mask = np.zeros((64, 64), np.uint8)
     mask[10:54, 10:54] = 255
@@ -140,7 +142,7 @@ def test_matte_known_regions_stay_opaque_or_transparent():
     assert np.any((alpha > 0) & (alpha < 255))
 
 
-def test_vector_roundtrip_keeps_holes_and_thin_structure():
+def test_vector_roundtrip_keeps_holes_and_thin_structure() -> None:
     from utils.cairo_support import load_cairosvg
     mask = np.zeros((64, 64), np.uint8)
     mask[8:50, 8:50] = 255
@@ -155,13 +157,13 @@ def test_vector_roundtrip_keeps_holes_and_thin_structure():
     assert not rendered[25, 25] and rendered[40, 58]
 
 
-def test_duplicate_svg_ids_are_uniquified():
+def test_duplicate_svg_ids_are_uniquified() -> None:
     svg = assemble_svg(4, 4, [{"id": "handle", "svg_data": "<path/>"}] * 3)
     ids = [el.attrib['id'] for el in ET.fromstring(svg).iter() if 'id' in el.attrib]
     assert len(ids) == len(set(ids)) == 3
 
 
-def test_gemma_ollama_disables_thinking():
+def test_gemma_ollama_disables_thinking() -> None:
     client = OllamaVLMClient(model="gemma4:e4b")
     client._client = Mock()
     client._client.chat.return_value = SimpleNamespace(message=SimpleNamespace(content="bag"))
@@ -169,7 +171,7 @@ def test_gemma_ollama_disables_thinking():
     assert client._client.chat.call_args.kwargs['think'] is False
 
 
-def test_truncated_response_is_rejected():
+def test_truncated_response_is_rejected() -> None:
     import pytest
     client = LlamaCppVLMClient()
     client._request_json = Mock(return_value={"choices":[{"finish_reason":"length", "message":{"content":"bag, car, bag"}}]})
@@ -177,13 +179,13 @@ def test_truncated_response_is_rejected():
         client.query_text("objects?")
 
 
-def test_managed_model_lookup_rejects_missing_files(tmp_path):
+def test_managed_model_lookup_rejects_missing_files(tmp_path) -> None:
     import pytest
     with pytest.raises(FileNotFoundError, match="No files were downloaded"):
         resolve_local_model(LOCAL_PRIMARY, cache=tmp_path)
 
 
-def test_body_and_parts_recompose_without_transparent_seams():
+def test_body_and_parts_recompose_without_transparent_seams() -> None:
     from core.layer_editing import body_alpha
     parent = np.array([[255, 200, 120, 0]], np.uint8)
     child = np.array([[128, 180, 100, 0]], np.uint8)
@@ -193,7 +195,7 @@ def test_body_and_parts_recompose_without_transparent_seams():
     assert np.max(np.abs(recomposed - parent)) <= 1
 
 
-def test_layer_edit_reclips_children_and_updates_export(tmp_path):
+def test_layer_edit_reclips_children_and_updates_export(tmp_path) -> None:
     from core.layer_editing import replace_layer_mask
     caps = _make_caps(FakeInterrogator([_candidate("bag")], {"bag": ["handle"]}), Instances(), FakeSegmenter())
     result = Orchestrator(caps, output_dir=tmp_path / "out").process(_write_image(tmp_path / "in.png"))
@@ -211,7 +213,7 @@ def test_layer_edit_reclips_children_and_updates_export(tmp_path):
     assert np.array_equal(composite_alpha, expected)
 
 
-def test_existing_transparency_is_preserved_in_export(tmp_path):
+def test_existing_transparency_is_preserved_in_export(tmp_path) -> None:
     rgb = np.full((64, 64, 4), 120, np.uint8)
     rgb[..., 3] = 0
     rgb[12:50, 12:50, 3] = 160
@@ -227,7 +229,7 @@ def test_existing_transparency_is_preserved_in_export(tmp_path):
         assert np.array_equal(pixels[..., :3], rgb[..., :3])
 
 
-def test_local_backend_routes_primary_and_fallback_independently():
+def test_local_backend_routes_primary_and_fallback_independently() -> None:
     from core.factory import build_interrogation_settings
     settings = build_interrogation_settings({"vlm_backend":"local"})
     assert settings.primary_vlm == LOCAL_PRIMARY
@@ -235,7 +237,7 @@ def test_local_backend_routes_primary_and_fallback_independently():
     assert settings.reasoner_model == LOCAL_FALLBACK
 
 
-def test_detailed_matte_only_runs_tiles_containing_boundary():
+def test_detailed_matte_only_runs_tiles_containing_boundary() -> None:
     refiner, model = _wired_refiner((960, 960))
     refiner._quality = "detailed"
     refiner._max_side = 1536
@@ -248,9 +250,9 @@ def test_detailed_matte_only_runs_tiles_containing_boundary():
     assert 1 < model.forward_calls < 9  # skip the wholly opaque center tile
 
 
-def test_uncertain_sam3_parts_are_not_promoted_to_layers(tmp_path):
+def test_uncertain_sam3_parts_are_not_promoted_to_layers(tmp_path) -> None:
     class UncertainParts(Instances):
-        def detect_instances(self, image, label, *args):
+        def detect_instances(self, image, label, *args) -> list[DetectionResult]:
             found = super().detect_instances(image, label, *args)
             if label == "handle":
                 for detection in found:
@@ -263,7 +265,7 @@ def test_uncertain_sam3_parts_are_not_promoted_to_layers(tmp_path):
     assert all(layer.role == "parent" for layer in result.layers)
 
 
-def test_mlx_adapter_reuses_encoding_and_returns_all_masks(tmp_path, monkeypatch):
+def test_mlx_adapter_reuses_encoding_and_returns_all_masks(tmp_path, monkeypatch) -> None:
     import sys
     import types
 
@@ -298,7 +300,7 @@ def test_mlx_adapter_reuses_encoding_and_returns_all_masks(tmp_path, monkeypatch
     assert len(adapter.detect_instances(image, "bag")) == 2  # parent fallback remains available
 
 
-def test_exif_orientation_is_applied_before_masks(tmp_path):
+def test_exif_orientation_is_applied_before_masks(tmp_path) -> None:
     from processors.source_image import load_source_image
     image = Image.new("RGB", (30, 20), "white")
     exif = image.getexif()
@@ -309,7 +311,7 @@ def test_exif_orientation_is_applied_before_masks(tmp_path):
     assert rgb.shape == (30, 20, 3) and alpha.shape == (30, 20)
 
 
-def test_gui_alpha_view_uses_actual_matte(single_view, tmp_path):
+def test_gui_alpha_view_uses_actual_matte(single_view, tmp_path) -> None:
     path = _write_image(tmp_path / "image.png")
     caps = _make_caps(FakeInterrogator([_candidate("bag")]), FakeDetector(default=(10, 10, 50, 50)), FakeSegmenter())
     result = Orchestrator(caps, output_dir=tmp_path / "out").process(path)
@@ -325,7 +327,7 @@ def test_gui_alpha_view_uses_actual_matte(single_view, tmp_path):
     assert result.layers[0].preview_opacity == .5
 
 
-def test_batch_interrogation_overrides_match_processing_settings():
+def test_batch_interrogation_overrides_match_processing_settings() -> None:
     from core.factory import build_interrogation_settings
     settings = build_interrogation_settings({"vlm_backend": "local"}, overrides={
         "interrogation_profile": "deep", "enable_tiled_fallback": False,
@@ -333,3 +335,32 @@ def test_batch_interrogation_overrides_match_processing_settings():
     })
     assert settings.profile == "deep" and settings.enable_tiling is False
     assert settings.primary_vlm == LOCAL_FALLBACK
+
+
+def test_layer_edit_names_the_layer_that_was_never_segmented(tmp_path) -> None:
+    """LayerResult.mask is Optional, so a parent without one is expressible.
+
+    The reclip then handed None to numpy, which reports an operand type
+    error naming neither the layer nor the field it was missing. Nothing
+    else in the call chain says which layer was never segmented.
+    """
+    from core.layer_editing import replace_layer_mask
+    from core.pipeline_results import LayerResult, PipelineResult
+
+    caps = _make_caps(FakeInterrogator([_candidate("bag")], {"bag": ["handle"]}),
+                      Instances(), FakeSegmenter())
+    result = PipelineResult(image_path=str(tmp_path / "in.png"), width=8, height=8)
+    result.layers = [
+        LayerResult(layer_id="L01", label="parent", role="parent", bbox=(0, 0, 8, 8)),
+        LayerResult(layer_id="L01-part-001", label="child", role="child",
+                    parent_id="L01", bbox=(0, 0, 4, 4)),
+    ]
+
+    with pytest.raises(ValueError, match="L01"):
+        replace_layer_mask(
+            result,
+            "L01-part-001",
+            np.zeros((8, 8), dtype=np.uint8),
+            np.zeros((8, 8, 3), dtype=np.uint8),
+            caps,
+        )

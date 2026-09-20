@@ -422,7 +422,7 @@ class TestDownloadGithubZip:
         payload = _fake_zip_bytes("Grounded-SAM-2-main")
         progress: list[tuple[int, int | None]] = []
 
-        def fake_urlopen(request, timeout=None):
+        def fake_urlopen(request, timeout=None) -> _FakeResponse:
             return _FakeResponse(payload, str(len(payload)))
 
         monkeypatch.setattr(model_manager.urllib.request, "urlopen", fake_urlopen)
@@ -447,7 +447,7 @@ class TestDownloadGithubZip:
     ) -> None:
         payload = _fake_zip_bytes("Grounded-SAM-2-main")
 
-        def fake_urlopen(request, timeout=None):
+        def fake_urlopen(request, timeout=None) -> _FakeResponse:
             return _FakeResponse(payload, None)
 
         monkeypatch.setattr(model_manager.urllib.request, "urlopen", fake_urlopen)
@@ -472,7 +472,7 @@ class TestDownloadGithubZip:
     ) -> None:
         payload = _fake_zip_bytes("root")
 
-        def fake_urlopen(request, timeout=None):
+        def fake_urlopen(request, timeout=None) -> _FakeResponse:
             return _FakeResponse(payload, None)
 
         monkeypatch.setattr(model_manager.urllib.request, "urlopen", fake_urlopen)

@@ -43,14 +43,14 @@ class FakeInterrogator:
     def set_confirmed_selections(self, selections: dict[str, str]) -> None:
         self.confirmed_selections.append(dict(selections))
 
-    def interrogate(self, image, confirmed_labels=None, knowledge_pack=None):
+    def interrogate(self, image, confirmed_labels=None, knowledge_pack=None) -> InterrogationResult:
         self.calls.append((confirmed_labels, knowledge_pack))
         return InterrogationResult(
             candidates=self._candidates,
             children_by_parent=self._children,
         )
 
-    def inspect_individual_glyphs(self, image, candidate):
+    def inspect_individual_glyphs(self, image, candidate) -> TypographyObservation | None:
         return self._typography_observation
 
 
@@ -66,7 +66,7 @@ class FakeDetector:
         self._default = default
         self.calls: list[str] = []
 
-    def detect_box(self, image, label, box_threshold=0.35, text_threshold=0.25):
+    def detect_box(self, image, label, box_threshold=0.35, text_threshold=0.25) -> DetectionResult | None:
         self.calls.append(label)
         if label in self._boxes:
             bbox = self._boxes[label]
@@ -85,7 +85,7 @@ class MultiInstanceDetector(FakeDetector):
         super().__init__()
         self._instances = instances
 
-    def detect_instances(self, image, label, box_threshold=0.35, text_threshold=0.25):
+    def detect_instances(self, image, label, box_threshold=0.35, text_threshold=0.25) -> list[DetectionResult]:
         self.calls.append(label)
         return list(self._instances)
 
@@ -98,7 +98,7 @@ class FakeSegmenter:
         self.clear_cache_called = False
         self.calls: list[tuple] = []
 
-    def segment(self, image, bbox, label="", prefer_full_box=False):
+    def segment(self, image, bbox, label="", prefer_full_box=False) -> NDArray[np.uint8]:
         self.calls.append((bbox, label, prefer_full_box))
         if label in self._mask_by_label:
             return self._mask_by_label[label]
@@ -118,7 +118,7 @@ class FakeAlphaRefiner:
     def __init__(self) -> None:
         self.calls = 0
 
-    def predict(self, image, mask):
+    def predict(self, image, mask) -> NDArray[np.uint8]:
         self.calls += 1
         return mask.copy()
 
@@ -127,7 +127,7 @@ class FakeVectorizer:
     def __init__(self) -> None:
         self.calls = 0
 
-    def trace(self, mask):
+    def trace(self, mask) -> str:
         self.calls += 1
         return (
             '<svg xmlns="http://www.w3.org/2000/svg">'

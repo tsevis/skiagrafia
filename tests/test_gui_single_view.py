@@ -18,12 +18,16 @@ from __future__ import annotations
 import sys
 import tkinter as tk
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 import numpy as np
 import pytest
 from PIL import Image
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+
+if TYPE_CHECKING:
+    from ui.single.canvas_panel import CanvasPanel
 
 
 def _write_image(path: Path, size: tuple[int, int] = (320, 240)) -> Path:
@@ -44,7 +48,7 @@ def _event(**kwargs: object) -> tk.Event:
 
 
 @pytest.fixture
-def loaded_canvas(single_view, tk_root, tmp_path):
+def loaded_canvas(single_view, tk_root, tmp_path) -> CanvasPanel:
     """A canvas panel with an image loaded and framed."""
     canvas = single_view.canvas_panel
     canvas.load_image(str(_write_image(tmp_path / "sample.png")))

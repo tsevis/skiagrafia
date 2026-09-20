@@ -31,7 +31,9 @@ import contextlib
 import json
 import sys
 import tkinter as tk
+from collections.abc import Iterator
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 import pytest
 
@@ -39,6 +41,9 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 import utils.preferences as prefs_mod
 from utils.preferences import DEFAULT_PREFERENCES
+
+if TYPE_CHECKING:
+    from ui.preferences.preferences_window import PreferencesWindow
 
 
 class _StubApp:
@@ -54,7 +59,7 @@ class _StubApp:
 
 
 @pytest.fixture
-def sandbox_home(tmp_path, monkeypatch):
+def sandbox_home(tmp_path, monkeypatch) -> Path:
     """Redirect every route to the real config directory into tmp_path."""
     config_dir = tmp_path / ".config" / "skiagrafia"
     config_dir.mkdir(parents=True)
@@ -64,7 +69,7 @@ def sandbox_home(tmp_path, monkeypatch):
 
 
 @pytest.fixture
-def prefs_app(tk_root, tmp_path, sandbox_home):
+def prefs_app(tk_root, tmp_path, sandbox_home) -> _StubApp:
     models_dir = tmp_path / "models"
     models_dir.mkdir()
     prefs = dict(DEFAULT_PREFERENCES)
@@ -74,7 +79,7 @@ def prefs_app(tk_root, tmp_path, sandbox_home):
 
 
 @pytest.fixture
-def prefs_window(prefs_app, tk_root):
+def prefs_window(prefs_app, tk_root) -> Iterator[PreferencesWindow]:
     from ui.preferences.preferences_window import PreferencesWindow
 
     window = PreferencesWindow(prefs_app)

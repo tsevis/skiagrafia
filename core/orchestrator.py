@@ -624,8 +624,13 @@ class Orchestrator:
         slug = re.sub(r"[^a-z0-9]+", "-", label.lower()).strip("-")[:40] or "object"
         return f"object-{index:03d}-{slug}"
 
-    def _detect_instances(self, image, candidate, manual_lookup):
-        manual = []
+    def _detect_instances(
+        self,
+        image: NDArray[np.uint8],
+        candidate: InterrogationCandidate,
+        manual_lookup: dict[str, list[tuple[int, int, int, int]]] | None,
+    ) -> list[tuple[DetectionResult, bool]]:
+        manual: list[tuple[DetectionResult, bool]] = []
         while manual_lookup:
             bbox = self._consume_manual_bbox(manual_lookup, candidate)
             if bbox is None:
@@ -672,7 +677,13 @@ class Orchestrator:
 
 
 
-    def _detection_mask(self, image, detection, label, manual=False):
+    def _detection_mask(
+        self,
+        image: NDArray[np.uint8],
+        detection: DetectionResult,
+        label: str,
+        manual: bool = False,
+    ) -> NDArray[np.uint8]:
         mask = detection.mask
         if mask is None or manual:
             mask = self._segmenter.segment(image, detection.bbox, label, prefer_full_box=manual)
@@ -708,7 +719,7 @@ class Orchestrator:
         image: NDArray[np.uint8],
         candidate: InterrogationCandidate,
         manual_lookup: dict[str, list[tuple[int, int, int, int]]] | None = None,
-    ):
+    ) -> DetectionResult | None:
         det, _is_manual = self._detect_candidate_ex(image, candidate, manual_lookup)
         return det
 

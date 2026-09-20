@@ -7,6 +7,7 @@ real model library.
 from __future__ import annotations
 
 import sys
+from collections.abc import Iterator
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -28,7 +29,7 @@ class TestListOllamaModels:
             def __init__(self, host: str) -> None:
                 self.host = host
 
-            def list(self):
+            def list(self) -> SimpleNamespace:
                 return SimpleNamespace(
                     models=[SimpleNamespace(model="qwen2.5vl:3b"), SimpleNamespace(model="gemma4:e4b")]
                 )
@@ -48,7 +49,7 @@ class TestListOllamaModels:
             def __init__(self, host: str) -> None:
                 pass
 
-            def list(self):
+            def list(self) -> SimpleNamespace:
                 return SimpleNamespace(models=[SimpleNamespace(model=None)])
 
         monkeypatch.setattr(ollama, "Client", FakeClient)
@@ -161,7 +162,7 @@ class TestCheckSetupOllamaBackend:
         _patch_models_dir(monkeypatch, tmp_path)
         captured = {}
 
-        def fake_list(host: str):
+        def fake_list(host: str) -> None:
             captured["host"] = host
 
         monkeypatch.setattr(bootstrap, "_list_ollama_models", fake_list)
@@ -210,7 +211,7 @@ class TestCheckSetupLlamaCppBackend:
 
         monkeypatch.setattr(LlamaCppVLMClient, "health_check", lambda self: True)
 
-        def fail(host: str):
+        def fail(host: str) -> None:
             raise AssertionError("should not query ollama for llamacpp backend")
 
         monkeypatch.setattr(bootstrap, "_list_ollama_models", fail)
@@ -252,7 +253,7 @@ class TestIsSetupComplete:
     def test_inconclusive_check_opens_setup_workflow(
         self, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
     ) -> None:
-        def broken(prefs):
+        def broken(prefs) -> None:
             raise RuntimeError("boom")
 
         monkeypatch.setattr(bootstrap, "check_setup", broken)
@@ -276,7 +277,7 @@ class TestPullOllamaModel:
             def __init__(self, host: str) -> None:
                 pass
 
-            def pull(self, model: str, stream: bool = True):
+            def pull(self, model: str, stream: bool = True) -> Iterator[SimpleNamespace]:
                 assert stream is True
                 return iter(updates)
 
@@ -300,7 +301,7 @@ class TestPullOllamaModel:
             def __init__(self, host: str) -> None:
                 pass
 
-            def pull(self, model: str, stream: bool = True):
+            def pull(self, model: str, stream: bool = True) -> Iterator[SimpleNamespace]:
                 return iter([SimpleNamespace()])
 
         monkeypatch.setattr(ollama, "Client", FakeClient)
@@ -323,7 +324,7 @@ class TestPullOllamaModel:
             def __init__(self, host: str) -> None:
                 pass
 
-            def pull(self, model: str, stream: bool = True):
+            def pull(self, model: str, stream: bool = True) -> Iterator[SimpleNamespace]:
                 return iter([SimpleNamespace(status="ok", completed=1, total=1)])
 
         monkeypatch.setattr(ollama, "Client", FakeClient)

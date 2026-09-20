@@ -4,6 +4,7 @@ import io
 import logging
 import re
 import tkinter as tk
+from types import ModuleType
 
 from PIL import Image, ImageTk
 
@@ -15,7 +16,7 @@ _cairosvg_checked = False
 logger = logging.getLogger(__name__)
 
 
-def _get_cairosvg():
+def _get_cairosvg() -> ModuleType | None:
     global _cairosvg, _cairosvg_checked
     if not _cairosvg_checked:
         _cairosvg_checked = True

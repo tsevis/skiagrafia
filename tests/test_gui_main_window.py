@@ -22,7 +22,9 @@ Never called from here:
 from __future__ import annotations
 
 import sys
+from collections.abc import Callable
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 import pytest
 
@@ -31,9 +33,14 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 import utils.preferences as prefs_mod
 from utils.bootstrap import SetupItem, SetupStatus
 
+if TYPE_CHECKING:
+    from ui.main_window import MainWindow
+    from ui.mode_switcher import ModeSwitcher
+    from ui.setup_wizard import SetupWizard
+
 
 @pytest.fixture
-def sandbox_config(tmp_path, monkeypatch):
+def sandbox_config(tmp_path, monkeypatch) -> Path:
     """Keep load_preferences away from the real config file."""
     config_dir = tmp_path / ".config" / "skiagrafia"
     config_dir.mkdir(parents=True)
@@ -43,7 +50,7 @@ def sandbox_config(tmp_path, monkeypatch):
 
 
 @pytest.fixture
-def main_window(tk_root, sandbox_config):
+def main_window(tk_root, sandbox_config) -> MainWindow:
     from ui.main_window import MainWindow
 
     window = MainWindow(tk_root)
@@ -175,7 +182,7 @@ class TestApplyPreferences:
 
 class TestModeSwitcher:
     @pytest.fixture
-    def switcher(self, tk_root):
+    def switcher(self, tk_root) -> tuple[ModeSwitcher, list[str]]:
         from ui.mode_switcher import ModeSwitcher
 
         seen: list[str] = []
@@ -245,11 +252,11 @@ def _item(
 
 
 @pytest.fixture
-def wizard_factory(tk_root, monkeypatch):
+def wizard_factory(tk_root, monkeypatch) -> Callable[[SetupStatus], SetupWizard]:
     """Build a SetupWizard over a canned checklist (no disk or network)."""
     from ui import setup_wizard as wizard_mod
 
-    def _build(status: SetupStatus):
+    def _build(status: SetupStatus) -> SetupWizard:
         monkeypatch.setattr(wizard_mod, "check_setup", lambda prefs: status)
         wizard = wizard_mod.SetupWizard(tk_root, {})
         tk_root.update()
@@ -322,7 +329,7 @@ class TestSetupWizard:
     ) -> None:
         from ui import setup_wizard as wizard_mod
 
-        def _boom(prefs):
+        def _boom(prefs) -> None:
             raise OSError("models directory unreadable")
 
         monkeypatch.setattr(wizard_mod, "check_setup", _boom)

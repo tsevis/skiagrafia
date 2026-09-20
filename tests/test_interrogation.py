@@ -305,7 +305,7 @@ class TestEscalationChain:
             def __init__(self) -> None:
                 super().__init__(host="http://raising", model="raising")
 
-            def query_vision(self, image, prompt):
+            def query_vision(self, image, prompt) -> None:
                 raise RuntimeError("network down")
 
         interrogator._clients["moondream"] = RaisingClient()
@@ -448,7 +448,7 @@ class TestReasonerRanking:
             def __init__(self) -> None:
                 super().__init__(host="http://raising", model="raising")
 
-            def query_text(self, prompt, *, num_predict=256):
+            def query_text(self, prompt, *, num_predict=256) -> None:
                 raise RuntimeError("down")
 
         interrogator._clients["qwen3.5"] = RaisingClient()
