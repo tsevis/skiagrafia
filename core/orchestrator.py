@@ -17,6 +17,7 @@ import re
 from collections.abc import Callable
 from hashlib import sha256
 from pathlib import Path
+from typing import NamedTuple, cast
 
 import cv2
 import numpy as np
@@ -36,6 +37,7 @@ from processors.mask_ops import refine_mask
 from processors.output_writer import write_svg, write_tiff
 from processors.source_image import detection_image, load_source_image
 from processors.vectorizer import assemble_svg
+from utils.array_types import as_uint8
 from utils.coord_math import tight_bbox
 from utils.security import SecurityError, safe_child_path
 
@@ -86,6 +88,22 @@ STRUCTURAL_STEPS = [
     "Structural SVG assembly & export",
 ]
 PIPELINE_STEPS = STRUCTURAL_STEPS
+
+
+class _SourceImage(NamedTuple):
+    """What loading an image produces, carried between pipeline stages.
+
+    A NamedTuple rather than four loose locals threaded through five
+    signatures: the pixels, the alpha and the ICC profile belong together,
+    and nothing downstream may replace one of them.
+    """
+
+    rgb: NDArray[np.uint8]
+    alpha: NDArray[np.uint8]
+    icc: bytes | None
+    detection: NDArray[np.uint8]
+    height: int
+    width: int
 
 
 class LayerResult(BaseModel):
@@ -216,18 +234,23 @@ def _rectangle_union_area(rectangles: list[tuple[int, int, int, int]]) -> int:
             if rectangle[0] < right and rectangle[2] > left
         )
         covered_y = 0
-        current_start: int | None = None
-        current_end: int | None = None
+        # ONE optional pair, not two optional ints. The bounds are only ever
+        # meaningful together, and as separate names nothing said so: the
+        # `start > current_end` branch is reachable only because the other
+        # name happens to have been set on the same line. A tuple makes that
+        # invariant structural instead of a convention, and each step rebinds
+        # rather than mutating.
+        current: tuple[int, int] | None = None
         for start, end in spans:
-            if current_start is None:
-                current_start, current_end = start, end
-            elif start > current_end:
-                covered_y += current_end - current_start
-                current_start, current_end = start, end
+            if current is None:
+                current = (start, end)
+            elif start > current[1]:
+                covered_y += current[1] - current[0]
+                current = (start, end)
             else:
-                current_end = max(current_end, end)
-        if current_start is not None and current_end is not None:
-            covered_y += current_end - current_start
+                current = (current[0], max(current[1], end))
+        if current is not None:
+            covered_y += current[1] - current[0]
         area += (right - left) * covered_y
     return area
 
@@ -363,50 +386,81 @@ class Orchestrator:
         confirmed_labels: list[str] | None,
         manual_detections: list[dict] | None,
     ) -> PipelineResult:
+        """The structural pipeline, as the sequence of stages it already was.
 
-        # STEP 0 — Load
+        Each stage below used to be a block inside one 220-line function,
+        separated only by a comment and sharing every local. They are the
+        same blocks in the same order, doing the same work: what changed is
+        that each one now states what it needs and what it produces, so a
+        stage can be read -- and a suspect stage stepped through -- without
+        holding the other four in your head.
+        """
+        source = self._load_source(image_path, result)
+        parents, children_by_parent = self._interrogate(source.detection, confirmed_labels)
+        manual_lookup = self._build_manual_lookup(manual_detections)
+
+        masks, accepted = self._detect_parent_layers(
+            source, parents, children_by_parent, manual_lookup, result
+        )
+        self._attach_part_layers(source, accepted, children_by_parent, masks, result)
+
+        self._report(5, "Object and part coordinates resolved")
+        all_alpha = self._write_layer_alphas(source, image_path, accepted, masks, result)
+        self._write_all_objects_alpha(source, image_path, all_alpha, result)
+        self._write_vector_output(source, image_path, masks, result)
+
+        result.warnings.extend(getattr(self._detector, "warnings", []))
+        return result
+
+    # ── Stage 0: load ───────────────────────────────────────────────────
+
+    def _load_source(self, image_path: Path, result: PipelineResult) -> _SourceImage:
+        """Read the image and record its dimensions on the result."""
         self._report(0)
         try:
             source_rgb, source_alpha, source_icc = load_source_image(image_path)
         except FileNotFoundError as exc:
             raise RuntimeError(f"Invalid image input: {exc}") from exc
-        image = detection_image(source_rgb, source_alpha)
-        h, w = image.shape[:2]
-        result.width, result.height = w, h
-        manual_lookup = self._build_manual_lookup(manual_detections)
+        detection = detection_image(source_rgb, source_alpha)
+        height, width = detection.shape[:2]
+        result.width, result.height = width, height
+        return _SourceImage(
+            rgb=source_rgb,
+            alpha=source_alpha,
+            icc=source_icc,
+            detection=detection,
+            height=height,
+            width=width,
+        )
 
-        self._report(1)
-        parents, children_by_parent = self._interrogate(image, confirmed_labels)
+    # ── Stage 2-3: parent objects ───────────────────────────────────────
+
+    def _detect_parent_layers(
+        self,
+        source: _SourceImage,
+        parents: list,
+        children_by_parent: dict[str, list[str]],
+        manual_lookup: dict,
+        result: PipelineResult,
+    ) -> tuple[dict[str, NDArray[np.uint8]], list]:
+        """Detect and segment every parent object across the whole image.
+
+        Detects all parents before any cropping, so one full-image encoding
+        is reused. Returns the layer masks and the accepted (layer, parent)
+        pairs; `children_by_parent` is updated in place when a duplicate
+        detection folds its parts into the layer already accepted.
+        """
+        image = source.detection
         masks: dict[str, NDArray[np.uint8]] = {}
         accepted = []
-
-        # Detect all parents before cropping parts: reuse one full-image encoding.
         for parent in parents:
             self._report(2, f"Finding instances: {parent.display_label}")
             detections = self._detect_instances(image, parent, manual_lookup)
             layer_labels = [parent.display_label] * len(detections)
             if is_individual_glyph_label(parent.display_label) and detections:
-                observation = self._inspect_individual_glyphs(image, parent)
-                matched = (
-                    self._match_typography_detections(image, detections, observation, parent.display_label)
-                    if observation is not None
-                    else None
+                detections, layer_labels = self._resolve_glyph_detections(
+                    image, parent, detections, layer_labels, result
                 )
-                if matched is not None:
-                    detections, layer_labels = matched
-                else:
-                    detections, rejected = self._reject_cross_glyph_composites(detections)
-                    layer_labels = [parent.display_label] * len(detections)
-                    if rejected:
-                        result.warnings.append(
-                            f"Excluded {rejected} composite typography proposal(s) for "
-                            f"'{parent.display_label}' because each overlapped multiple glyph instances."
-                        )
-                    if observation is not None:
-                        result.warnings.append(
-                            f"Typography reading for '{parent.display_label}' could not be matched "
-                            "one-to-one with local detections; retained only independently detected glyphs."
-                        )
             if not detections:
                 result.warnings.append(f"Could not locate '{parent.display_label}'. Draw a box to select it manually.")
                 continue
@@ -416,7 +470,7 @@ class Orchestrator:
                     break
                 self._report(3, f"Object mask: {parent.display_label}")
                 mask = self._detection_mask(image, detection, layer_label, is_manual)
-                mask[source_alpha == 0] = 0
+                mask[source.alpha == 0] = 0
                 # Keep small legitimate objects; reject only empty/tiny noise.
                 if np.count_nonzero(mask) < 8:
                     result.warnings.append(f"Empty or tiny mask for '{parent.display_label}'.")
@@ -435,9 +489,67 @@ class Orchestrator:
                 )
                 masks[layer_id] = refine_mask(mask, min_contour_area=0)
                 accepted.append((layer, parent))
+        return masks, accepted
 
-        # Each part is named, detected and segmented inside its parent's crop.
-        query_parts = getattr(self._interrogator, "discover_parts", None)
+    def _resolve_glyph_detections(
+        self,
+        image: NDArray[np.uint8],
+        parent,
+        detections: list,
+        layer_labels: list[str],
+        result: PipelineResult,
+    ) -> tuple[list, list[str]]:
+        """Split typography detections into individual glyphs where possible.
+
+        Falls back to rejecting composites that straddle several glyphs, and
+        records a warning for each path so the result explains what it did.
+        """
+        observation = self._inspect_individual_glyphs(image, parent)
+        matched = (
+            self._match_typography_detections(image, detections, observation, parent.display_label)
+            if observation is not None
+            else None
+        )
+        if matched is not None:
+            return matched
+        detections, rejected = self._reject_cross_glyph_composites(detections)
+        layer_labels = [parent.display_label] * len(detections)
+        if rejected:
+            result.warnings.append(
+                f"Excluded {rejected} composite typography proposal(s) for "
+                f"'{parent.display_label}' because each overlapped multiple glyph instances."
+            )
+        if observation is not None:
+            result.warnings.append(
+                f"Typography reading for '{parent.display_label}' could not be matched "
+                "one-to-one with local detections; retained only independently detected glyphs."
+            )
+        return detections, layer_labels
+
+    # ── Stage 4: parts, inside each parent's crop ───────────────────────
+
+    def _attach_part_layers(
+        self,
+        source: _SourceImage,
+        accepted: list,
+        children_by_parent: dict[str, list[str]],
+        masks: dict[str, NDArray[np.uint8]],
+        result: PipelineResult,
+    ) -> None:
+        """Name, detect and segment each part inside its parent's crop.
+
+        Appends the parent layer and then its child layers to `result`, and
+        adds each child's mask to `masks`, in the order the original single
+        function produced them.
+        """
+        image = source.detection
+        # getattr on an optional capability yields `object`, so the list it
+        # returns was not iterable as far as a checker could tell. The lookup
+        # stays dynamic -- only its shape is now declared.
+        query_parts = cast(
+            "Callable[..., list[str]] | None",
+            getattr(self._interrogator, "discover_parts", None),
+        )
         part_limit = getattr(self._interrogator, "part_query_limit", 0)
         for parent_index, (layer, parent) in enumerate(accepted):
             result.layers.append(layer)
@@ -455,19 +567,10 @@ class Orchestrator:
                     if detection.source == "mlx-sam3" and detection.confidence < MIN_SAM3_PART_SCORE:
                         logger.info("Excluded tentative part %s (SAM 3 score %.3f)", part, detection.confidence)
                         continue
-                    local = self._detection_mask(crop, detection, part)
-                    mask = np.zeros((h, w), dtype=np.uint8)
-                    mask[dy:dy + crop.shape[0], dx:dx + crop.shape[1]] = local
-                    area = np.count_nonzero(mask)
-                    if area < 8:
-                        continue
-                    intersection = cv2.bitwise_and(mask, parent_mask)
-                    if np.count_nonzero(intersection) / area < 0.90:
-                        continue
-                    mask = intersection
-                    if _mask_iou(mask, parent_mask) > MAX_CHILD_PARENT_IOU:
-                        continue
-                    if any(_mask_iou(mask, other) > MAX_CHILD_CHILD_IOU for other in child_masks):
+                    mask = self._contained_child_mask(
+                        source, crop, (dx, dy), detection, part, parent_mask, child_masks
+                    )
+                    if mask is None:
                         continue
                     child_masks.append(mask)
                     child_id = f"{layer.layer_id}-part-{len(child_masks):03d}"
@@ -479,74 +582,160 @@ class Orchestrator:
                         confidence=detection.confidence, source=detection.source,
                     ))
 
-        self._report(5, "Object and part coordinates resolved")
-        alphas = {}
-        if "bitmap" in self._output_mode:
-            self._report(6)
-            for layer in result.layers:
-                mask = masks[layer.layer_id]
-                try:
-                    alpha = mask.copy() if self._quality == "fast" else self._alpha_refiner.predict(image, mask)
-                except (OSError, RuntimeError, ValueError) as exc:
-                    raise RuntimeError(f"Alpha refinement failed for '{layer.label}'.") from exc
-                if alpha.shape != image.shape[:2]:
-                    raise RuntimeError(f"Alpha refinement failed for '{layer.label}': invalid dimensions.")
-                alpha = np.minimum(alpha, source_alpha)
-                if layer.parent_id:
-                    alpha = np.minimum(alpha, alphas[layer.parent_id])
-                alphas[layer.layer_id] = alpha
-                layer.alpha = alpha
-                path = self._output_path(f"{self._image_token(image_path)}_{layer.layer_id}.tiff")
-                try:
-                    write_tiff(source_rgb, path, alpha, icc_profile=source_icc)
-                except (OSError, RuntimeError, ValueError, SecurityError) as exc:
-                    raise RuntimeError(f"TIFF export failed for '{layer.label}'.") from exc
-                layer.alpha_path = str(path)
-                result.tiff_files.append(str(path))
-            # Bodies use subtraction of the actual child mattes, not a second
-            # independent matting pass that could grow over the child again.
-            for layer, _ in accepted:
-                children = [c for c in result.layers if c.parent_id == layer.layer_id]
-                if children:
-                    body = body_alpha(alphas[layer.layer_id], [alphas[c.layer_id] for c in children])
-                    path = self._output_path(f"{self._image_token(image_path)}_{layer.layer_id}-body.tiff")
-                    try:
-                        write_tiff(source_rgb, path, body, icc_profile=source_icc)
-                    except (OSError, RuntimeError, ValueError, SecurityError) as exc:
-                        raise RuntimeError(f"TIFF body export failed for '{layer.label}'.") from exc
-                    result.tiff_files.append(str(path))
-            all_alpha = all_objects_alpha(list(alphas.values()), (h, w))
-        else:
-            # The all-objects sidecar is intentionally present even for a
-            # vector-only run.  It gives every processed image one complete
-            # foreground asset, while per-layer TIFFs remain opt-in.
-            self._report(6, "Creating all-objects alpha sidecar")
-            all_mask = all_objects_alpha(list(masks.values()), (h, w))
-            if result.layers and self._quality != "fast":
-                try:
-                    all_alpha = self._alpha_refiner.predict(image, all_mask)
-                except (OSError, RuntimeError, ValueError) as exc:
-                    raise RuntimeError("All-objects alpha refinement failed.") from exc
-                if all_alpha.shape != image.shape[:2]:
-                    raise RuntimeError("All-objects alpha refinement failed: invalid dimensions.")
-            else:
-                all_alpha = all_mask
-            all_alpha = np.minimum(all_alpha, source_alpha)
+    # ── Stage 6: mattes ─────────────────────────────────────────────────
 
-        # Always export one complete foreground asset.  With no accepted
-        # layers this is an intentionally transparent TIFF: it is a truthful,
-        # predictable result rather than a full-frame background fallback.
+    def _contained_child_mask(
+        self,
+        source: _SourceImage,
+        crop: NDArray[np.uint8],
+        offset: tuple[int, int],
+        detection,
+        part: str,
+        parent_mask: NDArray[np.uint8],
+        child_masks: list[NDArray[np.uint8]],
+    ) -> NDArray[np.uint8] | None:
+        """A part's mask in full-image coordinates, or None if it is rejected.
+
+        Four independent reasons to reject, previously four bare `continue`
+        statements inside a doubly-nested loop, where the condition that
+        fired was not visible from the loop header:
+
+        - the mask is empty or tiny;
+        - less than 90% of it falls inside its parent;
+        - it covers so much of the parent that it IS the parent again;
+        - it duplicates a sibling already accepted.
+        """
+        dx, dy = offset
+        local = self._detection_mask(crop, detection, part)
+        mask = np.zeros((source.height, source.width), dtype=np.uint8)
+        mask[dy:dy + crop.shape[0], dx:dx + crop.shape[1]] = local
+        area = np.count_nonzero(mask)
+        if area < 8:
+            return None
+        intersection = as_uint8(cv2.bitwise_and(mask, parent_mask))
+        if np.count_nonzero(intersection) / area < 0.90:
+            return None
+        mask = intersection
+        if _mask_iou(mask, parent_mask) > MAX_CHILD_PARENT_IOU:
+            return None
+        if any(_mask_iou(mask, other) > MAX_CHILD_CHILD_IOU for other in child_masks):
+            return None
+        return mask
+
+    def _write_layer_alphas(
+        self,
+        source: _SourceImage,
+        image_path: Path,
+        accepted: list,
+        masks: dict[str, NDArray[np.uint8]],
+        result: PipelineResult,
+    ) -> NDArray[np.uint8]:
+        """Produce the all-objects alpha, exporting per-layer TIFFs if asked.
+
+        In bitmap mode every layer gets its own matte and TIFF, and a body
+        TIFF is written for each parent that has children. Otherwise only the
+        all-objects sidecar is produced. Returns the all-objects alpha.
+        """
+        image = source.detection
+        if "bitmap" not in self._output_mode:
+            return self._all_objects_only_alpha(source, masks, result)
+
+        self._report(6)
+        alphas = {}
+        for layer in result.layers:
+            mask = masks[layer.layer_id]
+            try:
+                alpha = mask.copy() if self._quality == "fast" else self._alpha_refiner.predict(image, mask)
+            except (OSError, RuntimeError, ValueError) as exc:
+                raise RuntimeError(f"Alpha refinement failed for '{layer.label}'.") from exc
+            if alpha.shape != image.shape[:2]:
+                raise RuntimeError(f"Alpha refinement failed for '{layer.label}': invalid dimensions.")
+            alpha = np.minimum(alpha, source.alpha)
+            if layer.parent_id:
+                alpha = np.minimum(alpha, alphas[layer.parent_id])
+            alphas[layer.layer_id] = alpha
+            layer.alpha = alpha
+            path = self._output_path(f"{self._image_token(image_path)}_{layer.layer_id}.tiff")
+            try:
+                write_tiff(source.rgb, path, alpha, icc_profile=source.icc)
+            except (OSError, RuntimeError, ValueError, SecurityError) as exc:
+                raise RuntimeError(f"TIFF export failed for '{layer.label}'.") from exc
+            layer.alpha_path = str(path)
+            result.tiff_files.append(str(path))
+        # Bodies use subtraction of the actual child mattes, not a second
+        # independent matting pass that could grow over the child again.
+        for layer, _ in accepted:
+            children = [c for c in result.layers if c.parent_id == layer.layer_id]
+            if children:
+                body = body_alpha(alphas[layer.layer_id], [alphas[c.layer_id] for c in children])
+                path = self._output_path(f"{self._image_token(image_path)}_{layer.layer_id}-body.tiff")
+                try:
+                    write_tiff(source.rgb, path, body, icc_profile=source.icc)
+                except (OSError, RuntimeError, ValueError, SecurityError) as exc:
+                    raise RuntimeError(f"TIFF body export failed for '{layer.label}'.") from exc
+                result.tiff_files.append(str(path))
+        return all_objects_alpha(list(alphas.values()), (source.height, source.width))
+
+    def _all_objects_only_alpha(
+        self,
+        source: _SourceImage,
+        masks: dict[str, NDArray[np.uint8]],
+        result: PipelineResult,
+    ) -> NDArray[np.uint8]:
+        """The all-objects alpha for a run that exports no per-layer TIFFs.
+
+        The sidecar is intentionally present even for a vector-only run: it
+        gives every processed image one complete foreground asset, while
+        per-layer TIFFs remain opt-in.
+        """
+        image = source.detection
+        self._report(6, "Creating all-objects alpha sidecar")
+        all_mask = all_objects_alpha(list(masks.values()), (source.height, source.width))
+        if result.layers and self._quality != "fast":
+            try:
+                all_alpha = self._alpha_refiner.predict(image, all_mask)
+            except (OSError, RuntimeError, ValueError) as exc:
+                raise RuntimeError("All-objects alpha refinement failed.") from exc
+            if all_alpha.shape != image.shape[:2]:
+                raise RuntimeError("All-objects alpha refinement failed: invalid dimensions.")
+        else:
+            all_alpha = all_mask
+        return np.minimum(all_alpha, source.alpha)
+
+    def _write_all_objects_alpha(
+        self,
+        source: _SourceImage,
+        image_path: Path,
+        all_alpha: NDArray[np.uint8],
+        result: PipelineResult,
+    ) -> None:
+        """Always export one complete foreground asset.
+
+        With no accepted layers this is an intentionally transparent TIFF: a
+        truthful, predictable result rather than a full-frame background
+        fallback.
+        """
         all_objects_path = self._output_path(
             f"{self._image_token(image_path)}_all-objects.tiff"
         )
         try:
-            write_tiff(source_rgb, all_objects_path, all_alpha, icc_profile=source_icc)
+            write_tiff(source.rgb, all_objects_path, all_alpha, icc_profile=source.icc)
         except (OSError, RuntimeError, ValueError, SecurityError) as exc:
             raise RuntimeError("All-objects TIFF export failed.") from exc
         result.all_objects_tiff_path = str(all_objects_path)
         result.tiff_files.append(str(all_objects_path))
         result.tiff_path = str(self._output_dir)
 
+    # ── Stage 7-9: vector output ────────────────────────────────────────
+
+    def _write_vector_output(
+        self,
+        source: _SourceImage,
+        image_path: Path,
+        masks: dict[str, NDArray[np.uint8]],
+        result: PipelineResult,
+    ) -> None:
+        """Trace every layer mask and assemble the combined SVG."""
         self._report(7, "Preserving holes and fine mask details")
         self._report(8)
         svg_layers = []
@@ -562,14 +751,12 @@ class Orchestrator:
         if svg_layers:
             path = self._output_path(f"{self._image_token(image_path)}.svg")
             try:
-                write_svg(assemble_svg(w, h, svg_layers), path)
+                write_svg(assemble_svg(source.width, source.height, svg_layers), path)
             except (OSError, RuntimeError, ValueError, SecurityError) as exc:
                 raise RuntimeError("SVG export failed integrity validation.") from exc
             result.svg_path = str(path)
         else:
             result.warnings.append("No usable object masks were found. Review the prompt or draw a box.")
-        result.warnings.extend(getattr(self._detector, "warnings", []))
-        return result
 
     def _output_path(self, filename: str) -> Path:
         """Create a flat output path under the configured, canonical root."""
@@ -600,9 +787,15 @@ class Orchestrator:
                 manual.append((DetectionResult(label=candidate.display_label, bbox=bbox, confidence=1.0, source="manual"), True))
         if manual:
             return manual
-        detect_many = getattr(self._detector, "detect_instances", None)
+        detect_many = cast(
+            "Callable[..., list[DetectionResult]] | None",
+            getattr(self._detector, "detect_instances", None),
+        )
         if candidate.role == "child" and self._quality != "detailed":
-            detect_many = getattr(self._detector, "detect_part_instances", detect_many)
+            detect_many = cast(
+                "Callable[..., list[DetectionResult]] | None",
+                getattr(self._detector, "detect_part_instances", detect_many),
+            )
         for phrase in candidate.detector_phrases or [candidate.display_label]:
             if callable(detect_many):
                 detections = detect_many(image, phrase, self._box_threshold, self._text_threshold)

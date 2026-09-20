@@ -17,6 +17,7 @@ from pydantic import BaseModel, ConfigDict
 if TYPE_CHECKING:
     from core.interrogation import InterrogationResult
     from core.knowledge import KnowledgePack
+    from models.grounded_sam import DetectionResult
 
 
 @runtime_checkable
@@ -51,8 +52,14 @@ class Detector(Protocol):
         label: str,
         box_threshold: float = 0.35,
         text_threshold: float = 0.25,
-    ) -> object | None:
-        """Return a DetectionResult or None."""
+    ) -> DetectionResult | None:
+        """Return a DetectionResult or None.
+
+        `from __future__ import annotations` makes this a string at runtime,
+        so naming the concrete type costs no import and creates no cycle --
+        which is what `object` was standing in for. Callers can now use the
+        result instead of re-describing it at every call site.
+        """
         ...
 
 
