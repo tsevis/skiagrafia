@@ -36,7 +36,12 @@ from core.pipeline_geometry import (
     mask_iou,
     safe_filename_label,
 )
-from core.pipeline_results import LayerResult, PipelineResult, _SourceImage
+from core.pipeline_results import (
+    LayerResult,
+    PipelineResult,
+    _SourceImage,
+    collapse_repeats,
+)
 from core.typography_matching import resolve_glyph_detections
 from models.grounded_sam import DetectionResult
 from processors.mask_ops import refine_mask
@@ -225,6 +230,9 @@ class Orchestrator:
         self._write_vector_output(source, image_path, masks, result)
 
         result.warnings.extend(getattr(self._detector, "warnings", []))
+        # Collapsed once, at the end, rather than at each append: the stages
+        # that repeat a warning do not know how many times they will.
+        result.warnings = collapse_repeats(result.warnings)
         return result
 
     # ── Stage 0: load ───────────────────────────────────────────────────
