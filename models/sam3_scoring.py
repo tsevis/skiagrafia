@@ -105,6 +105,13 @@ def select_queries(
     empty = Selection(indices=[], scores=[], rescued=False)
     if query_probs.size == 0:
         return empty
+    # Checked for the same reason `presence` is: these arrive from the model.
+    # A NaN passes neither threshold comparison, so the ordinary rule keeps
+    # nothing and the rescue below then reads it as the best query and returns
+    # a detection whose confidence is NaN -- which every later comparison
+    # answers False without saying why.
+    if not np.all(np.isfinite(query_probs)) or query_probs.min() < 0.0 or query_probs.max() > 1.0:
+        raise ValueError("query_probs must all be probabilities in 0..1")
 
     scores = query_probs * presence
     order = np.argsort(scores)[::-1]
