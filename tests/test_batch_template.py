@@ -7,6 +7,7 @@ never touched.
 """
 from __future__ import annotations
 
+import json
 import sys
 from pathlib import Path
 from typing import Any
@@ -26,10 +27,8 @@ def _make_template(name: str = "My Template", **overrides: Any) -> BatchTemplate
         "confirmed_labels": ["cross", "chalice"],
         "confirmed_children": {"chalice": ["cup", "stem"]},
         "output_mode": "vector+bitmap",
-        "recursion_depth": 2,
         "corner_threshold": 60,
         "speckle": 8,
-        "smoothing": 4,
         "length_threshold": 4.0,
         "vtracer_quality": "balanced",
     }
@@ -257,3 +256,33 @@ class TestSaveDoesNotMutate:
         assert template.created_at == ""
         written = BatchTemplate.load(path)
         assert written.created_at != ""
+
+
+def test_a_template_saved_before_the_inert_fields_were_removed_still_loads(tmp_path):
+    """Templates already on disk carry recursion_depth and smoothing, which the
+    pipeline never read. Removing the fields must not make a person's saved
+    configurations unreadable."""
+    saved = {
+        "name": "Older template",
+        "created_at": "2026-01-01T00:00:00+00:00",
+        "source_image": "/tmp/product.png",
+        "confirmed_labels": ["product"],
+        "confirmed_children": {},
+        "output_mode": "vector+bitmap",
+        "recursion_depth": 3,
+        "corner_threshold": 60,
+        "speckle": 8,
+        "smoothing": 4,
+        "length_threshold": 4.0,
+        "vtracer_quality": "balanced",
+    }
+    path = tmp_path / "older.json"
+    path.write_text(json.dumps(saved), encoding="utf-8")
+
+    template = BatchTemplate.model_validate_json(path.read_text(encoding="utf-8"))
+
+    assert template.name == "Older template"
+    assert template.confirmed_labels == ["product"]
+    assert template.vtracer_quality == "balanced"
+    assert not hasattr(template, "recursion_depth")
+    assert not hasattr(template, "smoothing")

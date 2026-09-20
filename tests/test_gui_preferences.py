@@ -270,10 +270,8 @@ class TestTemplatesTab:
             confirmed_labels=["chalice"],
             confirmed_children={"chalice": ["stem"]},
             output_mode="vector+bitmap",
-            recursion_depth=2,
             corner_threshold=60,
             speckle=8,
-            smoothing=5,
             length_threshold=4.0,
             vtracer_quality="balanced",
         ).save()

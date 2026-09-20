@@ -254,20 +254,16 @@ class LeftPanel(LabelsSectionMixin):
         ).pack(anchor=tk.W, pady=(0, 4))
 
         # Sliders
-        self._depth_var = tk.IntVar(value=2)
         self._corner_var = tk.IntVar(value=60)
         self._speckle_var = tk.IntVar(value=8)
-        self._smoothing_var = tk.IntVar(value=5)
         self._length_var = tk.DoubleVar(value=4.0)
 
         # No is_float column: it only ever repeated whether the variable is a
         # DoubleVar, and two places saying the same thing is one place to get
         # it wrong. _build_parameter_row reads it off the variable itself.
         sliders = [
-            ("Depth", self._depth_var, 1, 3),
             ("Corner thr.", self._corner_var, 30, 90),
             ("Speckle", self._speckle_var, 2, 20),
-            ("Smoothing", self._smoothing_var, 1, 10),
             ("Length thr.", self._length_var, 2.0, 8.0),
         ]
 
@@ -429,10 +425,8 @@ class LeftPanel(LabelsSectionMixin):
         return {
             "output_mode": self._get_output_mode(),
             "structural_svg": self._mode_structural_svg_var.get(),
-            "recursion_depth": self._depth_var.get(),
             "corner_threshold": self._corner_var.get(),
             "speckle": self._speckle_var.get(),
-            "smoothing": self._smoothing_var.get(),
             "length_threshold": self._length_var.get(),
         }
 

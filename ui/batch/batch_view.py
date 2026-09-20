@@ -248,7 +248,7 @@ class BatchView:
             guide_toml=guide_toml,
             output_settings={
                 key: config.get(key)
-                for key in ("output_mode", "recursion_depth", "vtracer_quality")
+                for key in ("output_mode", "vtracer_quality")
             },
         )
         frozen_config = dict(config)
@@ -395,7 +395,6 @@ class BatchView:
             output_dir=self.run_settings.output_directory,
             confirmed_labels=list(self.confirmed_labels),
             output_mode=str(config.get("output_mode", "vector+bitmap")),
-            recursion_depth=int(config.get("recursion_depth", 2)),
             corner_threshold=int(prefs.get("vtracer_corner_threshold", 60)),
             speckle=int(prefs.get("vtracer_speckle", 8)),
             length_threshold=float(prefs.get("vtracer_length_threshold", 4.0)),

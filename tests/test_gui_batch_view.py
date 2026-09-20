@@ -796,7 +796,6 @@ class TestStepConfigure:
         config = batch_view._step_views[1].get_config()
         assert {
             "output_mode",
-            "recursion_depth",
             "vtracer_quality",
             "interrogation_profile",
             "fallback_mode",
@@ -842,8 +841,8 @@ class TestStepConfigure:
 
         template = BatchTemplate(
             name="Apple", source_image="", confirmed_labels=[], confirmed_children={},
-            output_mode="vector", recursion_depth=2, corner_threshold=60,
-            speckle=8, smoothing=5, length_threshold=4.0, vtracer_quality="balanced",
+            output_mode="vector", corner_threshold=60,
+            speckle=8, length_threshold=4.0, vtracer_quality="balanced",
             selection_request="Template request",
         )
         batch_view.load_template(template)
@@ -860,7 +859,6 @@ class TestStepConfigure:
                 guide_name="Apple — The First 50 Years",
                 interrogation_settings={
                     "output_mode": "vector",
-                    "recursion_depth": 3,
                     "vtracer_quality": "maximum",
                 },
             )
@@ -870,7 +868,6 @@ class TestStepConfigure:
         restored = batch_view._step_views[1]
         assert restored.get_selection_request() == "Restored run request"
         assert restored.get_config()["output_mode"] == "vector"
-        assert restored.get_config()["recursion_depth"] == 3
         assert restored.get_config()["vtracer_quality"] == "maximum"
 
     def test_output_mode_falls_back_to_vector(self, batch_view, tk_root) -> None:

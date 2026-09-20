@@ -33,10 +33,8 @@ class BatchConfig(BaseModel):
     confirmed_labels: list[str]
     confirmed_children: dict[str, list[str]] = {}
     output_mode: str = "vector+bitmap"
-    recursion_depth: int = 2
     corner_threshold: int = 60
     speckle: int = 8
-    smoothing: int = 5
     length_threshold: float = 4.0
     vtracer_quality: str = "balanced"
     vlm_backend: str = "ollama"  # "ollama" | "llamacpp"

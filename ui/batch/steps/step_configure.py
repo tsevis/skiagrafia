@@ -11,7 +11,6 @@ from core.knowledge import (
     build_knowledge_pack,
     default_guide_markdown,
 )
-from ui.theme import is_macos
 
 if TYPE_CHECKING:
     from core.batch_template import BatchTemplate
@@ -22,7 +21,7 @@ logger = logging.getLogger(__name__)
 
 
 class StepConfigure:
-    """Step 2 — Configure: output mode cards, recursion depth, VTracer quality."""
+    """Step 2 — Configure: output mode cards and VTracer quality."""
 
     def __init__(self, parent: tk.Widget, view: BatchView) -> None:
         self._view = view
@@ -77,24 +76,6 @@ class StepConfigure:
                 anchor=tk.W, pady=(2, 0)
             )
 
-        # Recursion depth
-        depth_frame = ttk.Frame(self.frame)
-        depth_frame.pack(fill=tk.X, pady=4)
-        ttk.Label(depth_frame, text="Recursion Depth").pack(side=tk.LEFT)
-        self._depth_var = tk.IntVar(value=2)
-        depth_value = ttk.Label(
-            depth_frame,
-            text="2",
-            font=("Menlo", 10) if is_macos() else ("Consolas", 9),
-        )
-        depth_value.pack(side=tk.RIGHT)
-        ttk.Scale(
-            depth_frame,
-            variable=self._depth_var,
-            from_=1,
-            to=3,
-            command=lambda v: depth_value.config(text=str(int(float(v)))),
-        ).pack(side=tk.RIGHT, fill=tk.X, expand=True, padx=8)
 
         # VTracer quality
         quality_frame = ttk.Frame(self.frame)
@@ -128,9 +109,6 @@ class StepConfigure:
         if mode:
             for key, var in self._mode_vars.items():
                 var.set(key in mode)
-        depth = config.get("recursion_depth")
-        if isinstance(depth, (int, float, str)):
-            self._depth_var.set(int(depth))
         if config.get("vtracer_quality"):
             self._quality_var.set(str(config["vtracer_quality"]))
         if config.get("fallback_mode"):
@@ -152,8 +130,6 @@ class StepConfigure:
             mode = template.output_mode
             for key, var in self._mode_vars.items():
                 var.set(key in mode)
-        if hasattr(template, "recursion_depth"):
-            self._depth_var.set(template.recursion_depth)
         if hasattr(template, "vtracer_quality"):
             self._quality_var.set(template.vtracer_quality)
         if hasattr(template, "guide_path") and template.guide_path:
@@ -573,7 +549,6 @@ class StepConfigure:
         config = {
             "selection_request": self.get_selection_request(),
             "output_mode": output_mode,
-            "recursion_depth": self._depth_var.get(),
             "vtracer_quality": self._quality_var.get(),
             "guide_path": self._view.knowledge_pack_path if self._guide_mode_var.get() else None,
             "guide_mode": self._guide_mode_var.get(),
