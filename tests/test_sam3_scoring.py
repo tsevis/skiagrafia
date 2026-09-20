@@ -51,3 +51,24 @@ def test_a_part_label_keeps_the_presence_gate() -> None:
 def test_the_rescue_never_displaces_a_healthy_presence_result() -> None:
     probs = np.array([0.40, 0.95], dtype=np.float32)
     assert select_queries(probs, presence=0.95, policy=_policy()).indices == [1, 0]
+
+
+def test_a_non_probability_query_score_is_rejected_rather_than_rescued() -> None:
+    """`presence` is validated here; `query_probs` was not.
+
+    A NaN passes neither threshold test, so the ordinary rule keeps nothing
+    and the rescue then reads it as the best query and returns it -- a
+    detection whose reported confidence is NaN, which every later comparison
+    silently answers False.
+    """
+    for bad in (
+        np.array([0.1, np.nan, 0.3], dtype=np.float32),
+        np.array([0.1, np.inf], dtype=np.float32),
+        np.array([1.5, 0.3], dtype=np.float32),
+        np.array([-0.2, 0.3], dtype=np.float32),
+    ):
+        try:
+            select_queries(bad, presence=0.5, policy=_policy())
+        except ValueError:
+            continue
+        raise AssertionError(f"accepted non-probability query scores: {bad}")
