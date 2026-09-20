@@ -21,7 +21,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from core.contracts import AlphaRefiner, CapabilitySet, Vectorizer
 from core.interrogation import InterrogationCandidate, InterrogationResult
-from core.typography_labels import TypographyObservation
+from core.typography_labels import GlyphInspection, TypographyObservation
 from models.grounded_sam import DetectionResult
 
 IMG_SIZE = 64
@@ -50,8 +50,10 @@ class FakeInterrogator:
             children_by_parent=self._children,
         )
 
-    def inspect_individual_glyphs(self, image, candidate) -> TypographyObservation | None:
-        return self._typography_observation
+    def inspect_individual_glyphs(self, image, candidate) -> GlyphInspection:
+        if self._typography_observation is None:
+            return GlyphInspection(unavailable_reason="no reading configured")
+        return GlyphInspection(observation=self._typography_observation)
 
 
 class FakeDetector:

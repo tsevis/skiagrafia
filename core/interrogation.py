@@ -12,7 +12,7 @@ from pydantic import BaseModel, Field
 
 from core.knowledge import KnowledgePack, ObjectKnowledge
 from core.typography_labels import (
-    TypographyObservation,
+    GlyphInspection,
     is_individual_glyph_label,
     is_typography_label,
     parse_typography_observation,
@@ -26,6 +26,17 @@ from models.vlm_client import (
 )
 
 logger = logging.getLogger(__name__)
+
+# MAX_TOKENS is sized for a short list answer and is far too small for one
+# JSON object per visible glyph. Measured with Qwen3-VL-8B-Instruct on
+# synthetic grids: 8 glyphs answered in 325 characters and fitted inside the
+# 200-token default, while 12 glyphs was truncated. At 800 tokens the same
+# model returned 12, 16 and 24 glyphs complete, the largest of those in 939
+# characters. This does not rescue a dense collage: on a 600x450 crop of
+# Pete1_6000_on_grey.jpg the model degenerates into repeating one word with
+# out-of-range coordinates and never closes the JSON, at any budget tried up
+# to 4000 tokens.
+GLYPH_READING_MAX_TOKENS = 800
 
 _VAGUE_TERMS = {
     "object",
@@ -545,16 +556,20 @@ class GuidedInterrogator:
         self,
         image: NDArray[np.uint8],
         candidate: InterrogationCandidate,
-    ) -> TypographyObservation | None:
+    ) -> GlyphInspection:
         """Return a local-VLM reading usable to validate glyph proposals.
 
         This applies only to an explicit individual-glyph category such as
         ``letters`` or ``digits``.  It asks for approximate, normalized boxes
         so the orchestrator can require agreement with independently detected
         boxes.  The VLM result never becomes a mask or an output box itself.
+
+        Returns a GlyphInspection rather than an observation, so a caller can
+        tell "not a glyph label" from "asked, and got nothing usable" and warn
+        about the second.
         """
         if not is_individual_glyph_label(candidate.display_label):
-            return None
+            return GlyphInspection()
         prompt = (
             "Inspect the image as individual typography. Return ONLY JSON in this exact shape: "
             '{"elements":[{"glyph":"visible character","bbox":[x0,y0,x1,y1]}]}. '
@@ -566,11 +581,15 @@ class GuidedInterrogator:
         try:
             client = self._get_client(self._settings.primary_vlm)
             observation = parse_typography_observation(
-                client.query_vision(self._prepare_image(image), prompt)
+                client.query_vision(
+                    self._prepare_image(image),
+                    prompt,
+                    num_predict=GLYPH_READING_MAX_TOKENS,
+                )
             )
-        except (OSError, TimeoutError, ConnectionError, RuntimeError, VLMResponseError):
+        except (OSError, TimeoutError, ConnectionError, RuntimeError, VLMResponseError) as exc:
             logger.info("Typography validation unavailable for '%s'", candidate.display_label, exc_info=True)
-            return None
+            return GlyphInspection(unavailable_reason=str(exc) or type(exc).__name__)
         if observation:
             logger.info(
                 "%s typography observation for '%s': %s",
@@ -578,9 +597,11 @@ class GuidedInterrogator:
                 candidate.display_label,
                 observation.glyphs,
             )
-        else:
-            logger.warning("Rejected malformed typography observation for '%s'", candidate.display_label)
-        return observation
+            return GlyphInspection(observation=observation)
+        logger.warning("Rejected malformed typography observation for '%s'", candidate.display_label)
+        return GlyphInspection(
+            unavailable_reason="the model's reading could not be read as individual glyphs"
+        )
 
     def _children_map(
         self,

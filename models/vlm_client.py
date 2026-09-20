@@ -186,9 +186,18 @@ class BaseVLMClient:
         pil_img.save(buf, format="PNG")
         return base64.b64encode(buf.getvalue()).decode("utf-8")
 
-    def query_vision(self, image: NDArray[np.uint8], prompt: str) -> str:
-        """Send image + prompt to the VLM, return text response."""
-        return self._chat(prompt, images_b64=[self._encode_image(image)])
+    def query_vision(
+        self, image: NDArray[np.uint8], prompt: str, *, num_predict: int = MAX_TOKENS
+    ) -> str:
+        """Send image + prompt to the VLM, return text response.
+
+        `num_predict` is exposed because MAX_TOKENS is sized for a short list
+        answer.  A caller asking for one JSON object per visible item needs a
+        larger budget or its reply is truncated and thrown away.
+        """
+        return self._chat(
+            prompt, images_b64=[self._encode_image(image)], num_predict=num_predict
+        )
 
     def query_text(self, prompt: str, *, num_predict: int = 256) -> str:
         """Send a text-only prompt to the model."""

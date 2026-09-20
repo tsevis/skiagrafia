@@ -95,6 +95,60 @@ class TestProcessIndividualGlyphs:
         assert all(layer.label == "letters" for layer in result.layers)
         assert any("Excluded 1 composite typography proposal" in warning for warning in result.warnings)
 
+    def test_an_unavailable_glyph_reading_is_reported_to_the_operator(
+        self, tmp_path: Path
+    ) -> None:
+        """A skipped validation must be visible, not inferred from its absence.
+
+        The composite warning names what was excluded; it says nothing about
+        the one-to-one glyph matching that never ran, which is the check this
+        corpus actually depends on.
+        """
+        image_path = _write_image(tmp_path / "glyphs.png")
+        caps = _make_caps(
+            FakeInterrogator([_candidate("letters")]),
+            MultiInstanceDetector(self._glyph_detections()),
+            FakeSegmenter(),
+        )
+        result = Orchestrator(
+            capabilities=caps, output_dir=tmp_path / "out", quality="fast"
+        ).process(image_path)
+
+        assert result.error is None
+        assert any(
+            "could not be validated" in warning and "letters" in warning
+            for warning in result.warnings
+        ), result.warnings
+
+    def test_a_reading_that_arrived_but_did_not_match_is_not_reported_as_skipped(
+        self, tmp_path: Path
+    ) -> None:
+        """A reading that arrived and disagreed is a different outcome.
+
+        It already has its own warning. Reporting it as unavailable as well
+        tells the operator the check did not run when in fact it ran and
+        declined, and prints an empty reason for it.
+        """
+        image_path = _write_image(tmp_path / "glyphs.png")
+        unmatchable = TypographyObservation(
+            elements=(
+                TypographyElement("P", (0, 0, 60, 60)),
+                TypographyElement("E", (900, 900, 1000, 1000)),
+            )
+        )
+        caps = _make_caps(
+            FakeInterrogator([_candidate("letters")], typography_observation=unmatchable),
+            MultiInstanceDetector(self._glyph_detections()),
+            FakeSegmenter(),
+        )
+        result = Orchestrator(
+            capabilities=caps, output_dir=tmp_path / "out", quality="fast"
+        ).process(image_path)
+
+        assert result.error is None
+        assert any("could not be matched" in w for w in result.warnings), result.warnings
+        assert not any("could not be validated" in w for w in result.warnings), result.warnings
+
     def test_confirmed_selections_are_applied_before_confirmed_labels(
         self, tmp_path: Path
     ) -> None:
