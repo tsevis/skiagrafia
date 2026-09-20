@@ -9,10 +9,17 @@ smoke set remains available for fast local feedback.
 from __future__ import annotations
 
 import contextlib
+import tkinter as tk
 from pathlib import Path
-from typing import Protocol
+from types import SimpleNamespace
+from typing import TYPE_CHECKING, Protocol, cast
 
+import numpy as np
 import pytest
+from PIL import Image
+
+if TYPE_CHECKING:
+    from ui.main_window import MainWindow
 
 # Any test requesting one of these fixtures builds a real window, so it is
 # integration coverage unless an author deliberately marks it as fast `gui`.
@@ -136,3 +143,52 @@ def single_view(tk_root, stub_app):
     view.frame.pack(fill=tk.BOTH, expand=True)
     tk_root.update()  # realise geometry so the canvas has a real size
     return view
+
+
+# ── Batch wizard fixtures ───────────────────────────────────────────────────
+# Here rather than in a module the test files import, because a fixture is
+# requested by NAME: an imported one is flagged as unused, and a test
+# parameter of the same name is flagged as redefining it. conftest is how
+# pytest shares a fixture, and it is where tk_root already lives.
+
+
+def _write_image(path: Path) -> Path:
+    """A tiny valid image on disk, for the steps that scan a folder."""
+    Image.fromarray(np.zeros((16, 16, 3), dtype=np.uint8)).save(path)
+    return path
+
+
+@pytest.fixture
+def batch_view(tk_root, tmp_path):
+    """A real BatchView with all filesystem access sandboxed to tmp_path."""
+    from tkinter import ttk
+
+    from ui.batch.batch_view import BatchView
+
+    output_dir = tmp_path / "out"
+    output_dir.mkdir()
+    app = SimpleNamespace(
+        root=tk_root,
+        prefs={"output_directory": str(output_dir)},
+        switch_to_batch=lambda *a, **k: None,
+    )
+    container = ttk.Frame(tk_root)
+    container.pack(fill=tk.BOTH, expand=True)
+    # `app` is a SimpleNamespace exposing only the MainWindow surface BatchView
+    # actually touches (root/prefs/switch_to_batch); cast for the type checker.
+    view = BatchView(container, cast("MainWindow", app))
+    view.frame.pack(fill=tk.BOTH, expand=True)
+    tk_root.update()
+    return view
+
+
+@pytest.fixture
+def image_folder(tmp_path):
+    """A folder holding three images and two files that must be ignored."""
+    folder = tmp_path / "input"
+    folder.mkdir()
+    for name in ("c.png", "a.jpg", "b.tiff"):
+        _write_image(folder / name)
+    (folder / "notes.txt").write_text("not an image")
+    (folder / "sub").mkdir()
+    return folder
