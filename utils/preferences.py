@@ -52,6 +52,11 @@ DEFAULT_PREFERENCES: dict[str, Any] = {
     # when its verified checkpoint exists; otherwise retain SAM 2.1.
     "segmentation_backend": "auto",
     "sam3_confidence": 0.2,
+    # SAM 3 vetoes a whole image with one presence scalar when it does not
+    # recognise the prompt, discarding correctly localised masks with it.
+    # A confirmed label only needs locating, so a query this confident is
+    # kept even then. See models/sam3_scoring.py for the measurements.
+    "sam3_localization_confidence": 0.65,
     "quality_profile": "balanced",
     "preserve_path_detail": True,
     "object_prompt": "",

@@ -206,7 +206,12 @@ def build_detector(
     checkpoint = root / "sam3-mod-weights/model.safetensors"
     if backend == "mlx-sam3" or (backend == "auto" and checkpoint.is_file()):
         from models.mlx_sam3 import MLXSAM3
-        return MLXSAM3(root, sam, float(prefs.get("sam3_confidence", 0.2)))
+        return MLXSAM3(
+            root,
+            sam,
+            float(prefs.get("sam3_confidence", 0.2)),
+            float(prefs.get("sam3_localization_confidence", 0.65)),
+        )
     return sam
 
 

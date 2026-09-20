@@ -227,18 +227,29 @@ def test_explicit_mlx_sam3_constructs_the_local_backend(
     captured: dict[str, object] = {}
 
     class FakeMLXSAM3:
-        def __init__(self, root, fallback, confidence) -> None:
-            captured.update(root=root, fallback=fallback, confidence=confidence)
+        def __init__(self, root, fallback, confidence, localization_confidence) -> None:
+            captured.update(
+                root=root,
+                fallback=fallback,
+                confidence=confidence,
+                localization_confidence=localization_confidence,
+            )
 
     monkeypatch.setattr(mlx_sam3, "MLXSAM3", FakeMLXSAM3)
 
     detector = factory.build_detector(
-        _prefs(tmp_path, segmentation_backend="mlx-sam3", sam3_confidence=0.61)
+        _prefs(
+            tmp_path,
+            segmentation_backend="mlx-sam3",
+            sam3_confidence=0.61,
+            sam3_localization_confidence=0.71,
+        )
     )
 
     assert isinstance(detector, FakeMLXSAM3)
     assert captured["root"] == tmp_path / "models" / "mlx_sam3"
     assert captured["confidence"] == 0.61
+    assert captured["localization_confidence"] == 0.71
 
 
 def test_auto_backend_uses_mlx_only_when_its_checkpoint_is_present(
@@ -248,10 +259,11 @@ def test_auto_backend_uses_mlx_only_when_its_checkpoint_is_present(
         pass
 
     class FakeMLXSAM3:
-        def __init__(self, root, fallback, confidence) -> None:
+        def __init__(self, root, fallback, confidence, localization_confidence) -> None:
             self.root = root
             self.fallback = fallback
             self.confidence = confidence
+            self.localization_confidence = localization_confidence
 
     monkeypatch.setattr(factory, "GroundedSAM", lambda **_kwargs: FakeGroundedSAM())
     monkeypatch.setattr(mlx_sam3, "MLXSAM3", FakeMLXSAM3)

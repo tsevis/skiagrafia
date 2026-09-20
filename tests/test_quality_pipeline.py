@@ -269,7 +269,9 @@ def test_mlx_adapter_reuses_encoding_and_returns_all_masks(tmp_path, monkeypatch
     import sys
     import types
 
+    from models import mlx_sam3 as mlx_sam3_module
     from models.mlx_sam3 import MLXSAM3
+    from models.sam3_grounding import GroundedInstances
     mlx = types.ModuleType("mlx")
     core = types.ModuleType("mlx.core")
     # types.ModuleType has no declared `eval`/`core` attributes; monkeypatch
@@ -280,10 +282,17 @@ def test_mlx_adapter_reuses_encoding_and_returns_all_masks(tmp_path, monkeypatch
     monkeypatch.setitem(sys.modules, "mlx.core", core)
     processor = Mock()
     processor.set_image.return_value = {}
-    processor.set_text_prompt.return_value = {
-        "masks": np.ones((2, 1, 16, 16), dtype=bool),
-        "scores": np.array([.8, .9]), "boxes": np.array([[0, 0, 6, 6], [8, 8, 14, 14]]),
-    }
+    # The vendored grounding call needs the MLX runtime, so stand in for it at
+    # the seam and keep this test about encoding reuse and fallback routing.
+    grounded = GroundedInstances(
+        boxes=np.array([[0, 0, 6, 6], [8, 8, 14, 14]], dtype=np.float32),
+        masks=np.full((2, 16, 16), 255, dtype=np.uint8),
+        scores=[.8, .9], presence=.9, rescued=False,
+    )
+    holder = {"value": grounded}
+    monkeypatch.setattr(
+        mlx_sam3_module, "ground_text_prompt", lambda *_args, **_kwargs: holder["value"]
+    )
     # MLXSAM3.fallback only ever calls detect_instances/segment/clear_cache on
     # this, all of which Instances (via FakeDetector) provides; cast because
     # MLXSAM3 pins the parameter to the concrete GroundedSAM class.
@@ -295,7 +304,11 @@ def test_mlx_adapter_reuses_encoding_and_returns_all_masks(tmp_path, monkeypatch
     assert processor.set_image.call_count == 1
     adapter.detect_instances(image.copy(), "bag")
     assert processor.set_image.call_count == 2
-    processor.set_text_prompt.return_value = {"masks": np.zeros((0, 1, 16, 16)), "scores": np.zeros(0), "boxes": np.zeros((0, 4))}
+    holder["value"] = GroundedInstances(
+        boxes=np.zeros((0, 4), dtype=np.float32),
+        masks=np.zeros((0, 16, 16), dtype=np.uint8),
+        scores=[], presence=.001, rescued=False,
+    )
     assert adapter.detect_part_instances(image, "bag") == []
     assert len(adapter.detect_instances(image, "bag")) == 2  # parent fallback remains available
 
