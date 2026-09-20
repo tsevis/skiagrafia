@@ -3,10 +3,27 @@ from __future__ import annotations
 import tkinter as tk
 from pathlib import Path
 from tkinter import ttk
-from typing import TYPE_CHECKING, ClassVar
+from typing import TYPE_CHECKING, ClassVar, cast
 
 if TYPE_CHECKING:
+    from core.batch_runner import BatchConfig
+    from core.batch_session import ResumableBatch
+    from ui.batch.steps.step_configure import StepConfigure
+    from ui.batch.steps.step_import import StepImport
+    from ui.batch.steps.step_interrogate import StepInterrogate
+    from ui.batch.steps.step_output import StepOutput
+    from ui.batch.steps.step_progress import StepProgress
+    from ui.batch.steps.step_triage import StepTriage
     from ui.main_window import MainWindow
+
+    BatchStepView = (
+        StepImport
+        | StepConfigure
+        | StepInterrogate
+        | StepTriage
+        | StepProgress
+        | StepOutput
+    )
 
 
 class BatchView:
@@ -73,7 +90,7 @@ class BatchView:
         self._content.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
 
         # Build step views (lazy)
-        self._step_views: list[object | None] = [None] * 6
+        self._step_views: list[BatchStepView | None] = [None] * 6
 
         # Show step 1
         self._show_step(0)
@@ -82,7 +99,12 @@ class BatchView:
         """Show the given step view."""
         # Clear content
         for child in self._content.winfo_children():
-            child.pack_forget()
+            # winfo_children() may include a Toplevel, which (unlike an
+            # ordinary Widget) supports no geometry manager and never
+            # appears here in practice — this guard keeps that contract
+            # explicit instead of assuming it holds.
+            if isinstance(child, tk.Widget):
+                child.pack_forget()
 
         self._current_step = index
         self._sidebar.set_active_step(index)
@@ -99,7 +121,7 @@ class BatchView:
 
         # Refresh data when navigating to Triage (step 3)
         if index == 3 and hasattr(view, "_load_from_interrogation"):
-            view._load_from_interrogation()
+            cast("StepTriage", view)._load_from_interrogation()
 
     def _sync_bottom_status(self, index: int) -> None:
         status_map = {
@@ -115,7 +137,7 @@ class BatchView:
         if index != 4:
             self._bottom_bar.set_progress(0, 1)
 
-    def _create_step_view(self, index: int) -> object:
+    def _create_step_view(self, index: int) -> BatchStepView:
         """Create a step view by index."""
         from ui.batch.steps.step_configure import StepConfigure
         from ui.batch.steps.step_import import StepImport
@@ -255,10 +277,10 @@ class BatchView:
         self.excluded_labels_by_image = {}
         step_interrogate = self._step_views[2]
         if step_interrogate and hasattr(step_interrogate, "_clear_results"):
-            step_interrogate._clear_results()
+            cast("StepInterrogate", step_interrogate)._clear_results()
         step_triage = self._step_views[3]
         if step_triage and hasattr(step_triage, "populate"):
-            step_triage.populate({})
+            cast("StepTriage", step_triage).populate({})
 
     def store_interrogation_records(self, records: dict[str, list[dict]]) -> None:
         self.interrogation_records = {path: list(items) for path, items in records.items()}
@@ -329,7 +351,7 @@ class BatchView:
             self.excluded_labels_by_image.get(image_path, []),
         )
 
-    def freeze_processing_config(self, image_paths: list[str]) -> object:
+    def freeze_processing_config(self, image_paths: list[str]) -> BatchConfig:
         """Create the single immutable BatchRunner manifest after Triage."""
         if self.run_settings is None:
             raise ValueError("Interrogate and confirm labels before processing.")
@@ -422,7 +444,7 @@ class BatchView:
         )
         return batch_config
 
-    def resume_run(self, resumable: object) -> None:
+    def resume_run(self, resumable: ResumableBatch) -> None:
         """Restore a verified immutable run without reopening human approval."""
         settings = resumable.run_settings
         interrogation = resumable.interrogation

@@ -131,8 +131,9 @@ class TestKnowledgePackFindObject:
 
     def test_matches_canonical_case_insensitively(self) -> None:
         pack = self._pack()
-        assert pack.find_object("Chalice") is not None
-        assert pack.find_object("Chalice").canonical == "chalice"
+        found = pack.find_object("Chalice")
+        assert found is not None
+        assert found.canonical == "chalice"
 
     def test_matches_alias(self) -> None:
         pack = self._pack()

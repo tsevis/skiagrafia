@@ -25,11 +25,12 @@ from core.interrogation import (
     rank_detector_phrases,
 )
 from core.knowledge import KnowledgeDomain, KnowledgePack, ObjectKnowledge
+from models.vlm_client import BaseVLMClient
 
 # ── Fakes ────────────────────────────────────────────────────────────────
 
 
-class FakeVLMClient:
+class FakeVLMClient(BaseVLMClient):
     """Vision/text/children client whose responses are keyed by substring
     of the prompt (vision/text) or exact parent label (children)."""
 
@@ -40,6 +41,7 @@ class FakeVLMClient:
         children_response: list[str] | None = None,
         children_error: bool = False,
     ) -> None:
+        super().__init__(host="http://fake", model="fake-model")
         self.vision_responses = vision_responses or {}
         self.text_response = text_response
         self.children_response = children_response or []
@@ -297,7 +299,10 @@ class TestEscalationChain:
             enable_tiling=False, fallback_mode="moondream_only"
         )
 
-        class RaisingClient:
+        class RaisingClient(BaseVLMClient):
+            def __init__(self) -> None:
+                super().__init__(host="http://raising", model="raising")
+
             def query_vision(self, image, prompt):
                 raise RuntimeError("network down")
 
@@ -437,7 +442,10 @@ class TestReasonerRanking:
             _candidate("chalice", confidence=0.9),
         ]
 
-        class RaisingClient:
+        class RaisingClient(BaseVLMClient):
+            def __init__(self) -> None:
+                super().__init__(host="http://raising", model="raising")
+
             def query_text(self, prompt, *, num_predict=256):
                 raise RuntimeError("down")
 

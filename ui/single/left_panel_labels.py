@@ -12,14 +12,31 @@ import queue
 import threading
 import tkinter as tk
 from tkinter import ttk
+from typing import TYPE_CHECKING
 
 from ui.theme import TAG_COLOURS, is_macos
+
+if TYPE_CHECKING:
+    from ui.main_window import MainWindow
+    from ui.single.single_view import SingleView
 
 logger = logging.getLogger(__name__)
 
 
 class LabelsSectionMixin:
     """Label scanning, rendering and editing. Requires LeftPanel's attributes."""
+
+    # Provided by LeftPanel, which mixes this in. Annotations only:
+    # no assignment, so nothing exists at runtime and the MRO is untouched.
+    _app: MainWindow
+    _image_path: str | None
+    _inner: ttk.Frame
+    _knowledge_pack_defaults: dict[str, object]
+    _knowledge_pack_path: str | None
+    _process_btn: ttk.Button
+    _progress_queue: queue.Queue
+    _root: tk.Tk
+    _view: SingleView
 
     def _build_labels_section(self) -> None:
         section = ttk.LabelFrame(self._inner, text="Labels", padding=6)

@@ -10,6 +10,7 @@ import torch
 from numpy.typing import NDArray
 from pydantic import BaseModel, ConfigDict
 
+from models.vendored_contracts import SamPredictorLike
 from utils.model_manager import model_path
 from utils.mps_utils import DEVICE
 
@@ -27,7 +28,7 @@ def _patch_onnx_ml_dtypes() -> None:
     but newer ONNX builds may import them unconditionally through torchvision.
     """
     try:
-        import ml_dtypes
+        import ml_dtypes  # type: ignore[import-not-found]
     except ImportError:
         return
 
@@ -216,7 +217,7 @@ class GroundedSAM:
         self._sam_weights = sam_weights
         self._gsam_root = gsam_root
         self._dino_model: object | None = None
-        self._sam_predictor: object | None = None
+        self._sam_predictor: SamPredictorLike | None = None
         self._masks_cache: dict[str, NDArray[np.uint8]] = {}
         self._encoded_image = None
 
@@ -229,7 +230,9 @@ class GroundedSAM:
             gsam_root = self._gsam_root or model_path("groundingdino_swint_ogc.pth").parent.parent
             _ensure_gsam_on_path(gsam_root)
 
-            from grounding_dino.groundingdino.util.inference import load_model
+            from grounding_dino.groundingdino.util.inference import (  # type: ignore[import-not-found]  # vendored; resolved at runtime from the model directory
+                load_model,
+            )
 
             weights = self._dino_weights or model_path("groundingdino_swint_ogc.pth")
             config_path = (
@@ -247,14 +250,23 @@ class GroundedSAM:
             logger.exception("Failed to load GroundingDINO")
             raise
 
-    def _load_sam(self) -> None:
-        """Load SAM 2.1 predictor (lazy, once)."""
+    def _load_sam(self) -> SamPredictorLike:
+        """Load SAM 2.1 predictor (lazy, once) and return it.
+
+        Returning the predictor rather than None is what lets callers hold a
+        value that cannot be None. Every failure path below raises, so
+        reaching the end means it is loaded.
+        """
         if self._sam_predictor is not None:
-            return
+            return self._sam_predictor
         try:
             _ensure_gsam_on_path(self._gsam_root or model_path("groundingdino_swint_ogc.pth").parent.parent)
-            from sam2.build_sam import build_sam2
-            from sam2.sam2_image_predictor import SAM2ImagePredictor
+            from sam2.build_sam import (  # type: ignore[import-not-found]  # vendored; resolved at runtime from the model directory
+                build_sam2,
+            )
+            from sam2.sam2_image_predictor import (  # type: ignore[import-not-found]  # vendored; resolved at runtime from the model directory
+                SAM2ImagePredictor,
+            )
 
             weights = self._sam_weights or model_path("sam2.1_hiera_large.pt")
             config = "configs/sam2.1/sam2.1_hiera_l.yaml"
@@ -263,8 +275,10 @@ class GroundedSAM:
                 ckpt_path=str(weights),
                 device=str(DEVICE),
             )
-            self._sam_predictor = SAM2ImagePredictor(sam)
+            predictor: SamPredictorLike = SAM2ImagePredictor(sam)
+            self._sam_predictor = predictor
             logger.info("SAM 2.1 loaded on %s", DEVICE)
+            return predictor
         except (ImportError, FileNotFoundError, OSError, RuntimeError, ValueError, AttributeError):
             logger.exception("Failed to load SAM 2.1")
             raise
@@ -286,8 +300,10 @@ class GroundedSAM:
         """
         self._load_dino()
 
-        import grounding_dino.groundingdino.datasets.transforms as T
-        from grounding_dino.groundingdino.util.inference import predict
+        import grounding_dino.groundingdino.datasets.transforms as T  # type: ignore[import-not-found]
+        from grounding_dino.groundingdino.util.inference import (  # type: ignore[import-not-found]  # vendored; resolved at runtime from the model directory
+            predict,
+        )
 
         transform = T.Compose([
             T.RandomResize([800], max_size=1333),
@@ -374,10 +390,10 @@ class GroundedSAM:
 
         Returns binary mask (0/255) at image resolution.
         """
-        self._load_sam()
+        predictor = self._load_sam()
 
         if self._encoded_image is not image:
-            self._sam_predictor.set_image(image)
+            predictor.set_image(image)
             self._encoded_image = image
             self._masks_cache.clear()
         cache_key = f"{label}_{bbox}_{prefer_full_box}"
@@ -387,7 +403,7 @@ class GroundedSAM:
         box_array = np.array(bbox, dtype=np.float32)
 
         if prefer_full_box:
-            masks, scores, _ = self._sam_predictor.predict(
+            masks, scores, _ = predictor.predict(
                 box=box_array,
                 multimask_output=True,
             )
@@ -395,7 +411,7 @@ class GroundedSAM:
             best_idx = self._best_mask_for_bbox(masks, bbox)
             mask = (masks[best_idx] > 0).astype(np.uint8) * 255
         else:
-            masks, scores, _ = self._sam_predictor.predict(
+            masks, scores, _ = predictor.predict(
                 box=box_array,
                 multimask_output=False,
             )

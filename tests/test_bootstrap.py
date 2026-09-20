@@ -99,15 +99,15 @@ class TestCheckSetupOllamaBackend:
         mgr = ModelManager(tmp_path / "models")
 
         # Materialize every registry entry so nothing is missing.
-        from utils.model_manager import REGISTRY
+        from utils.model_manager import REGISTRY, _entry_files
 
         for name, entry in REGISTRY.items():
             path = mgr.resolve(name)
             if entry.get("kind") == "hf_files":
                 path.mkdir(parents=True, exist_ok=True)
-                for f in entry.get("hf_files", []):
+                for f in _entry_files(entry):
                     (path / f).touch()
-                alternatives = entry.get("hf_weight_alternatives", [])
+                alternatives = _entry_files(entry, "hf_weight_alternatives")
                 if alternatives:
                     (path / alternatives[0]).touch()
             elif entry.get("kind") == "github_zip":

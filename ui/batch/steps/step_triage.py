@@ -3,12 +3,13 @@ from __future__ import annotations
 import tkinter as tk
 from pathlib import Path
 from tkinter import ttk
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, cast
 
 from ui.theme import TAG_COLOURS, is_macos
 
 if TYPE_CHECKING:
     from ui.batch.batch_view import BatchView
+    from ui.batch.steps.step_interrogate import StepInterrogate
 
 
 class StepTriage:
@@ -76,7 +77,7 @@ class StepTriage:
         self._include_vars: dict[str, tk.BooleanVar] = {}
         self._image_exclude_vars: dict[tuple[str, str], tk.BooleanVar] = {}
         self._tag_data: dict[str, dict] = {}
-        self._card_frames: dict[str, ttk.Frame] = {}
+        self._card_frames: dict[str, ttk.LabelFrame] = {}
         self._detail_frames: dict[str, ttk.Frame] = {}
 
         # Auto-populate from interrogation results
@@ -94,7 +95,7 @@ class StepTriage:
         """Pull tags from the Interrogate step and populate cards."""
         step_interrogate = self._view._step_views[2]
         if step_interrogate and hasattr(step_interrogate, "get_all_tags"):
-            tags = step_interrogate.get_all_tags()
+            tags = cast("StepInterrogate", step_interrogate).get_all_tags()
             if tags:
                 self.populate(tags)
 

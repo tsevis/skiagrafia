@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import sys
 from pathlib import Path
+from typing import Any
 
 import pytest
 from pydantic import ValidationError
@@ -18,8 +19,8 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from core.batch_template import BatchTemplate
 
 
-def _make_template(name: str = "My Template", **overrides: object) -> BatchTemplate:
-    fields: dict[str, object] = {
+def _make_template(name: str = "My Template", **overrides: Any) -> BatchTemplate:
+    fields: dict[str, Any] = {
         "name": name,
         "source_image": "/images/source.png",
         "confirmed_labels": ["cross", "chalice"],
@@ -57,12 +58,14 @@ class TestSave:
         assert path.exists()
 
     def test_save_populates_created_at(self, fake_home: Path) -> None:
+        """The stamp lands in the FILE. It never belonged on the caller's
+        object, so this reads it back from where it is actually needed."""
         template = _make_template()
         assert template.created_at == ""
 
-        template.save()
+        path = template.save()
 
-        assert template.created_at != ""
+        assert BatchTemplate.load(path).created_at != ""
 
     def test_save_round_trips_via_load(self, fake_home: Path) -> None:
         template = _make_template(
@@ -82,7 +85,9 @@ class TestSave:
         assert loaded.selection_request == "Select computers only.\nExclude captions."
         assert loaded.guide_path == "/guides/apple.toml"
         assert loaded.guide_name == "Apple — The First 50 Years"
-        assert loaded.created_at == template.created_at
+        # Stamped on write, so it is not equal to the unsaved original's
+        # empty value -- it has to be a real timestamp.
+        assert loaded.created_at != ""
 
 
 class TestNameSlugging:
@@ -230,4 +235,25 @@ class TestListAll:
 
         listed = BatchTemplate.list_all_with_paths()
 
-        assert listed == [(path, template)]
+        # Compared against what was written rather than the in-memory
+        # original: save() stamps the copy it writes and leaves this one be.
+        assert listed == [(path, BatchTemplate.load(path))]
+        assert listed[0][1].created_at != ""
+
+
+class TestSaveDoesNotMutate:
+    def test_save_leaves_the_receiver_untouched(self, tmp_path, monkeypatch) -> None:
+        """save() stamped created_at onto the caller's own object.
+
+        The template a caller holds is theirs; writing it to disk is not a
+        reason to edit it under them. Saving twice silently changed a field
+        of an object someone else may still be reading.
+        """
+        monkeypatch.setattr(Path, "home", lambda: tmp_path)
+        template = _make_template(name="unmutated")
+
+        path = template.save()
+
+        assert template.created_at == ""
+        written = BatchTemplate.load(path)
+        assert written.created_at != ""

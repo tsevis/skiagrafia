@@ -6,6 +6,7 @@ pytest tmp_path, never the user's real model library.
 """
 from __future__ import annotations
 
+import hashlib
 import io
 import sys
 import zipfile
@@ -18,13 +19,14 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from utils import model_manager
 from utils.model_manager import ModelInfo, ModelManager, _entry_files, _hf_dir_available
+from utils.security import SecurityError
 
 # ── _entry_files / _hf_dir_available (pure helpers) ─────────────────────────
 
 
 class TestEntryFiles:
     def test_returns_list_for_present_key(self) -> None:
-        entry = {"hf_files": ["a.json", "b.json"]}
+        entry: dict[str, object] = {"hf_files": ["a.json", "b.json"]}
         assert _entry_files(entry) == ["a.json", "b.json"]
 
     def test_returns_empty_for_missing_key(self) -> None:
@@ -34,7 +36,7 @@ class TestEntryFiles:
         assert _entry_files({"hf_files": "not-a-list"}) == []
 
     def test_reads_alternate_key(self) -> None:
-        entry = {"hf_weight_alternatives": ["model.safetensors"]}
+        entry: dict[str, object] = {"hf_weight_alternatives": ["model.safetensors"]}
         assert _entry_files(entry, "hf_weight_alternatives") == ["model.safetensors"]
 
 
@@ -77,7 +79,7 @@ class TestHfDirAvailable:
         target = tmp_path / "model"
         target.mkdir()
         (target / "config.json").touch()
-        entry = {"hf_files": ["config.json"]}
+        entry: dict[str, object] = {"hf_files": ["config.json"]}
         assert _hf_dir_available(entry, target) is True
 
 
@@ -185,7 +187,9 @@ class TestEnsure:
         mgr = ModelManager(tmp_path)
         captured: dict = {}
 
-        def fake_download(url: str, path: Path, progress_callback=None) -> None:
+        def fake_download(
+            url: str, path: Path, progress_callback=None, expected_sha256=None
+        ) -> None:
             captured["url"] = url
             captured["path"] = path
             path.parent.mkdir(parents=True, exist_ok=True)
@@ -343,7 +347,9 @@ class TestDownloadHfFiles:
         (target / "config.json").touch()  # already present, should be skipped
         downloaded: list[str] = []
 
-        def fake_download_file(url: str, dest: Path, progress_callback=None) -> None:
+        def fake_download_file(
+            url: str, dest: Path, progress_callback=None, expected_sha256=None
+        ) -> None:
             downloaded.append(url)
             dest.parent.mkdir(parents=True, exist_ok=True)
             dest.touch()
@@ -365,7 +371,9 @@ class TestDownloadHfFiles:
         (target / "pytorch_model.bin").touch()
         downloaded: list[str] = []
 
-        def fake_download_file(url: str, dest: Path, progress_callback=None) -> None:
+        def fake_download_file(
+            url: str, dest: Path, progress_callback=None, expected_sha256=None
+        ) -> None:
             downloaded.append(url)
             dest.parent.mkdir(parents=True, exist_ok=True)
             dest.touch()
@@ -420,7 +428,7 @@ class TestDownloadGithubZip:
         monkeypatch.setattr(model_manager.urllib.request, "urlopen", fake_urlopen)
 
         target = tmp_path / "Grounded-SAM-2"
-        entry = {
+        entry: dict[str, object] = {
             "url": "https://github.com/example/repo/archive/refs/heads/main.zip",
             "zip_root": "Grounded-SAM-2-main",
         }
@@ -448,7 +456,7 @@ class TestDownloadGithubZip:
         target.mkdir(parents=True)
         (target / "existing.txt").write_text("keep me")
 
-        entry = {
+        entry: dict[str, object] = {
             "url": "https://github.com/example/repo/archive/refs/heads/main.zip",
             "zip_root": "Grounded-SAM-2-main",
         }
@@ -470,7 +478,7 @@ class TestDownloadGithubZip:
         monkeypatch.setattr(model_manager.urllib.request, "urlopen", fake_urlopen)
         progress: list[tuple[int, int | None]] = []
 
-        entry = {"url": "https://github.com/x/y.zip", "zip_root": "root"}
+        entry: dict[str, object] = {"url": "https://github.com/x/y.zip", "zip_root": "root"}
         target = tmp_path / "dest"
 
         ModelManager._download_github_zip(
@@ -605,3 +613,85 @@ class TestBackwardCompatShims:
 
         with pytest.raises(FileNotFoundError):
             model_manager.model_path("groundingdino_swint_ogc.pth")
+
+
+# ── SHA-256 integrity verification ──────────────────────────────────────────
+
+
+class TestDownloadIntegrity:
+    """A registry pin must actually reject a payload that does not match it.
+
+    The host allowlist in validate_download_url() answers "did this come from
+    the right server"; nothing answered "is this the right file". A release
+    asset replaced in place passes every check above these tests.
+    """
+
+    PAYLOAD = b"weights"
+    # sha256 of PAYLOAD, from hashlib rather than from anything on disk.
+    PAYLOAD_SHA256 = hashlib.sha256(PAYLOAD).hexdigest()
+
+    @staticmethod
+    def _serving(payload: bytes) -> object:
+        def fake_urlretrieve(url: str, filename, reporthook=None) -> None:
+            Path(filename).parent.mkdir(parents=True, exist_ok=True)
+            Path(filename).write_bytes(payload)
+
+        return fake_urlretrieve
+
+    def test_matching_digest_installs_the_file(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        dest = tmp_path / "weights.bin"
+        monkeypatch.setattr(
+            model_manager.urllib.request, "urlretrieve", self._serving(self.PAYLOAD)
+        )
+
+        ModelManager._download_file(
+            "https://github.com/example/f.bin",
+            dest,
+            expected_sha256=self.PAYLOAD_SHA256,
+        )
+
+        assert dest.read_bytes() == self.PAYLOAD
+
+    def test_mismatched_digest_raises_and_installs_nothing(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        dest = tmp_path / "weights.bin"
+        monkeypatch.setattr(
+            model_manager.urllib.request,
+            "urlretrieve",
+            self._serving(b"tampered"),
+        )
+
+        with pytest.raises(SecurityError, match="sha256"):
+            ModelManager._download_file(
+                "https://github.com/example/f.bin",
+                dest,
+                expected_sha256=self.PAYLOAD_SHA256,
+            )
+
+        assert not dest.exists()
+        assert not dest.with_suffix(dest.suffix + ".part").exists()
+
+    def test_hf_files_applies_the_digest_declared_for_each_file(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """The pin has to survive the hf_files path, not just the direct one.
+
+        _download_hf_files() builds its own URLs and calls _download_file()
+        itself, so a registry hash is inert unless it is passed through here.
+        """
+        entry = {
+            "url": "https://huggingface.co/acme/model",
+            "hf_files": ["config.json"],
+            "sha256": {"config.json": self.PAYLOAD_SHA256},
+        }
+        monkeypatch.setattr(
+            model_manager.urllib.request,
+            "urlretrieve",
+            self._serving(b"not the config you pinned"),
+        )
+
+        with pytest.raises(SecurityError, match=r"config\.json"):
+            ModelManager._download_hf_files(entry, tmp_path / "model")

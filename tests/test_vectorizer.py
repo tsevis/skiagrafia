@@ -86,36 +86,36 @@ class TestAssembleSvg:
         assert "<g" not in svg
 
     def test_single_layer_uses_first_palette_colour_and_default_id(self) -> None:
-        layers = [{"svg_data": '<path d="M0 0 L1 1"/>'}]
+        layers: list[dict[str, str | int | float]] = [{"svg_data": '<path d="M0 0 L1 1"/>'}]
         svg = assemble_svg(10, 10, layers)
         assert f'fill="{LAYER_PALETTE[0]}"' in svg
         assert 'id="layer_0"' in svg
         assert '<path d="M0 0 L1 1"/>' in svg
 
     def test_explicit_id_is_used(self) -> None:
-        layers = [{"id": "body", "svg_data": '<path d="M0 0"/>'}]
+        layers: list[dict[str, str | int | float]] = [{"id": "body", "svg_data": '<path d="M0 0"/>'}]
         svg = assemble_svg(10, 10, layers)
         assert 'id="body"' in svg
 
     def test_translate_applied_when_dx_or_dy_nonzero(self) -> None:
-        layers = [{"id": "child", "svg_data": '<path d="M0 0"/>', "dx": 5, "dy": -3}]
+        layers: list[dict[str, str | int | float]] = [{"id": "child", "svg_data": '<path d="M0 0"/>', "dx": 5, "dy": -3}]
         svg = assemble_svg(20, 20, layers)
         assert "translate(5,-3)" in svg
 
     def test_no_translate_when_dx_and_dy_zero(self) -> None:
-        layers = [{"id": "child", "svg_data": '<path d="M0 0"/>', "dx": 0, "dy": 0}]
+        layers: list[dict[str, str | int | float]] = [{"id": "child", "svg_data": '<path d="M0 0"/>', "dx": 0, "dy": 0}]
         svg = assemble_svg(20, 20, layers)
         assert "translate" not in svg
 
     def test_layer_colours_cycle_through_palette(self) -> None:
-        layers = [{"svg_data": "<path/>"} for _ in range(len(LAYER_PALETTE) + 1)]
+        layers: list[dict[str, str | int | float]] = [{"svg_data": "<path/>"} for _ in range(len(LAYER_PALETTE) + 1)]
         svg = assemble_svg(10, 10, layers)
         assert f'fill="{LAYER_PALETTE[0]}"' in svg
         # The (len(LAYER_PALETTE)+1)-th layer wraps back to the first colour.
         assert svg.count(f'fill="{LAYER_PALETTE[0]}"') == 2
 
     def test_multiple_layers_preserve_order(self) -> None:
-        layers = [
+        layers: list[dict[str, str | int | float]] = [
             {"id": "parent", "svg_data": "<path d='P'/>"},
             {"id": "child", "svg_data": "<path d='C'/>"},
         ]
@@ -125,19 +125,19 @@ class TestAssembleSvg:
     def test_unsafe_layer_id_cannot_inject_markup(self) -> None:
         """A label containing a quote must not break out of the id attribute."""
         unsafe_id = 'a"><script>alert(1)</script>'
-        layers = [{"id": unsafe_id, "svg_data": "<path/>"}]
+        layers: list[dict[str, str | int | float]] = [{"id": unsafe_id, "svg_data": "<path/>"}]
         svg = assemble_svg(10, 10, layers)
         assert "<script>" not in svg
         assert "&quot;" in svg
 
     def test_escaped_layer_id_keeps_document_well_formed(self) -> None:
-        layers = [{"id": 'q"&<>', "svg_data": "<path/>"}]
+        layers: list[dict[str, str | int | float]] = [{"id": 'q"&<>', "svg_data": "<path/>"}]
         svg = assemble_svg(10, 10, layers)
         # The whole document must still parse as XML.
         ET.fromstring(svg)
 
     def test_ampersand_in_layer_id_is_escaped(self) -> None:
-        layers = [{"id": "cup & saucer", "svg_data": "<path/>"}]
+        layers: list[dict[str, str | int | float]] = [{"id": "cup & saucer", "svg_data": "<path/>"}]
         svg = assemble_svg(10, 10, layers)
         assert "&amp;" in svg
         ET.fromstring(svg)

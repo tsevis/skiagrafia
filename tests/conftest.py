@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import contextlib
 from pathlib import Path
+from typing import Protocol
 
 import pytest
 
@@ -19,7 +20,41 @@ GUI_FIXTURE_NAMES = frozenset({"tk_root", "gui_root", "gui_app", "main_window"})
 FAST_GUI_MODULE_NAMES = frozenset({"test_gui_smoke.py"})
 
 
-def pytest_ignore_collect(collection_path: Path, config: pytest.Config) -> bool:
+class _MarkerLike(Protocol):
+    """The `pytest.Mark` surface `pytest_collection_modifyitems` reads."""
+
+    name: str
+
+
+class _ItemLike(Protocol):
+    """The `pytest.Item` surface `pytest_collection_modifyitems` touches.
+
+    Narrow on purpose so tests/test_gui_markers.py can exercise the hook
+    against a lightweight fake instead of a real, expensively-collected
+    pytest.Item -- both satisfy this structurally.
+    """
+
+    def get_closest_marker(self, name: str) -> _MarkerLike | None: ...
+    def add_marker(self, name: str) -> None: ...
+
+
+class _MarkexprOptionLike(Protocol):
+    markexpr: str
+
+
+class _ConfigLike(Protocol):
+    """The `pytest.Config` surface `pytest_ignore_collect` touches.
+
+    `option` is declared as a read-only property so structurally-similar but
+    not identical `option` types (mutable-attribute protocol members are
+    matched invariantly) still satisfy this Protocol.
+    """
+
+    @property
+    def option(self) -> _MarkexprOptionLike: ...
+
+
+def pytest_ignore_collect(collection_path: Path, config: _ConfigLike) -> bool:
     """Avoid importing the full test tree for the deliberately tiny smoke gate."""
     if config.option.markexpr.strip() != "gui":
         return False
@@ -31,7 +66,7 @@ def pytest_ignore_collect(collection_path: Path, config: pytest.Config) -> bool:
 
 
 def pytest_collection_modifyitems(
-    config: pytest.Config, items: list[pytest.Item]
+    config: _ConfigLike | None, items: list[_ItemLike]
 ) -> None:
     """Classify real-window tests as fast smoke or full integration coverage."""
     for item in items:

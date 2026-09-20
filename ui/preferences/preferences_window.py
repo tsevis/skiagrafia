@@ -416,7 +416,7 @@ class PreferencesWindow:
             value=self._prefs.get("enable_tiled_fallback", True)
         )
 
-        sliders: list[tuple[str, tk.Variable, float, float, bool]] = [
+        sliders: list[tuple[str, tk.IntVar | tk.DoubleVar, float, float, bool]] = [
             ("SAM box threshold", self._sam_box_var, 0.1, 0.9, True),
             ("SAM text threshold", self._sam_text_var, 0.1, 0.9, True),
             ("VTracer corner threshold", self._vt_corner_var, 30, 90, False),

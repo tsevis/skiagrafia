@@ -349,11 +349,17 @@ class OllamaVLMClient(BaseVLMClient):
         if images_b64:
             message["images"] = images_b64
         try:
+            # `think` is passed explicitly instead of splatted in from a
+            # conditional dict. Its default is None and Client.chat takes no
+            # **kwargs, so passing the default is indistinguishable from
+            # omitting it -- while a `**dict[str, bool]` splat let any
+            # parameter receive a bool as far as a type checker could tell.
+            think = False if self._model.startswith(("gemma4", "qwen3")) else None
             response = self._client.chat(
                 model=self._model,
                 messages=[message],
                 options={"num_predict": num_predict, "temperature": 0, "seed": 42},
-                **({"think": False} if self._model.startswith(("gemma4", "qwen3")) else {}),
+                think=think,
             )
         except (OSError, TimeoutError, ollama.RequestError, ollama.ResponseError) as exc:
             raise RuntimeError("The local Ollama model request failed.") from exc

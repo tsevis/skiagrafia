@@ -24,12 +24,16 @@ import sys
 import tkinter as tk
 from pathlib import Path
 from types import SimpleNamespace
+from typing import TYPE_CHECKING, cast
 
 import numpy as np
 import pytest
 from PIL import Image
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+
+if TYPE_CHECKING:
+    from ui.main_window import MainWindow
 
 
 def _write_image(path: Path) -> Path:
@@ -53,7 +57,9 @@ def batch_view(tk_root, tmp_path):
     )
     container = ttk.Frame(tk_root)
     container.pack(fill=tk.BOTH, expand=True)
-    view = BatchView(container, app)
+    # `app` is a SimpleNamespace exposing only the MainWindow surface BatchView
+    # actually touches (root/prefs/switch_to_batch); cast for the type checker.
+    view = BatchView(container, cast("MainWindow", app))
     view.frame.pack(fill=tk.BOTH, expand=True)
     tk_root.update()
     return view

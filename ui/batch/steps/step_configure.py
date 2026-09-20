@@ -4,7 +4,7 @@ import logging
 import tkinter as tk
 from pathlib import Path
 from tkinter import messagebox, ttk
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, cast
 
 from core.knowledge import (
     KnowledgePack,
@@ -14,7 +14,9 @@ from core.knowledge import (
 from ui.theme import is_macos
 
 if TYPE_CHECKING:
+    from core.batch_template import BatchTemplate
     from ui.batch.batch_view import BatchView
+    from ui.batch.steps.step_import import StepImport
 
 logger = logging.getLogger(__name__)
 
@@ -116,7 +118,7 @@ class StepConfigure:
 
         # Apply template values if available
         if view.template is not None:
-            self._apply_template(view.template)
+            self._apply_template(cast("BatchTemplate", view.template))
 
     def _apply_config(self, config: dict[str, object]) -> None:
         request = str(config.get("selection_request", "") or "")
@@ -126,8 +128,9 @@ class StepConfigure:
         if mode:
             for key, var in self._mode_vars.items():
                 var.set(key in mode)
-        if "recursion_depth" in config:
-            self._depth_var.set(int(config["recursion_depth"]))
+        depth = config.get("recursion_depth")
+        if isinstance(depth, (int, float, str)):
+            self._depth_var.set(int(depth))
         if config.get("vtracer_quality"):
             self._quality_var.set(str(config["vtracer_quality"]))
         if config.get("fallback_mode"):
@@ -141,7 +144,7 @@ class StepConfigure:
         if "enable_tiled_fallback" in config:
             self._tiled_fallback_var.set(bool(config["enable_tiled_fallback"]))
 
-    def _apply_template(self, template: object) -> None:
+    def _apply_template(self, template: BatchTemplate) -> None:
         request = str(getattr(template, "selection_request", "") or "")
         if request:
             self._set_selection_request(request)
@@ -378,7 +381,8 @@ class StepConfigure:
     def _load_guide(self) -> None:
         from tkinter import filedialog
 
-        initial_dir = self._view._step_views[0].input_folder if self._view._step_views[0] else None
+        step_import = cast("StepImport", self._view._step_views[0])
+        initial_dir = step_import.input_folder if step_import else None
         path = filedialog.askopenfilename(
             initialdir=initial_dir,
             filetypes=[("TOML files", "*.toml"), ("All files", "*.*")],
@@ -447,12 +451,9 @@ class StepConfigure:
         self._refresh_guide_status()
 
     def _create_guide(self) -> None:
-        step_import = self._view._step_views[0]
-        batch_folder = (
-            Path(step_import.input_folder)
-            if step_import and getattr(step_import, "input_folder", None)
-            else None
-        )
+        step_import = cast("StepImport", self._view._step_views[0])
+        input_folder = step_import.input_folder if step_import else None
+        batch_folder = Path(input_folder) if input_folder else None
         if batch_folder is None:
             self._guide_status_label.config(
                 text="Guide: Select a batch folder first in Step 1",

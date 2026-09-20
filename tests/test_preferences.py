@@ -8,6 +8,7 @@ from __future__ import annotations
 import json
 import sys
 from pathlib import Path
+from typing import Any
 
 import pytest
 
@@ -73,7 +74,7 @@ class TestLoadPreferencesExistingFile:
 
         real_read_text = Path.read_text
 
-        def flaky_read_text(self: Path, *args: object, **kwargs: object) -> str:
+        def flaky_read_text(self: Path, *args: Any, **kwargs: Any) -> str:
             if self == prefs_path:
                 raise OSError("disk error")
             return real_read_text(self, *args, **kwargs)

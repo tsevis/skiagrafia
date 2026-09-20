@@ -8,6 +8,7 @@ import numpy as np
 import torch
 from numpy.typing import NDArray
 
+from models.vendored_contracts import VitMatteModelLike
 from utils.mps_utils import DEVICE
 
 logger = logging.getLogger(__name__)
@@ -26,15 +27,19 @@ class VitMatteRefiner:
 
     def __init__(self, model_dir: Path | None = None, quality: str = "balanced") -> None:
         self._model_dir = model_dir
-        self._model: object | None = None
-        self._processor: object | None = None
+        self._model: VitMatteModelLike | None = None
+        self._processor: VitMatteModelLike | None = None
         self._max_side = 1536
         self._quality = quality
 
-    def _load(self) -> None:
-        """Load VitMatte model weights from local directory (lazy, once)."""
-        if self._model is not None:
-            return
+    def _load(self) -> tuple[VitMatteModelLike, VitMatteModelLike]:
+        """Load VitMatte weights from a local directory (lazy, once).
+
+        Returns (processor, model) rather than None, so a caller holds two
+        values that cannot be None. Every failure path below raises.
+        """
+        if self._processor is not None and self._model is not None:
+            return self._processor, self._model
         try:
             from transformers import VitMatteForImageMatting, VitMatteImageProcessor
 
@@ -51,15 +56,23 @@ class VitMatteRefiner:
                     "Download with: huggingface-cli download hustvl/vitmatte-base-composition-1k"
                 )
 
-            self._processor = VitMatteImageProcessor.from_pretrained(
+            processor = VitMatteImageProcessor.from_pretrained(
                 str(vitmatte_dir), local_files_only=True
             )
-            self._model = VitMatteForImageMatting.from_pretrained(
+            model = VitMatteForImageMatting.from_pretrained(
                 str(vitmatte_dir), local_files_only=True
             )
-            self._model.to(DEVICE)
-            self._model.eval()
+            # Moved and switched to eval BEFORE being published on self, so a
+            # concurrent reader can never observe a half-prepared model.
+            # transformers' stubs type from_pretrained's result as the class
+            # rather than an instance, so `.to` resolves to the unbound method
+            # and DEVICE lands on `self`. Runtime is an instance; scoped here.
+            model.to(DEVICE)  # type: ignore[arg-type]
+            model.eval()
+            self._processor = processor
+            self._model = model
             logger.info("VitMatte loaded on %s from %s", DEVICE, vitmatte_dir)
+            return processor, model
         except ImportError:
             logger.warning(
                 "transformers VitMatte not available — alpha matting disabled."
@@ -94,11 +107,11 @@ class VitMatteRefiner:
     def _infer(self, image, trimap):
         from PIL import Image
 
-        self._load()
-        inputs = self._processor(images=Image.fromarray(image), trimaps=Image.fromarray(trimap), return_tensors="pt")
+        processor, model = self._load()
+        inputs = processor(images=Image.fromarray(image), trimaps=Image.fromarray(trimap), return_tensors="pt")
         inputs = {k: v.to(DEVICE) for k, v in inputs.items()}
         with torch.inference_mode():
-            alpha = self._model(**inputs).alphas.squeeze().cpu().numpy()
+            alpha = model(**inputs).alphas.squeeze().cpu().numpy()
         h, w = image.shape[:2]
         if alpha.shape[0] >= h and alpha.shape[1] >= w:
             alpha = alpha[:h, :w]  # processor pads on right/bottom

@@ -5,12 +5,14 @@ import queue
 import threading
 import tkinter as tk
 from tkinter import ttk
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, cast
 
 from ui.theme import TAG_COLOURS
 
 if TYPE_CHECKING:
     from ui.batch.batch_view import BatchView
+    from ui.batch.steps.step_configure import StepConfigure
+    from ui.batch.steps.step_import import StepImport
 
 logger = logging.getLogger(__name__)
 
@@ -86,7 +88,7 @@ class StepInterrogate:
         """Gather image paths from the import step and launch interrogation."""
         step_configure = self._view._step_views[1]
         config = (
-            step_configure.get_config()
+            cast("StepConfigure", step_configure).get_config()
             if step_configure and hasattr(step_configure, "get_config")
             else {}
         )
@@ -94,7 +96,7 @@ class StepInterrogate:
         step_import = self._view._step_views[0]
         image_paths: list[str] = []
         if step_import and hasattr(step_import, "get_image_paths"):
-            image_paths = step_import.get_image_paths()
+            image_paths = cast("StepImport", step_import).get_image_paths()
 
         if not image_paths:
             self._progress_label.config(text="No images imported — go back to Step 1")

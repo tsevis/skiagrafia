@@ -139,8 +139,17 @@ def render_layer_masks(
         mask = getattr(layer, "mask", None)
         if mask is not None:
             matte = Image.fromarray(mask).resize((render_w, render_h), Image.Resampling.LANCZOS)
-            # Bind the loop's opacity explicitly rather than closing over it.
-            matte = matte.point(lambda value, o=layer_opacity: round(value * o))
+
+            # A plain lambda here leaves its parameter's type ambiguous
+            # between Image.point()'s per-pixel-int and per-transform
+            # overloads; a `def` with an explicit `int` parameter pins it to
+            # the per-pixel-int overload actually intended.  The default
+            # argument still binds the loop's opacity explicitly rather than
+            # closing over it.
+            def _scale_alpha(value: int, o: float = layer_opacity) -> int:
+                return round(value * o)
+
+            matte = matte.point(_scale_alpha)
             overlay = Image.new("RGBA", (render_w, render_h), OVERLAY_PALETTE[i % len(OVERLAY_PALETTE)])
             overlay.putalpha(matte)
             photo = ImageTk.PhotoImage(overlay)

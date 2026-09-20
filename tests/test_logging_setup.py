@@ -39,6 +39,7 @@ class TestRotatingFileHandler:
     def test_oversized_log_rolls_over(self, tmp_path: Path) -> None:
         log_file = tmp_path / "skiagrafia.log"
         handler = build_file_handler(log_file)
+        assert isinstance(handler, logging.handlers.RotatingFileHandler)
         handler.maxBytes = 512  # keep the test cheap
         record_logger = logging.getLogger("test_rollover_probe")
         record_logger.propagate = False
@@ -58,6 +59,7 @@ class TestRotatingFileHandler:
     def test_total_files_capped_by_backup_count(self, tmp_path: Path) -> None:
         log_file = tmp_path / "skiagrafia.log"
         handler = build_file_handler(log_file)
+        assert isinstance(handler, logging.handlers.RotatingFileHandler)
         handler.maxBytes = 256
         record_logger = logging.getLogger("test_cap_probe")
         record_logger.propagate = False

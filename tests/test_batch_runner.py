@@ -124,6 +124,25 @@ def _fake_executor(monkeypatch: pytest.MonkeyPatch) -> type[FakeExecutor]:
     return FakeExecutor
 
 
+def _drain(runner: BatchRunner) -> None:
+    """Drain the `FakeExecutor` the `_fake_executor` fixture installed.
+
+    `BatchRunner._executor` is typed as `ProcessPoolExecutor | None` in
+    production; the isinstance check both narrows that for the type checker
+    and asserts the fixture actually did its job.
+    """
+    executor = runner._executor
+    assert isinstance(executor, FakeExecutor)
+    executor.drain()
+
+
+def _record(runner: BatchRunner, image_id: str) -> JobRecord:
+    """Fetch a state record that a test expects to exist."""
+    record = runner._state.get(image_id)
+    assert record is not None
+    return record
+
+
 def _patch_process_single(
     monkeypatch: pytest.MonkeyPatch,
     fn_by_image: dict[str, PipelineResult] | None = None,
@@ -318,7 +337,7 @@ class TestDiscoverImages:
             _make_config(tmp_path, input_images=[str(approved)], max_workers=1)
         )
         runner.start()
-        runner._executor.drain()
+        _drain(runner)
 
         assert [Path(path).name for path, _ in calls] == ["approved.png"]
         assert runner._state.get("new-unreviewed") is None
@@ -341,12 +360,12 @@ class TestStartSuccessPath:
         cfg = _make_config(tmp_path, max_workers=1)
         runner = BatchRunner(cfg)
         runner.start()
-        runner._executor.drain()
+        _drain(runner)
 
-        assert runner._state.get("a").status == JobStatus.COMPLETE
-        assert runner._state.get("b").status == JobStatus.COMPLETE
-        assert runner._state.get("a").output_svg == str(input_dir / "a.png") + ".svg"
-        assert runner._state.get("a").output_all_objects_tiff == str(input_dir / "a.png") + ".all-objects.tiff"
+        assert _record(runner, "a").status == JobStatus.COMPLETE
+        assert _record(runner, "b").status == JobStatus.COMPLETE
+        assert _record(runner, "a").output_svg == str(input_dir / "a.png") + ".svg"
+        assert _record(runner, "a").output_all_objects_tiff == str(input_dir / "a.png") + ".all-objects.tiff"
         assert not runner.is_running
         runner.close()
 
@@ -361,7 +380,7 @@ class TestStartSuccessPath:
         cfg = _make_config(tmp_path, max_workers=1)
         runner = BatchRunner(cfg)
         runner.start()
-        runner._executor.drain()
+        _drain(runner)
 
         assert len(calls) == 1
         image_path, config_dict = calls[0]
@@ -403,7 +422,7 @@ class TestStartSuccessPath:
         )
         runner = BatchRunner(cfg)
         runner.start()
-        runner._executor.drain()
+        _drain(runner)
 
         record = runner._state.get("a")
         assert record is not None
@@ -453,13 +472,13 @@ class TestStartSuccessPath:
 
         runner = BatchRunner(cfg)
         runner.start()
-        runner._executor.drain()
+        _drain(runner)
 
         processed_stems = {Path(p).stem for p, _ in calls}
         assert processed_stems == {"todo"}
-        assert runner._state.get("done").status == JobStatus.COMPLETE
-        assert runner._state.get("skip").status == JobStatus.SKIPPED
-        assert runner._state.get("todo").status == JobStatus.COMPLETE
+        assert _record(runner, "done").status == JobStatus.COMPLETE
+        assert _record(runner, "skip").status == JobStatus.SKIPPED
+        assert _record(runner, "todo").status == JobStatus.COMPLETE
         runner.close()
 
     def test_progress_callback_invoked_per_image_and_on_completion(
@@ -481,7 +500,7 @@ class TestStartSuccessPath:
             completion_callback=completion_events.append,
         )
         runner.start()
-        runner._executor.drain()
+        _drain(runner)
 
         assert len(progress_events) == 2
         assert progress_events[-1].completed == 2
@@ -504,7 +523,7 @@ class TestStartSuccessPath:
         assert runner._image_paths == []
 
         runner.start()
-        runner._executor.drain()
+        _drain(runner)
 
         assert len(runner._image_paths) == 1
         runner.close()
@@ -520,7 +539,7 @@ class TestStartSuccessPath:
         cfg = _make_config(tmp_path, max_workers=2)
         runner = BatchRunner(cfg)
         runner.start()
-        runner._executor.drain()
+        _drain(runner)
 
         assert isinstance(runner._executor, FakeExecutor)
         assert runner._executor.max_workers == (1 if sys.platform == "darwin" else 2)
@@ -546,10 +565,10 @@ class TestStartFailurePath:
         cfg = _make_config(tmp_path, max_workers=1)
         runner = BatchRunner(cfg)
         runner.start()
-        runner._executor.drain()
+        _drain(runner)
 
-        good = runner._state.get("good")
-        bad = runner._state.get("bad")
+        good = _record(runner, "good")
+        bad = _record(runner, "bad")
         assert good.status == JobStatus.COMPLETE
         assert bad.status == JobStatus.FAILED
         assert bad.error == "vectorizer exploded"
@@ -567,10 +586,11 @@ class TestStartFailurePath:
         cfg = _make_config(tmp_path, max_workers=1)
         runner = BatchRunner(cfg)
         runner.start()
-        runner._executor.drain()
+        _drain(runner)
 
-        record = runner._state.get("a")
+        record = _record(runner, "a")
         assert record.status == JobStatus.FAILED
+        assert record.error is not None
         assert "model crashed" in record.error
         assert not runner.is_running
         runner.close()
@@ -587,7 +607,7 @@ class TestStartFailurePath:
         cfg = _make_config(tmp_path, max_workers=1)
         runner = BatchRunner(cfg, completion_callback=completion_events.append)
         runner.start()
-        runner._executor.drain()
+        _drain(runner)
 
         assert len(completion_events) == 1
         assert completion_events[0].failed == 1
@@ -615,9 +635,9 @@ class TestResume:
         _patch_process_single(monkeypatch, fn=first_outcome)
         runner1 = BatchRunner(cfg)
         runner1.start()
-        runner1._executor.drain()
-        assert runner1._state.get("a").status == JobStatus.FAILED
-        assert runner1._state.get("b").status == JobStatus.COMPLETE
+        _drain(runner1)
+        assert _record(runner1, "a").status == JobStatus.FAILED
+        assert _record(runner1, "b").status == JobStatus.COMPLETE
         runner1.close()
 
         # Second run against the same batch_id/output_dir: only "a" (not
@@ -625,12 +645,12 @@ class TestResume:
         calls = _patch_process_single(monkeypatch)
         runner2 = BatchRunner(cfg)
         runner2.start()
-        runner2._executor.drain()
+        _drain(runner2)
 
         processed_stems = {Path(p).stem for p, _ in calls}
         assert processed_stems == {"a"}
-        assert runner2._state.get("a").status == JobStatus.COMPLETE
-        assert runner2._state.get("b").status == JobStatus.COMPLETE
+        assert _record(runner2, "a").status == JobStatus.COMPLETE
+        assert _record(runner2, "b").status == JobStatus.COMPLETE
         runner2.close()
 
 
