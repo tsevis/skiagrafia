@@ -1,10 +1,10 @@
 # Skiagrafia — File Structure
 
-> **v0.4.0 · Python 3.13 · Apple Silicon**
+> **v0.5.0 · Python 3.13 · Apple Silicon**
 >
 > A local semantic vectorizing and masking desktop application.
 
-[![Version](https://img.shields.io/badge/version-0.4.0-blue.svg)](https://github.com/tsevis/skiagrafia)
+[![Version](https://img.shields.io/badge/version-0.5.0-blue.svg)](https://github.com/tsevis/skiagrafia)
 [![Python](https://img.shields.io/badge/python-3.13-blue.svg)](https://www.python.org/downloads/)
 [![Platform](https://img.shields.io/badge/platform-macOS%20Apple%20Silicon-lightgrey.svg)](https://support.apple.com/en-us/116943)
 [![Architecture](https://img.shields.io/badge/architecture-v5.2-orange.svg)](README.md#architecture)
@@ -27,7 +27,7 @@ instructions.
 ```text
 skiagrafia/
 ├── main.py                         # Application bootstrap and Tk root
-├── pyproject.toml                  # v0.4.0 metadata, Python/runtime dependencies
+├── pyproject.toml                  # v0.5.0 metadata, Python/runtime dependencies
 ├── uv.lock                         # Locked Python 3.13 dependency resolution
 ├── run.sh                          # Validates and launches .venv/bin/python
 ├── scripts/
@@ -39,7 +39,11 @@ skiagrafia/
 │   ├── contracts.py                # Five capability Protocols + CapabilitySet
 │   ├── factory.py                  # Preferences → concrete capability wiring
 │   ├── orchestrator.py             # Single-image structural pipeline and outputs
-│   ├── interrogation.py            # VLM candidates, selection policy and glyph logic
+│   ├── pipeline_results.py         # Source, layer and run result models
+│   ├── pipeline_geometry.py        # Pure mask/bbox maths and filename-safe labels
+│   ├── interrogation.py            # VLM candidates and selection policy
+│   ├── typography_labels.py        # Does a label name typography, or single glyphs
+│   ├── typography_matching.py      # Semantic glyphs matched to detector boxes
 │   ├── knowledge.py                # TOML domain-guide models and normalization
 │   ├── batch_runner.py             # ProcessPoolExecutor runner and persisted metrics
 │   ├── batch_session.py            # Frozen run/guide/interrogation/triage snapshots
@@ -56,6 +60,7 @@ skiagrafia/
 │   ├── mlx_sam3.py                 # MLX SAM 3 instance masks + SAM 2.1 fallback
 │   ├── grounded_sam.py             # GroundingDINO detection and SAM 2.1 masks
 │   ├── vitmatte_refiner.py         # Alpha-matte refinement
+│   ├── vendored_contracts.py       # Protocols for model source not importable here
 │   └── moondream_client.py         # Legacy import compatibility shim
 │
 ├── processors/                     # Pure image, mask, vector and output operations
@@ -67,6 +72,7 @@ skiagrafia/
 │
 ├── ui/                             # Tkinter desktop application
 │   ├── main_window.py              # App shell and Single/Batch switching
+│   ├── container_utils.py          # Clearing a container, reporting what it cannot
 │   ├── setup_wizard.py             # Core-model and VLM setup checks/download UI
 │   ├── single/                     # Editable three-panel Single Image workflow
 │   │   ├── left_panel.py           # Labels, scan and pipeline parameters
@@ -75,6 +81,7 @@ skiagrafia/
 │   │   ├── canvas_drawing.py       # Manual selection drawing
 │   │   ├── canvas_events.py        # Canvas interaction bindings
 │   │   ├── canvas_overlays.py      # Mask/vector/composite overlays
+│   │   ├── dnd_contracts.py        # The tkinterdnd2 surface this project relies on
 │   │   └── right_panel.py          # Layer edits and exports
 │   ├── batch/                      # Six-step Batch workflow
 │   │   ├── batch_view.py           # Session wiring, frozen artifacts and resume
@@ -89,6 +96,7 @@ skiagrafia/
 │   ├── model_manager.py            # Core model registry, verified downloads/paths
 │   ├── bootstrap.py                # First-run readiness detection
 │   ├── security.py                 # URL, archive/output path and atomic-write guards
+│   ├── array_types.py              # Narrowing OpenCV returns to their declared dtype
 │   ├── coord_math.py               # Crop, remap and bounding-box transforms
 │   ├── mps_utils.py                # PyTorch MPS/CPU selection
 │   ├── cairo_support.py            # Optional Cairo export support
@@ -99,6 +107,8 @@ skiagrafia/
 │   ├── test_interrogation.py       # Candidate policy and glyph observations
 │   ├── test_batch_*.py             # Batch runner/session/template behavior
 │   ├── test_gui_*.py               # Fast smoke + opt-in window integration coverage
+│   ├── conftest.py                 # Shared fixtures; the hook that marks windowed tests
+│   ├── *_fakes.py                  # Offline capability stand-ins, shared per area
 │   ├── test_security_boundaries.py # I/O, path, URL, archive and SVG guards
 │   └── test_*.py                   # Model, output, state and pipeline regressions
 │
