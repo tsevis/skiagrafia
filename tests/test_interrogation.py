@@ -17,14 +17,16 @@ from core.interrogation import (
     GuidedInterrogator,
     InterrogationCandidate,
     InterrogationSettings,
-    TypographyElement,
-    is_individual_glyph_label,
-    is_typography_label,
     parse_label_candidates,
-    parse_typography_observation,
     rank_detector_phrases,
 )
 from core.knowledge import KnowledgeDomain, KnowledgePack, ObjectKnowledge
+from core.typography_labels import (
+    TypographyElement,
+    is_individual_glyph_label,
+    is_typography_label,
+    parse_typography_observation,
+)
 from models.vlm_client import BaseVLMClient
 
 # ── Fakes ────────────────────────────────────────────────────────────────

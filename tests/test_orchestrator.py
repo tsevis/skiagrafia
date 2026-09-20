@@ -21,12 +21,7 @@ from PIL import Image
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from core.contracts import AlphaRefiner, CapabilitySet, Vectorizer
-from core.interrogation import (
-    InterrogationCandidate,
-    InterrogationResult,
-    TypographyElement,
-    TypographyObservation,
-)
+from core.interrogation import InterrogationCandidate, InterrogationResult
 from core.knowledge import KnowledgeDomain, KnowledgePack, ObjectKnowledge
 from core.orchestrator import Orchestrator
 from core.pipeline_geometry import (
@@ -40,6 +35,7 @@ from core.pipeline_geometry import (
     mask_iou,
     safe_filename_label,
 )
+from core.typography_labels import TypographyElement, TypographyObservation
 from models.grounded_sam import DetectionResult
 
 IMG_SIZE = 64
