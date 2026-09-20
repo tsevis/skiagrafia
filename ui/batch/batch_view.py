@@ -5,6 +5,8 @@ from pathlib import Path
 from tkinter import ttk
 from typing import TYPE_CHECKING, ClassVar, cast
 
+from ui.container_utils import unpack_children
+
 if TYPE_CHECKING:
     from core.batch_runner import BatchConfig
     from core.batch_session import ResumableBatch
@@ -98,13 +100,7 @@ class BatchView:
     def _show_step(self, index: int) -> None:
         """Show the given step view."""
         # Clear content
-        for child in self._content.winfo_children():
-            # winfo_children() may include a Toplevel, which (unlike an
-            # ordinary Widget) supports no geometry manager and never
-            # appears here in practice — this guard keeps that contract
-            # explicit instead of assuming it holds.
-            if isinstance(child, tk.Widget):
-                child.pack_forget()
+        unpack_children(self._content)
 
         self._current_step = index
         self._sidebar.set_active_step(index)

@@ -6,6 +6,7 @@ from collections.abc import Callable
 from tkinter import ttk
 from typing import TYPE_CHECKING
 
+from ui.container_utils import unpack_children
 from ui.mode_switcher import ModeSwitcher
 from ui.theme import get_palette, is_macos
 from utils.preferences import load_preferences
@@ -132,13 +133,7 @@ class MainWindow:
     def _show_mode(self, mode: str) -> None:
         """Show the appropriate view for the given mode."""
         # Clear content
-        for child in self._content.winfo_children():
-            # winfo_children() may include a Toplevel, which (unlike an
-            # ordinary Widget) supports no geometry manager and never
-            # appears here in practice — this guard keeps that contract
-            # explicit instead of assuming it holds.
-            if isinstance(child, tk.Widget):
-                child.pack_forget()
+        unpack_children(self._content)
 
         if mode == "single":
             self._subtitle_label.config(
