@@ -16,6 +16,7 @@ Backward-compat shims (module-level functions) kept for transition period.
 """
 from __future__ import annotations
 
+import hashlib
 import io
 import logging
 import shutil
@@ -38,6 +39,7 @@ _MODEL_DOWNLOAD_HOSTS = {
     "huggingface.co",
 }
 _MAX_SOURCE_ARCHIVE_BYTES = 256 * 1024 * 1024
+_HASH_CHUNK_BYTES = 1024 * 1024
 _MAX_SOURCE_ARCHIVE_MEMBERS = 20_000
 
 # ── Registry of known models ────────────────────────────────────────────────
@@ -52,6 +54,12 @@ REGISTRY: dict[str, dict[str, object]] = {
             "archive/refs/heads/main.zip"
         ),
         "zip_root": "Grounded-SAM-2-main",
+        # NO PIN IS POSSIBLE HERE, and that is a property of the URL. It
+        # names refs/heads/main, so the archive changes whenever that branch
+        # does; a digest recorded today would reject every later fetch. What
+        # bounds this entry is _extract_archive_safely() plus the size and
+        # member caps, not integrity.
+        "sha256": None,
         "approx_mb": 30,
     },
     "groundingdino_swint_ogc.pth": {
@@ -62,6 +70,13 @@ REGISTRY: dict[str, dict[str, object]] = {
             "https://github.com/IDEA-Research/GroundingDINO/releases/download/"
             "v0.1.0-alpha/groundingdino_swint_ogc.pth"
         ),
+        # UPSTREAM PUBLISHES NO DIGEST. Checked 2026-09-20: the GitHub
+        # releases API reports `digest: null` for this asset, and the
+        # repository documents no checksum anywhere. A hash computed from a
+        # copy already on a developer's disk would be trust-on-first-use
+        # wearing the costume of an integrity check, so this stays unpinned
+        # and honest about it.
+        "sha256": None,
         "approx_mb": 694,
     },
     "sam2.1_hiera_large.pt": {
@@ -72,6 +87,12 @@ REGISTRY: dict[str, dict[str, object]] = {
             "https://dl.fbaipublicfiles.com/segment_anything_2/"
             "092824/sam2.1_hiera_large.pt"
         ),
+        # UPSTREAM PUBLISHES NO DIGEST. Checked 2026-09-20: Meta's own
+        # checkpoints/download_ckpts.sh verifies nothing, and the only
+        # server-side value is an S3 multipart ETag ("...-108"), which is a
+        # hash of part hashes and cannot be compared against the file. Same
+        # reasoning as the GroundingDINO entry above.
+        "sha256": None,
         "approx_mb": 898,
     },
     "vitmatte-base-composition-1k": {
@@ -83,12 +104,70 @@ REGISTRY: dict[str, dict[str, object]] = {
             "config.json",
             "preprocessor_config.json",
         ],
-        # transformers loads either format; existing installs may have
-        # only the .bin. Fresh downloads fetch the first entry.
-        "hf_weight_alternatives": ["model.safetensors", "pytorch_model.bin"],
+        # transformers loads either format, and an existing install may
+        # already carry a .safetensors from elsewhere, so both stay
+        # acceptable. A FRESH DOWNLOAD FETCHES THE FIRST ENTRY, and
+        # hustvl/vitmatte-base-composition-1k publishes no model.safetensors
+        # at all -- its resolve URL answers 404. The .bin leads for that
+        # reason, not as a preference.
+        "hf_weight_alternatives": ["pytorch_model.bin", "model.safetensors"],
+        # PUBLISHED BY UPSTREAM, not computed from this machine. The weight
+        # digest is the sha256 the HuggingFace API reports for the LFS blob
+        # (/api/models/<repo>?blobs=true); the two configs are not LFS, so
+        # the API reports no digest and these are the sha256 of the bytes
+        # their resolve URLs served. Read 2026-09-20.
+        #
+        # model.safetensors carries no pin: it does not exist upstream, so
+        # there is nothing to pin it to. It is only ever accepted, never
+        # fetched.
+        "sha256": {
+            "pytorch_model.bin": (
+                "b2521bcc4b719fb24611c39605b6642162fd7502e69b3cc846506ca921757b41"
+            ),
+            "config.json": (
+                "6c88774b9be97a236203be0d978b1ba8121bc6e585d10ca69ff3e90f921458be"
+            ),
+            "preprocessor_config.json": (
+                "05b1234eb3f939dca65743521503302c8bace56d07d52b6c6e993104f216c85a"
+            ),
+        },
         "approx_mb": 380,
     },
 }
+
+
+def _entry_sha256(entry: dict[str, object], filename: str | None = None) -> str | None:
+    """Declared digest for an entry, or for one file inside an "hf_files" one.
+
+    Returns None when the entry declares no pin, which is not an error: see
+    the registry comments for the three entries upstream publishes no digest
+    for. A pin that is present is always enforced.
+    """
+    declared = entry.get("sha256")
+    if filename is not None:
+        if not isinstance(declared, dict):
+            return None
+        value = declared.get(filename)
+        return str(value) if value else None
+    return str(declared) if isinstance(declared, str) and declared else None
+
+
+def _verify_sha256(path: Path, expected: str, label: str) -> None:
+    """Raise SecurityError unless `path` hashes to `expected`.
+
+    Reads in chunks: these files reach ~900 MB and the check must not need
+    the whole payload in memory.
+    """
+    digest = hashlib.sha256()
+    with path.open("rb") as handle:
+        while chunk := handle.read(_HASH_CHUNK_BYTES):
+            digest.update(chunk)
+    actual = digest.hexdigest()
+    if actual != expected.lower():
+        raise SecurityError(
+            f"Integrity check failed for {label}: expected sha256 {expected}, "
+            f"got {actual}. The download was discarded."
+        )
 
 
 def _entry_files(entry: dict[str, object], key: str = "hf_files") -> list[str]:
@@ -197,7 +276,12 @@ class ModelManager:
         elif kind == "hf_files":
             self._download_hf_files(entry, path, progress_callback)
         else:
-            self._download_file(str(url), path, progress_callback)
+            self._download_file(
+                str(url),
+                path,
+                progress_callback,
+                expected_sha256=_entry_sha256(entry),
+            )
         logger.info("Downloaded %s", name)
         return path
 
@@ -208,8 +292,14 @@ class ModelManager:
         url: str,
         path: Path,
         progress_callback: Callable[[int, int | None], None] | None = None,
+        expected_sha256: str | None = None,
     ) -> None:
-        """Fetch a single file from a direct URL with optional progress."""
+        """Fetch a single file from a direct URL with optional progress.
+
+        When `expected_sha256` is given the payload is verified while it is
+        still the `.part` file, so a mismatch never reaches the destination
+        name and the `finally` below removes it.
+        """
         validate_download_url(url, _MODEL_DOWNLOAD_HOSTS)
         path.parent.mkdir(parents=True, exist_ok=True)
         tmp_path = path.with_suffix(path.suffix + ".part")
@@ -225,6 +315,8 @@ class ModelManager:
 
         try:
             urllib.request.urlretrieve(url, tmp_path, reporthook=_reporthook)  # noqa: S310 — validate_download_url() enforces HTTPS and the host allowlist
+            if expected_sha256 is not None:
+                _verify_sha256(tmp_path, expected_sha256, path.name)
             tmp_path.replace(path)
         finally:
             tmp_path.unlink(missing_ok=True)
@@ -249,7 +341,10 @@ class ModelManager:
             if dest.is_file():
                 continue
             cls._download_file(
-                f"{base_url}/resolve/main/{filename}", dest, progress_callback
+                f"{base_url}/resolve/main/{filename}",
+                dest,
+                progress_callback,
+                expected_sha256=_entry_sha256(entry, filename),
             )
 
     @staticmethod

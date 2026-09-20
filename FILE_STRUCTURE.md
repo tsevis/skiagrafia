@@ -191,9 +191,19 @@ than part of ordinary development checks.
 - MLX SAM 3 improves text-to-instance segmentation, but semantic recognition
   remains model output. Ambiguous material needs Triage and per-image
   exceptions.
-- The download registry restricts source hosts and the output paths/SVGs are
-  validated, but model weights are external artifacts and are not yet pinned
-  to immutable SHA-256 values.
+- The download registry restricts source hosts, the output paths/SVGs are
+  validated, and a registry entry may now pin an immutable SHA-256 that is
+  verified before the download is moved into place. **Three of the four
+  entries are deliberately unpinned, because upstream publishes no digest to
+  pin them to** (checked 2026-09-20): the GitHub releases API reports
+  `digest: null` for `groundingdino_swint_ogc.pth`; `sam2.1_hiera_large.pt`
+  offers only an S3 multipart ETag, which is a hash of part hashes and cannot
+  be compared against the file; and `grounded-sam-2-source` points at
+  `refs/heads/main.zip`, a moving target that no fixed digest can describe.
+  Hashing the copies already on a developer's disk would record whatever
+  those copies are — trust-on-first-use in the costume of an integrity check
+  — so it is not done. Only `vitmatte-base-composition-1k` is pinned, from
+  HuggingFace's published LFS digest and the bytes its resolve URLs served.
 - Batch state is JSON in SQLite (`core/state_manager.py`). It is never
   unpickled, because a `state.db` can arrive from a copied or shared batch
   folder; a record that is not a valid job record raises instead of loading.
