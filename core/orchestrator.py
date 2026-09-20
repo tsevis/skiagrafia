@@ -11,27 +11,33 @@ All inference runs locally. VLM clients communicate with local services.
 """
 from __future__ import annotations
 
-import itertools
 import logging
 import re
 from collections.abc import Callable
 from hashlib import sha256
 from pathlib import Path
-from typing import NamedTuple, cast
+from typing import cast
 
 import cv2
 import numpy as np
 from numpy.typing import NDArray
-from pydantic import BaseModel, ConfigDict, Field
 
 from core.contracts import CapabilitySet
 from core.interrogation import (
     InterrogationCandidate,
-    TypographyObservation,
     is_individual_glyph_label,
 )
 from core.knowledge import KnowledgePack
 from core.layer_editing import all_objects_alpha, body_alpha
+from core.pipeline_geometry import (
+    bbox_area,
+    clip_mask_to_bbox,
+    crop_to_bbox,
+    mask_iou,
+    safe_filename_label,
+)
+from core.pipeline_results import LayerResult, PipelineResult, _SourceImage
+from core.typography_matching import resolve_glyph_detections
 from models.grounded_sam import DetectionResult
 from processors.mask_ops import refine_mask
 from processors.output_writer import write_svg, write_tiff
@@ -53,27 +59,8 @@ MIN_CONFIRMED_COVERAGE_PCT = 0.05
 PARENT_IOU_MERGE = 0.50
 PARENT_CONTAINMENT_MERGE = 0.75
 BBOX_IOU_MERGE = 0.60
-BBOX_EXPAND_RATIO = 0.30
-MAX_LABEL_FILENAME_LEN = 60  # max chars of a label used in output filenames
-TYPOGRAPHY_BOX_MATCH_MIN_IOU = 0.30
-TYPOGRAPHY_COMPOSITE_MIN_CONTRIBUTION = 0.15
-TYPOGRAPHY_COMPOSITE_MIN_COVERAGE = 0.80
 
 
-def _safe_filename_label(label: str) -> str:
-    """Truncate and sanitize a label for use in output filenames.
-
-    Moondream can return extremely long child labels (e.g. numbered
-    lists of 38 items).  macOS enforces a 255-byte filename limit.
-    """
-    # Replace path-unsafe characters
-    safe = re.sub(r"[^A-Za-z0-9._ -]+", "_", label).strip(". ")
-    safe = safe.replace("/", "_").replace("\\", "_").replace(":", "_")
-    if not safe:
-        safe = "layer"
-    if len(safe) > MAX_LABEL_FILENAME_LEN:
-        safe = safe[:MAX_LABEL_FILENAME_LEN].rstrip(". ")
-    return safe
 
 STRUCTURAL_STEPS = [
     "Loading image",
@@ -90,209 +77,26 @@ STRUCTURAL_STEPS = [
 PIPELINE_STEPS = STRUCTURAL_STEPS
 
 
-class _SourceImage(NamedTuple):
-    """What loading an image produces, carried between pipeline stages.
-
-    A NamedTuple rather than four loose locals threaded through five
-    signatures: the pixels, the alpha and the ICC profile belong together,
-    and nothing downstream may replace one of them.
-    """
-
-    rgb: NDArray[np.uint8]
-    alpha: NDArray[np.uint8]
-    icc: bytes | None
-    detection: NDArray[np.uint8]
-    height: int
-    width: int
 
 
-class LayerResult(BaseModel):
-    model_config = ConfigDict(arbitrary_types_allowed=True)
-
-    layer_id: str = ""
-    parent_id: str | None = None
-    confidence: float | None = None
-    source: str = ""
-    alpha_path: str | None = None
-    mask: NDArray[np.uint8] | None = Field(default=None, exclude=True)
-    alpha: NDArray[np.uint8] | None = Field(default=None, exclude=True)
-    preview_opacity: float = Field(default=1.0, exclude=True)
-    label: str
-    role: str
-    parent_label: str | None = None
-    bbox: tuple[int, int, int, int]
-    svg_data: str = ""
-    dx: int = 0
-    dy: int = 0
 
 
-class PipelineResult(BaseModel):
-    image_path: str
-    width: int
-    height: int
-    layers: list[LayerResult] = []
-    svg_path: str | None = None
-    tiff_path: str | None = None
-    all_objects_tiff_path: str | None = None
-    error: str | None = None
-    warnings: list[str] = Field(default_factory=list)
-    tiff_files: list[str] = Field(default_factory=list)
 
 
-def _mask_iou(a: NDArray[np.uint8], b: NDArray[np.uint8]) -> float:
-    a_bool, b_bool = a > 127, b > 127
-    inter = np.logical_and(a_bool, b_bool).sum()
-    union = np.logical_or(a_bool, b_bool).sum()
-    return float(inter / union) if union else 0.0
 
 
-def _mask_containment(a: NDArray[np.uint8], b: NDArray[np.uint8]) -> float:
-    """Fraction of the *smaller* mask that is contained in the larger one.
-
-    Returns a value in [0, 1].  A high value means one mask is mostly
-    inside the other — strong evidence they represent the same object even
-    when IoU is low (because one mask is much larger).
-    """
-    a_bool, b_bool = a > 127, b > 127
-    a_area = int(a_bool.sum())
-    b_area = int(b_bool.sum())
-    if a_area == 0 or b_area == 0:
-        return 0.0
-    inter = int(np.logical_and(a_bool, b_bool).sum())
-    smaller = min(a_area, b_area)
-    return float(inter / smaller)
 
 
-def _bbox_overlaps(
-    child_bbox: tuple[int, int, int, int],
-    parent_bbox: tuple[int, int, int, int],
-    img_h: int,
-    img_w: int,
-    expand: float = BBOX_EXPAND_RATIO,
-) -> bool:
-    px0, py0, px1, py1 = parent_bbox
-    pw, ph = px1 - px0, py1 - py0
-    ex0 = max(0, int(px0 - pw * expand))
-    ey0 = max(0, int(py0 - ph * expand))
-    ex1 = min(img_w, int(px1 + pw * expand))
-    ey1 = min(img_h, int(py1 + ph * expand))
-    cx0, cy0, cx1, cy1 = child_bbox
-    return cx0 < ex1 and cx1 > ex0 and cy0 < ey1 and cy1 > ey0
 
 
-def _bbox_area(bbox: tuple[int, int, int, int]) -> int:
-    x0, y0, x1, y1 = bbox
-    return max(0, x1 - x0) * max(0, y1 - y0)
 
 
-def _bbox_iou(
-    a: tuple[int, int, int, int],
-    b: tuple[int, int, int, int],
-) -> float:
-    """Intersection-over-union of two bounding boxes."""
-    ax0, ay0, ax1, ay1 = a
-    bx0, by0, bx1, by1 = b
-    ix0 = max(ax0, bx0)
-    iy0 = max(ay0, by0)
-    ix1 = min(ax1, bx1)
-    iy1 = min(ay1, by1)
-    inter = max(0, ix1 - ix0) * max(0, iy1 - iy0)
-    area_a = _bbox_area(a)
-    area_b = _bbox_area(b)
-    union = area_a + area_b - inter
-    return float(inter / union) if union else 0.0
 
 
-def _normalized_bbox_to_image(
-    bbox: tuple[int, int, int, int],
-    width: int,
-    height: int,
-) -> tuple[int, int, int, int]:
-    """Convert a 0..1000 VLM box to the current image dimensions."""
-    x0, y0, x1, y1 = bbox
-    return (
-        round(x0 * width / 1000),
-        round(y0 * height / 1000),
-        round(x1 * width / 1000),
-        round(y1 * height / 1000),
-    )
 
 
-def _rectangle_union_area(rectangles: list[tuple[int, int, int, int]]) -> int:
-    """Return exact union area for a small list of axis-aligned rectangles."""
-    rectangles = [rectangle for rectangle in rectangles if _bbox_area(rectangle)]
-    if not rectangles:
-        return 0
-    x_edges = sorted({edge for rectangle in rectangles for edge in (rectangle[0], rectangle[2])})
-    area = 0
-    for left, right in itertools.pairwise(x_edges):
-        if right <= left:
-            continue
-        spans = sorted(
-            (rectangle[1], rectangle[3])
-            for rectangle in rectangles
-            if rectangle[0] < right and rectangle[2] > left
-        )
-        covered_y = 0
-        # ONE optional pair, not two optional ints. The bounds are only ever
-        # meaningful together, and as separate names nothing said so: the
-        # `start > current_end` branch is reachable only because the other
-        # name happens to have been set on the same line. A tuple makes that
-        # invariant structural instead of a convention, and each step rebinds
-        # rather than mutating.
-        current: tuple[int, int] | None = None
-        for start, end in spans:
-            if current is None:
-                current = (start, end)
-            elif start > current[1]:
-                covered_y += current[1] - current[0]
-                current = (start, end)
-            else:
-                current = (current[0], max(current[1], end))
-        if current is not None:
-            covered_y += current[1] - current[0]
-        area += (right - left) * covered_y
-    return area
 
 
-def _glyph_layer_label(category: str, glyph: str) -> str:
-    """Make a readable output label without trusting a VLM for filenames."""
-    words = set(re.findall(r"[^\W\d_]+|\d+", category.casefold(), flags=re.UNICODE))
-    if words & {"letter", "letters"}:
-        kind = "letter"
-    elif words & {"digit", "digits", "numeral", "numerals", "number", "numbers"}:
-        kind = "digit"
-    else:
-        kind = "glyph"
-    return f"{kind} {glyph}"
-
-
-def _crop_to_bbox(
-    image: NDArray[np.uint8],
-    bbox: tuple[int, int, int, int],
-    padding: int = 8,
-) -> tuple[NDArray[np.uint8], int, int]:
-    h, w = image.shape[:2]
-    x0, y0, x1, y1 = bbox
-    x0 = max(0, x0 - padding)
-    y0 = max(0, y0 - padding)
-    x1 = min(w, x1 + padding)
-    y1 = min(h, y1 + padding)
-    return image[y0:y1, x0:x1], x0, y0
-
-
-def _clip_mask_to_bbox(
-    mask: NDArray[np.uint8],
-    bbox: tuple[int, int, int, int],
-) -> NDArray[np.uint8]:
-    """Zero out mask pixels outside the bounding box."""
-    x0, y0, x1, y1 = bbox
-    h, w = mask.shape[:2]
-    x0, y0 = max(0, x0), max(0, y0)
-    x1, y1 = min(w, x1), min(h, y1)
-    clipped = np.zeros_like(mask)
-    clipped[y0:y1, x0:x1] = mask[y0:y1, x0:x1]
-    return clipped
 
 
 class Orchestrator:
@@ -435,6 +239,33 @@ class Orchestrator:
 
     # ── Stage 2-3: parent objects ───────────────────────────────────────
 
+    def _parent_proposals(
+        self,
+        image: NDArray[np.uint8],
+        parent: InterrogationCandidate,
+        manual_lookup: dict,
+        result: PipelineResult,
+    ) -> tuple[list, list[str]]:
+        """Detections for one parent, with the typography fork applied.
+
+        Returns an empty list when nothing was found, having recorded why --
+        so the caller's loop reads as "no proposals, next parent" instead of
+        carrying the reason for that inline.
+        """
+        self._report(2, f"Finding instances: {parent.display_label}")
+        detections = self._detect_instances(image, parent, manual_lookup)
+        layer_labels = [parent.display_label] * len(detections)
+        if is_individual_glyph_label(parent.display_label) and detections:
+            detections, layer_labels, glyph_warnings = resolve_glyph_detections(
+                self._interrogator, image, parent, detections, layer_labels
+            )
+            result.warnings.extend(glyph_warnings)
+        if not detections:
+            result.warnings.append(
+                f"Could not locate '{parent.display_label}'. Draw a box to select it manually."
+            )
+        return detections, layer_labels
+
     def _detect_parent_layers(
         self,
         source: _SourceImage,
@@ -454,15 +285,10 @@ class Orchestrator:
         masks: dict[str, NDArray[np.uint8]] = {}
         accepted = []
         for parent in parents:
-            self._report(2, f"Finding instances: {parent.display_label}")
-            detections = self._detect_instances(image, parent, manual_lookup)
-            layer_labels = [parent.display_label] * len(detections)
-            if is_individual_glyph_label(parent.display_label) and detections:
-                detections, layer_labels = self._resolve_glyph_detections(
-                    image, parent, detections, layer_labels, result
-                )
+            detections, layer_labels = self._parent_proposals(
+                image, parent, manual_lookup, result
+            )
             if not detections:
-                result.warnings.append(f"Could not locate '{parent.display_label}'. Draw a box to select it manually.")
                 continue
             for (detection, is_manual), layer_label in zip(detections, layer_labels, strict=True):
                 if len(accepted) >= 64:
@@ -476,7 +302,7 @@ class Orchestrator:
                     result.warnings.append(f"Empty or tiny mask for '{parent.display_label}'.")
                     continue
                 # Containment and overlapping boxes alone do not imply duplication.
-                duplicate = next((entry for entry in accepted if _mask_iou(mask, masks[entry[0].layer_id]) > 0.9), None)
+                duplicate = next((entry for entry in accepted if mask_iou(mask, masks[entry[0].layer_id]) > 0.9), None)
                 if duplicate:
                     existing_label = duplicate[1].display_label
                     extra = children_by_parent.get(parent.display_label, [])
@@ -491,42 +317,71 @@ class Orchestrator:
                 accepted.append((layer, parent))
         return masks, accepted
 
-    def _resolve_glyph_detections(
-        self,
-        image: NDArray[np.uint8],
-        parent: InterrogationCandidate,
-        detections: list,
-        layer_labels: list[str],
-        result: PipelineResult,
-    ) -> tuple[list, list[str]]:
-        """Split typography detections into individual glyphs where possible.
-
-        Falls back to rejecting composites that straddle several glyphs, and
-        records a warning for each path so the result explains what it did.
-        """
-        observation = self._inspect_individual_glyphs(image, parent)
-        matched = (
-            self._match_typography_detections(image, detections, observation, parent.display_label)
-            if observation is not None
-            else None
-        )
-        if matched is not None:
-            return matched
-        detections, rejected = self._reject_cross_glyph_composites(detections)
-        layer_labels = [parent.display_label] * len(detections)
-        if rejected:
-            result.warnings.append(
-                f"Excluded {rejected} composite typography proposal(s) for "
-                f"'{parent.display_label}' because each overlapped multiple glyph instances."
-            )
-        if observation is not None:
-            result.warnings.append(
-                f"Typography reading for '{parent.display_label}' could not be matched "
-                "one-to-one with local detections; retained only independently detected glyphs."
-            )
-        return detections, layer_labels
 
     # ── Stage 4: parts, inside each parent's crop ───────────────────────
+
+    def _parts_for(
+        self,
+        parent: InterrogationCandidate,
+        children_by_parent: dict[str, list[str]],
+        crop: NDArray[np.uint8],
+        query_parts: Callable[..., list[str]] | None,
+        parent_index: int,
+        part_limit: int,
+    ) -> list[str]:
+        """Part names for one parent: confirmed if known, else discovered.
+
+        The interrogator is only asked when nothing was confirmed AND this
+        parent is within the query budget, because that call costs a model
+        round-trip per parent.
+        """
+        parts = children_by_parent.get(parent.display_label, [])
+        if parts or not callable(query_parts) or parent_index >= part_limit:
+            return parts
+        self._report(4, f"Inspecting visible parts: {parent.display_label}")
+        return query_parts(crop, parent, self._knowledge_pack)
+
+    def _attach_parts_of(
+        self,
+        source: _SourceImage,
+        layer: LayerResult,
+        parent: InterrogationCandidate,
+        parts: list[str],
+        crop: NDArray[np.uint8],
+        offset: tuple[int, int],
+        parent_mask: NDArray[np.uint8],
+        masks: dict[str, NDArray[np.uint8]],
+        result: PipelineResult,
+    ) -> None:
+        """Detect, segment and record every accepted part of ONE parent.
+
+        Child ids are numbered in acceptance order, so a part rejected by
+        _contained_child_mask leaves no gap in the sequence.
+        """
+        dx, dy = offset
+        child_masks: list[NDArray[np.uint8]] = []
+        for part in parts:
+            candidate = self._child_candidate(parent, part)
+            for detection, _ in self._detect_instances(crop, candidate, None):
+                if detection.source == "mlx-sam3" and detection.confidence < MIN_SAM3_PART_SCORE:
+                    logger.info(
+                        "Excluded tentative part %s (SAM 3 score %.3f)", part, detection.confidence
+                    )
+                    continue
+                mask = self._contained_child_mask(
+                    source, crop, offset, detection, part, parent_mask, child_masks
+                )
+                if mask is None:
+                    continue
+                child_masks.append(mask)
+                child_id = f"{layer.layer_id}-part-{len(child_masks):03d}"
+                bx0, by0, bx1, by1 = detection.bbox
+                masks[child_id] = refine_mask(mask, min_contour_area=0)
+                result.layers.append(LayerResult(
+                    layer_id=child_id, label=part, role="child", parent_label=layer.label,
+                    parent_id=layer.layer_id, bbox=(bx0 + dx, by0 + dy, bx1 + dx, by1 + dy),
+                    confidence=detection.confidence, source=detection.source,
+                ))
 
     def _attach_part_layers(
         self,
@@ -555,32 +410,13 @@ class Orchestrator:
             result.layers.append(layer)
             parent_mask = masks[layer.layer_id]
             y0, x0, y1, x1 = tight_bbox(parent_mask, padding=0)
-            crop, dx, dy = _crop_to_bbox(image, (x0, y0, x1, y1), padding=8)
-            parts = children_by_parent.get(parent.display_label, [])
-            if not parts and callable(query_parts) and parent_index < part_limit:
-                self._report(4, f"Inspecting visible parts: {parent.display_label}")
-                parts = query_parts(crop, parent, self._knowledge_pack)
-            child_masks = []
-            for part in parts:
-                candidate = self._child_candidate(parent, part)
-                for detection, _ in self._detect_instances(crop, candidate, None):
-                    if detection.source == "mlx-sam3" and detection.confidence < MIN_SAM3_PART_SCORE:
-                        logger.info("Excluded tentative part %s (SAM 3 score %.3f)", part, detection.confidence)
-                        continue
-                    mask = self._contained_child_mask(
-                        source, crop, (dx, dy), detection, part, parent_mask, child_masks
-                    )
-                    if mask is None:
-                        continue
-                    child_masks.append(mask)
-                    child_id = f"{layer.layer_id}-part-{len(child_masks):03d}"
-                    bx0, by0, bx1, by1 = detection.bbox
-                    masks[child_id] = refine_mask(mask, min_contour_area=0)
-                    result.layers.append(LayerResult(
-                        layer_id=child_id, label=part, role="child", parent_label=layer.label,
-                        parent_id=layer.layer_id, bbox=(bx0 + dx, by0 + dy, bx1 + dx, by1 + dy),
-                        confidence=detection.confidence, source=detection.source,
-                    ))
+            crop, dx, dy = crop_to_bbox(image, (x0, y0, x1, y1), padding=8)
+            parts = self._parts_for(
+                parent, children_by_parent, crop, query_parts, parent_index, part_limit
+            )
+            self._attach_parts_of(
+                source, layer, parent, parts, crop, (dx, dy), parent_mask, masks, result
+            )
 
     # ── Stage 6: mattes ─────────────────────────────────────────────────
 
@@ -616,11 +452,36 @@ class Orchestrator:
         if np.count_nonzero(intersection) / area < 0.90:
             return None
         mask = intersection
-        if _mask_iou(mask, parent_mask) > MAX_CHILD_PARENT_IOU:
+        if mask_iou(mask, parent_mask) > MAX_CHILD_PARENT_IOU:
             return None
-        if any(_mask_iou(mask, other) > MAX_CHILD_CHILD_IOU for other in child_masks):
+        if any(mask_iou(mask, other) > MAX_CHILD_CHILD_IOU for other in child_masks):
             return None
         return mask
+
+    def _write_body_alphas(
+        self,
+        source: _SourceImage,
+        image_path: Path,
+        accepted: list,
+        alphas: dict[str, NDArray[np.uint8]],
+        result: PipelineResult,
+    ) -> None:
+        """Export a body matte for each parent that has children.
+
+        Bodies use SUBTRACTION of the actual child mattes, not a second
+        independent matting pass, which could grow back over the child.
+        """
+        for layer, _ in accepted:
+            children = [c for c in result.layers if c.parent_id == layer.layer_id]
+            if not children:
+                continue
+            body = body_alpha(alphas[layer.layer_id], [alphas[c.layer_id] for c in children])
+            path = self._output_path(f"{self._image_token(image_path)}_{layer.layer_id}-body.tiff")
+            try:
+                write_tiff(source.rgb, path, body, icc_profile=source.icc)
+            except (OSError, RuntimeError, ValueError, SecurityError) as exc:
+                raise RuntimeError(f"TIFF body export failed for '{layer.label}'.") from exc
+            result.tiff_files.append(str(path))
 
     def _write_layer_alphas(
         self,
@@ -662,18 +523,7 @@ class Orchestrator:
                 raise RuntimeError(f"TIFF export failed for '{layer.label}'.") from exc
             layer.alpha_path = str(path)
             result.tiff_files.append(str(path))
-        # Bodies use subtraction of the actual child mattes, not a second
-        # independent matting pass that could grow over the child again.
-        for layer, _ in accepted:
-            children = [c for c in result.layers if c.parent_id == layer.layer_id]
-            if children:
-                body = body_alpha(alphas[layer.layer_id], [alphas[c.layer_id] for c in children])
-                path = self._output_path(f"{self._image_token(image_path)}_{layer.layer_id}-body.tiff")
-                try:
-                    write_tiff(source.rgb, path, body, icc_profile=source.icc)
-                except (OSError, RuntimeError, ValueError, SecurityError) as exc:
-                    raise RuntimeError(f"TIFF body export failed for '{layer.label}'.") from exc
-                result.tiff_files.append(str(path))
+        self._write_body_alphas(source, image_path, accepted, alphas, result)
         return all_objects_alpha(list(alphas.values()), (source.height, source.width))
 
     def _all_objects_only_alpha(
@@ -765,7 +615,7 @@ class Orchestrator:
     @staticmethod
     def _image_token(image_path: Path) -> str:
         """A readable, collision-resistant filename stem for one source image."""
-        stem = _safe_filename_label(image_path.stem)[:80]
+        stem = safe_filename_label(image_path.stem)[:80]
         digest = sha256(str(image_path.resolve(strict=False)).encode("utf-8")).hexdigest()[:10]
         return f"{stem}-{digest}"
 
@@ -815,108 +665,12 @@ class Orchestrator:
                 if selection in {"leftmost", "rightmost"}:
                     valid = [sorted(valid, key=lambda d: (d.bbox[0] + d.bbox[2]) / 2)[0 if selection == "leftmost" else -1]]
                 elif selection in {"largest", "smallest"}:
-                    valid = [sorted(valid, key=lambda d: np.count_nonzero(d.mask) if d.mask is not None else _bbox_area(d.bbox))[0 if selection == "smallest" else -1]]
+                    valid = [sorted(valid, key=lambda d: np.count_nonzero(d.mask) if d.mask is not None else bbox_area(d.bbox))[0 if selection == "smallest" else -1]]
                 return [(detection, False) for detection in valid]
         return []
 
-    def _inspect_individual_glyphs(
-        self,
-        image: NDArray[np.uint8],
-        candidate: InterrogationCandidate,
-    ) -> TypographyObservation | None:
-        """Ask the interrogator for an optional, local semantic glyph check."""
-        inspect = getattr(self._interrogator, "inspect_individual_glyphs", None)
-        if not callable(inspect):
-            return None
-        observation = inspect(image, candidate)
-        return observation if isinstance(observation, TypographyObservation) else None
 
-    def _match_typography_detections(
-        self,
-        image: NDArray[np.uint8],
-        detections: list[tuple[DetectionResult, bool]],
-        observation: TypographyObservation,
-        category: str,
-    ) -> tuple[list[tuple[DetectionResult, bool]], list[str]] | None:
-        """Require a one-to-one match between semantic glyphs and local boxes.
 
-        The local detector/SAM stack remains authoritative for pixel geometry.
-        A VLM observation only selects a detector proposal when the two views
-        overlap enough.  If even one semantic glyph has no independent local
-        match, the method declines to relabel or discard any proposal.
-        """
-        if any(is_manual for _detection, is_manual in detections):
-            return None
-        height, width = image.shape[:2]
-        matches: list[tuple[float, int, int]] = []
-        for element_index, element in enumerate(observation.elements):
-            semantic_bbox = _normalized_bbox_to_image(element.bbox, width, height)
-            for detection_index, (detection, _is_manual) in enumerate(detections):
-                score = _bbox_iou(semantic_bbox, detection.bbox)
-                if score >= TYPOGRAPHY_BOX_MATCH_MIN_IOU:
-                    matches.append((score, element_index, detection_index))
-
-        assigned_elements: set[int] = set()
-        assigned_detections: set[int] = set()
-        assignments: dict[int, int] = {}
-        for _score, element_index, detection_index in sorted(
-            matches,
-            key=lambda match: (-match[0], match[1], match[2]),
-        ):
-            if element_index in assigned_elements or detection_index in assigned_detections:
-                continue
-            assigned_elements.add(element_index)
-            assigned_detections.add(detection_index)
-            assignments[element_index] = detection_index
-
-        if len(assignments) != len(observation.elements):
-            return None
-        ordered_detections = [detections[assignments[index]] for index in range(len(observation.elements))]
-        labels = [
-            _glyph_layer_label(category, observation.elements[index].glyph)
-            for index in range(len(observation.elements))
-        ]
-        return ordered_detections, labels
-
-    def _reject_cross_glyph_composites(
-        self,
-        detections: list[tuple[DetectionResult, bool]],
-    ) -> tuple[list[tuple[DetectionResult, bool]], int]:
-        """Reject a proposal substantially explained by two prior glyph boxes.
-
-        This is the detector-only safety net for when the semantic verifier is
-        unavailable.  It targets the characteristic false positive where one
-        proposal spans pieces of two neighbouring glyphs; it does not reject
-        an ordinary overlapping glyph or any manual box.
-        """
-        kept: list[tuple[DetectionResult, bool]] = []
-        rejected = 0
-        for detection, is_manual in detections:
-            if is_manual:
-                kept.append((detection, is_manual))
-                continue
-            candidate_area = _bbox_area(detection.bbox)
-            intersections: list[tuple[int, int, int, int]] = []
-            for previous, previous_manual in kept:
-                if previous_manual:
-                    continue
-                x0 = max(detection.bbox[0], previous.bbox[0])
-                y0 = max(detection.bbox[1], previous.bbox[1])
-                x1 = min(detection.bbox[2], previous.bbox[2])
-                y1 = min(detection.bbox[3], previous.bbox[3])
-                overlap = (x0, y0, x1, y1)
-                if candidate_area and _bbox_area(overlap) / candidate_area >= TYPOGRAPHY_COMPOSITE_MIN_CONTRIBUTION:
-                    intersections.append(overlap)
-            covered = _rectangle_union_area(intersections)
-            if (
-                len(intersections) >= 2
-                and candidate_area
-                and covered / candidate_area >= TYPOGRAPHY_COMPOSITE_MIN_COVERAGE
-            ):
-                rejected += 1
-                continue
-            kept.append((detection, is_manual))
-        return kept, rejected
 
     def _detection_mask(self, image, detection, label, manual=False):
         mask = detection.mask
@@ -925,7 +679,7 @@ class Orchestrator:
         if mask.shape != image.shape[:2]:
             raise RuntimeError(f"Mask generation failed for '{label}': invalid dimensions.")
         mask = (mask > 127).astype(np.uint8) * 255
-        return _clip_mask_to_bbox(mask, detection.bbox) if manual else mask
+        return clip_mask_to_bbox(mask, detection.bbox) if manual else mask
 
     # ─────────────────────────────────────────────────────────────────────
     # Interrogation helper

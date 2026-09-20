@@ -391,14 +391,14 @@ class RightPanel:
             try:
                 from core.factory import build_capabilities
                 from core.layer_editing import replace_layer_mask
-                from core.orchestrator import _clip_mask_to_bbox
+                from core.pipeline_geometry import clip_mask_to_bbox
                 from processors.mask_ops import edge_refine
                 from processors.source_image import detection_image, load_source_image
                 image, alpha_limit, icc_profile = load_source_image(updated.image_path)
                 caps = build_capabilities(prefs)
                 try:
                     mask = caps.segmenter.segment(detection_image(image, alpha_limit), layer.bbox, name, prefer_full_box=True) if resegment else layer.mask
-                    mask = edge_refine(_clip_mask_to_bbox(mask, layer.bbox), iterations=edge)
+                    mask = edge_refine(clip_mask_to_bbox(mask, layer.bbox), iterations=edge)
                     layer.label = name
                     for child in updated.layers:
                         if child.parent_id == layer.layer_id:
