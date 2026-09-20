@@ -66,7 +66,7 @@ class VitMatteRefiner:
             )
             raise
         except (AttributeError, OSError, RuntimeError, TypeError, ValueError):
-            logger.error("Failed to load VitMatte", exc_info=True)
+            logger.exception("Failed to load VitMatte")
             raise
 
     @staticmethod
@@ -163,5 +163,4 @@ class VitMatteRefiner:
     ) -> NDArray[np.uint8]:
         """Predict alpha matte and return 4-channel RGBA image."""
         alpha = self.predict(image, mask)
-        rgba = np.dstack([image, alpha])
-        return rgba
+        return np.dstack([image, alpha])

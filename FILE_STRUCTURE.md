@@ -44,7 +44,7 @@ skiagrafia/
 │   ├── batch_runner.py             # ProcessPoolExecutor runner and persisted metrics
 │   ├── batch_session.py            # Frozen run/guide/interrogation/triage snapshots
 │   ├── batch_template.py           # Reusable Single → Batch configuration template
-│   ├── state_manager.py            # Per-image SQLiteDict state records
+│   ├── state_manager.py            # Per-image JSON-in-SQLite state records
 │   ├── layer_editing.py            # Layer edits plus all-objects TIFF recomposition
 │   ├── preset_library.py           # Bundled preset discovery
 │   └── presets/
@@ -191,11 +191,19 @@ than part of ordinary development checks.
 - MLX SAM 3 improves text-to-instance segmentation, but semantic recognition
   remains model output. Ambiguous material needs Triage and per-image
   exceptions.
-- `sqlitedict 2.1.0` has unresolved advisory `PYSEC-2026-1939`; there is no
-  fixed release currently available.
 - The download registry restricts source hosts and the output paths/SVGs are
   validated, but model weights are external artifacts and are not yet pinned
   to immutable SHA-256 values.
+- Batch state is JSON in SQLite (`core/state_manager.py`). It is never
+  unpickled, because a `state.db` can arrive from a copied or shared batch
+  folder; a record that is not a valid job record raises instead of loading.
+- `ruff check .` is configured in `pyproject.toml` so the gate does not vary
+  by machine. Reviewed-and-accepted findings carry an inline `noqa` naming the
+  guard that makes them safe. Bandit still reports some of these, since it
+  does not read ruff directives: the `xml` parses are DTD/entity-rejected and
+  size-capped, the `urlopen` calls run behind `validate_download_url` or
+  `validate_loopback_url`, and VitMatte's `from_pretrained` needs no revision
+  pin because it loads a local directory with `local_files_only=True`.
 
 See [README.md](README.md) for installation and user-facing operation, and
 [the Python 3.13 / MLX SAM 3 migration audit](docs/audits/2026-09-16/PYTHON313_MLX_SAM3_MIGRATION.md)

@@ -31,8 +31,7 @@ def kmeans_quantize(
     )
 
     centers = centers.astype(np.uint8)
-    quantized = centers[labels.flatten()].reshape(h, w, 3)
-    return quantized
+    return centers[labels.flatten()].reshape(h, w, 3)
 
 
 def apply_mask_to_image(

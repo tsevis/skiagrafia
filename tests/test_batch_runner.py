@@ -23,10 +23,12 @@ the filesystem; image *contents* are never decoded by this module).
 """
 from __future__ import annotations
 
+import sqlite3
 import sys
+from collections.abc import Callable
 from concurrent.futures import Future
 from pathlib import Path
-from typing import Any, Callable
+from typing import Any
 
 import numpy as np
 import pytest
@@ -34,11 +36,10 @@ from PIL import Image
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-import core.batch_runner as batch_runner
+from core import batch_runner
 from core.batch_runner import BatchConfig, BatchProgress, BatchRunner
 from core.orchestrator import LayerResult, PipelineResult
 from core.state_manager import JobRecord, JobStatus, StateManager
-
 
 # ── Helpers ──────────────────────────────────────────────────────────────
 
@@ -702,7 +703,7 @@ class TestStopAndClose:
         runner.start()
         runner.close()
 
-        with pytest.raises(Exception):
+        with pytest.raises(sqlite3.ProgrammingError, match="closed database"):
             runner._state.get("a")
 
     def test_is_running_true_only_while_futures_pending(self, tmp_path: Path) -> None:
@@ -726,7 +727,7 @@ class EagerExecutor(FakeExecutor):
         future: Future = Future()
         try:
             future.set_result(fn(*args, **kwargs))
-        except Exception as exc:  # noqa: BLE001 — mirrors executor semantics
+        except Exception as exc:
             future.set_exception(exc)
         return future
 

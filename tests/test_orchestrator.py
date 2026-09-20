@@ -15,8 +15,8 @@ from pathlib import Path
 import cv2
 import numpy as np
 import pytest
-from PIL import Image
 from numpy.typing import NDArray
+from PIL import Image
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
@@ -27,7 +27,7 @@ from core.interrogation import (
     TypographyElement,
     TypographyObservation,
 )
-from core.knowledge import KnowledgePack, KnowledgeDomain, ObjectKnowledge
+from core.knowledge import KnowledgeDomain, KnowledgePack, ObjectKnowledge
 from core.orchestrator import (
     MAX_LABEL_FILENAME_LEN,
     Orchestrator,
@@ -41,7 +41,6 @@ from core.orchestrator import (
     _safe_filename_label,
 )
 from models.grounded_sam import DetectionResult
-
 
 IMG_SIZE = 64
 

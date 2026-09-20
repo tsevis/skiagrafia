@@ -286,7 +286,7 @@ def load_resumable_batch(run_dir: str | Path) -> ResumableBatch | None:
 
         state_db_path = directory / "state.db"
         # This validator is also used while populating the Recent Batches
-        # list.  Do not let SqliteDict create an empty DB merely because a
+        # list.  Do not let StateManager create an empty DB merely because a
         # saved, not-yet-started run happens to have a processing manifest.
         if not state_db_path.is_file() or state_db_path.is_symlink():
             return None

@@ -45,7 +45,7 @@ class TestLoadCairosvg:
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         monkeypatch.setattr(
-            cairo_support, "configure_cairo_library_path", lambda: []
+            cairo_support, "configure_cairo_library_path", list
         )
         logger = logging.getLogger("test.cairo_support.success")
 
@@ -58,7 +58,7 @@ class TestLoadCairosvg:
         self, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
     ) -> None:
         monkeypatch.setattr(
-            cairo_support, "configure_cairo_library_path", lambda: []
+            cairo_support, "configure_cairo_library_path", list
         )
         # None in sys.modules makes `import cairosvg` raise ImportError.
         monkeypatch.setitem(sys.modules, "cairosvg", None)

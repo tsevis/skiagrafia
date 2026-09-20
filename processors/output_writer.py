@@ -28,7 +28,7 @@ def _validate_svg(svg_content: str) -> None:
     if "<!DOCTYPE" in svg_content.upper() or "<!ENTITY" in svg_content.upper():
         raise ValueError("SVG export must not contain DTDs or entities.")
     try:
-        root = ET.fromstring(encoded)
+        root = ET.fromstring(encoded)  # noqa: S314 — DTDs and entities are rejected and the input is size-capped above
     except ET.ParseError as exc:
         raise ValueError("SVG export content is malformed.") from exc
     if root.tag.rsplit("}", 1)[-1].lower() != "svg":

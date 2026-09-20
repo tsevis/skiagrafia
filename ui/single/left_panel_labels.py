@@ -13,7 +13,7 @@ import threading
 import tkinter as tk
 from tkinter import ttk
 
-from ui.theme import is_macos, TAG_COLOURS
+from ui.theme import TAG_COLOURS, is_macos
 
 logger = logging.getLogger(__name__)
 
@@ -105,7 +105,7 @@ class LabelsSectionMixin:
                 from core.factory import build_interrogation_settings
                 from core.interrogation import GuidedInterrogator
                 from core.knowledge import KnowledgePack
-                from processors.source_image import load_source_image, detection_image
+                from processors.source_image import detection_image, load_source_image
 
                 rgb, alpha, _ = load_source_image(image_path)
                 image = detection_image(rgb, alpha)
@@ -142,8 +142,8 @@ class LabelsSectionMixin:
                     detector = build_detector(prefs)
                     # Use the same selection/instance policy as final processing.
                     from core.contracts import CapabilitySet
-                    from processors.vectorizer import VTracerVectorizer
                     from models.vitmatte_refiner import VitMatteRefiner
+                    from processors.vectorizer import VTracerVectorizer
                     scan = Orchestrator(CapabilitySet(interrogator=interrogator, detector=detector,
                         segmenter=detector, alpha_refiner=VitMatteRefiner(), vectorizer=VTracerVectorizer()),
                         box_threshold=float(prefs.get("sam_box_threshold", .35)),
@@ -161,7 +161,7 @@ class LabelsSectionMixin:
                     logger.info("Scan preview detections unavailable", exc_info=True)
                 self._progress_queue.put(("scan_preview", preview_detections))
             except Exception as exc:
-                logger.error("Object scan failed: %s", exc, exc_info=True)
+                logger.exception("Object scan failed: %s", exc)
                 self._progress_queue.put(("error", str(exc)))
 
         threading.Thread(target=_worker, daemon=True).start()

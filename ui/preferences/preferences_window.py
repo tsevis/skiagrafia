@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import contextlib
 import logging
 import os
 import subprocess
@@ -9,8 +10,8 @@ from tkinter import filedialog, ttk
 from typing import TYPE_CHECKING
 
 from ui.preferences.guide_editor import GuideEditorTab
-from ui.theme import is_macos
-from utils.model_manager import ModelManager, REGISTRY
+from ui.theme import MACOS_OPEN, is_macos
+from utils.model_manager import REGISTRY, ModelManager
 from utils.preferences import DEFAULT_MODELS_DIR, get_models_dir, save_preferences
 
 if TYPE_CHECKING:
@@ -253,8 +254,8 @@ class PreferencesWindow:
         ttk.Button(
             btn_frame2,
             text="Open in Finder",
-            command=lambda: subprocess.run(
-                ["open", str(self._get_current_models_dir())], check=False
+            command=lambda: subprocess.run(  # noqa: S603 — fixed argv, no shell
+                [MACOS_OPEN, str(self._get_current_models_dir())], check=False
             ),
         ).pack(side=tk.LEFT, padx=(4, 0))
 
@@ -303,10 +304,7 @@ class PreferencesWindow:
 
         mgr = ModelManager(self._get_current_models_dir())
         for info in mgr.scan():
-            if info.size_bytes is not None:
-                size = f"{info.size_bytes / 1e6:.0f} MB"
-            else:
-                size = "\u2014"
+            size = f"{info.size_bytes / 1000000.0:.0f} MB" if info.size_bytes is not None else "—"
             status_text = "Installed" if info.status == "ready" else "Missing"
             self._models_tree.insert(
                 "", tk.END, values=(info.display_name, size, status_text)
@@ -327,7 +325,12 @@ class PreferencesWindow:
 
         backend = self._backend_var.get()
         if backend == "local":
-            from models.local_vlm import resolve_local_model, server_binary, LOCAL_PRIMARY, LOCAL_FALLBACK
+            from models.local_vlm import (
+                LOCAL_FALLBACK,
+                LOCAL_PRIMARY,
+                resolve_local_model,
+                server_binary,
+            )
             try:
                 server_binary()
                 resolve_local_model(LOCAL_PRIMARY)
@@ -357,7 +360,7 @@ class PreferencesWindow:
                 try:
                     mgr.ensure(name)
                 except Exception:
-                    logger.error("Failed to download %s", name, exc_info=True)
+                    logger.exception("Failed to download %s", name)
         self._scan_models()
 
     # ── Tab 3: Pipeline ────────────────────────────────────────
@@ -613,10 +616,8 @@ class PreferencesWindow:
         ).pack(anchor=tk.W)
 
     def _update_swatch(self) -> None:
-        try:
+        with contextlib.suppress(tk.TclError):
             self._canvas_swatch.config(bg=self._canvas_bg_var.get())
-        except tk.TclError:
-            pass
 
     # ── Tab 5: Templates ───────────────────────────────────────
 
@@ -703,7 +704,7 @@ class PreferencesWindow:
         templates_dir = Path.home() / ".config" / "skiagrafia" / "templates"
         templates_dir.mkdir(parents=True, exist_ok=True)
         if is_macos():
-            subprocess.run(["open", str(templates_dir)], check=False)
+            subprocess.run([MACOS_OPEN, str(templates_dir)], check=False)  # noqa: S603 — fixed argv, no shell
 
     # ── Tab 6: Domain Guides ──────────────────────────────────
 

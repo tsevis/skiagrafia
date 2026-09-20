@@ -17,10 +17,7 @@ class CanvasEventsMixin:
 
     def _on_scroll(self, event: tk.Event) -> None:
         """Zoom on scroll wheel, centred on cursor."""
-        if event.delta > 0:
-            factor = self.ZOOM_STEP
-        else:
-            factor = 1 / self.ZOOM_STEP
+        factor = self.ZOOM_STEP if event.delta > 0 else 1 / self.ZOOM_STEP
         self._zoom_at(factor, event.x, event.y)
 
     def _on_pan_start(self, event: tk.Event) -> None:

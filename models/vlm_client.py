@@ -334,7 +334,7 @@ class OllamaVLMClient(BaseVLMClient):
                 )
             return found
         except (OSError, TimeoutError, ollama.RequestError, ollama.ResponseError):
-            logger.error("Ollama health check failed", exc_info=True)
+            logger.exception("Ollama health check failed")
             return False
 
     def _chat(
@@ -398,14 +398,14 @@ class LlamaCppVLMClient(BaseVLMClient):
         """GET (payload=None) or POST JSON to the llama.cpp server."""
         url = f"{self._host.rstrip('/')}{path}"
         data = json.dumps(payload).encode("utf-8") if payload is not None else None
-        request = urllib.request.Request(
+        request = urllib.request.Request(  # noqa: S310 — host is validated by validate_loopback_url() in __init__
             url,
             data=data,
             headers={"Content-Type": "application/json"},
             method="POST" if payload is not None else "GET",
         )
         try:
-            with urllib.request.urlopen(
+            with urllib.request.urlopen(  # noqa: S310 — host is validated by validate_loopback_url() in __init__
                 request, timeout=timeout or self._timeout
             ) as response:
                 body = response.read().decode("utf-8")
@@ -454,7 +454,7 @@ class LlamaCppVLMClient(BaseVLMClient):
             logger.warning("llama.cpp server not ready (HTTP %s)", exc.code)
             return False
         except (OSError, TimeoutError, urllib.error.URLError, VLMResponseError):
-            logger.error("llama.cpp health check failed", exc_info=True)
+            logger.exception("llama.cpp health check failed")
             return False
         ok = status.get("status") == "ok"
         if ok:

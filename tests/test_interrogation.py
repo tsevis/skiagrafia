@@ -26,7 +26,6 @@ from core.interrogation import (
 )
 from core.knowledge import KnowledgeDomain, KnowledgePack, ObjectKnowledge
 
-
 # ── Fakes ────────────────────────────────────────────────────────────────
 
 
@@ -68,12 +67,12 @@ class FakeVLMClient:
 
 
 def _settings(**overrides) -> InterrogationSettings:
-    base = dict(
-        host="http://localhost:11434",
-        primary_vlm="moondream",
-        fallback_vlms=["minicpm-v"],
-        reasoner_model="qwen3.5",
-    )
+    base = {
+        "host": "http://localhost:11434",
+        "primary_vlm": "moondream",
+        "fallback_vlms": ["minicpm-v"],
+        "reasoner_model": "qwen3.5",
+    }
     base.update(overrides)
     return InterrogationSettings(**base)
 

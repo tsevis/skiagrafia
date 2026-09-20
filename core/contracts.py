@@ -28,7 +28,7 @@ class Interrogator(Protocol):
         image: NDArray[np.uint8],
         confirmed_labels: list[str] | None = None,
         knowledge_pack: KnowledgePack | None = None,
-    ) -> "InterrogationResult":
+    ) -> InterrogationResult:
         """Return an InterrogationResult with .candidates and .children_by_parent.
 
         The return type must have at minimum:

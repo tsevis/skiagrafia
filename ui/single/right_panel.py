@@ -337,7 +337,7 @@ class RightPanel:
             variable=var,
             from_=minimum,
             to=maximum,
-            command=lambda val: entry_var.set(str(int(round(float(val))))),
+            command=lambda val: entry_var.set(str(round(float(val)))),
         )
         scale.pack(side=tk.RIGHT, fill=tk.X, expand=True, padx=(6, 6))
 
@@ -393,7 +393,7 @@ class RightPanel:
                 from core.layer_editing import replace_layer_mask
                 from core.orchestrator import _clip_mask_to_bbox
                 from processors.mask_ops import edge_refine
-                from processors.source_image import load_source_image, detection_image
+                from processors.source_image import detection_image, load_source_image
                 image, alpha_limit, icc_profile = load_source_image(updated.image_path)
                 caps = build_capabilities(prefs)
                 try:
@@ -465,6 +465,7 @@ class RightPanel:
     def _open_export_dialog(self, preselect: str | None = None) -> None:
         """Open a modal export dialog with format checkboxes and folder picker."""
         from tkinter import filedialog
+
         from processors.output_writer import write_pdf
 
         result = getattr(self._view, "_last_result", None)

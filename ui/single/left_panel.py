@@ -183,6 +183,9 @@ class LeftPanel(LabelsSectionMixin):
             w, h = ImageOps.exif_transpose(img).size
             self._dims_label.config(text=f"{w} x {h} px")
         except Exception:
+            # Pillow raises a wide range of decoder errors here; the panel
+            # must still render, but the reason belongs in the log.
+            logger.warning("Could not read image dimensions for %s", path, exc_info=True)
             self._dims_label.config(text="")
 
         size_mb = p.stat().st_size / (1024 * 1024)
@@ -357,7 +360,7 @@ class LeftPanel(LabelsSectionMixin):
                 )
                 self._progress_queue.put(("complete", result))
             except Exception as exc:
-                logger.error("Processing failed: %s", exc, exc_info=True)
+                logger.exception("Processing failed: %s", exc)
                 self._progress_queue.put(("error", str(exc)))
 
         threading.Thread(target=_worker, daemon=True).start()
@@ -479,7 +482,7 @@ class LeftPanel(LabelsSectionMixin):
                 var.set(round(clamped, 1))
                 entry_var.set(f"{float(var.get()):.1f}")
             else:
-                var.set(int(round(clamped)))
+                var.set(round(clamped))
                 entry_var.set(str(int(float(var.get()))))
 
         entry.bind("<Return>", _apply_entry)
@@ -491,7 +494,7 @@ class LeftPanel(LabelsSectionMixin):
                 var.set(round(numeric, 1))
                 entry_var.set(f"{float(var.get()):.1f}")
             else:
-                var.set(int(round(numeric)))
+                var.set(round(numeric))
                 entry_var.set(str(int(float(var.get()))))
 
         scale = ttk.Scale(

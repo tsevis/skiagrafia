@@ -66,7 +66,7 @@ class MLXSAM3:
                     scores = np.asarray(state["scores"])
                     h, w = image.shape[:2]
                     results = []
-                    for mask, box, score in zip(masks, boxes, scores):
+                    for mask, box, score in zip(masks, boxes, scores, strict=True):
                         x0, y0, x1, y1 = box
                         bbox = (max(0, int(x0)), max(0, int(y0)), min(w, int(np.ceil(x1))), min(h, int(np.ceil(y1))))
                         if bbox[2] <= bbox[0] or bbox[3] <= bbox[1]:

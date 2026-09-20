@@ -244,7 +244,7 @@ class GroundedSAM:
             )
             logger.info("GroundingDINO loaded on %s", DEVICE)
         except (ImportError, FileNotFoundError, OSError, RuntimeError, ValueError, AttributeError):
-            logger.error("Failed to load GroundingDINO", exc_info=True)
+            logger.exception("Failed to load GroundingDINO")
             raise
 
     def _load_sam(self) -> None:
@@ -266,7 +266,7 @@ class GroundedSAM:
             self._sam_predictor = SAM2ImagePredictor(sam)
             logger.info("SAM 2.1 loaded on %s", DEVICE)
         except (ImportError, FileNotFoundError, OSError, RuntimeError, ValueError, AttributeError):
-            logger.error("Failed to load SAM 2.1", exc_info=True)
+            logger.exception("Failed to load SAM 2.1")
             raise
 
     def detect_instances(
@@ -286,8 +286,8 @@ class GroundedSAM:
         """
         self._load_dino()
 
-        from grounding_dino.groundingdino.util.inference import predict
         import grounding_dino.groundingdino.datasets.transforms as T
+        from grounding_dino.groundingdino.util.inference import predict
 
         transform = T.Compose([
             T.RandomResize([800], max_size=1333),

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 import tkinter as tk
 from pathlib import Path
 from tkinter import messagebox, ttk
@@ -14,6 +15,8 @@ from ui.theme import is_macos
 
 if TYPE_CHECKING:
     from ui.batch.batch_view import BatchView
+
+logger = logging.getLogger(__name__)
 
 
 class StepConfigure:
@@ -385,6 +388,7 @@ class StepConfigure:
         try:
             pack = KnowledgePack.load(path)
         except Exception:
+            logger.warning("Could not load TOML guide %s", path, exc_info=True)
             self._guide_status_label.config(
                 text="Guide: Failed to load selected TOML guide",
                 foreground="red",

@@ -101,8 +101,9 @@ class LocalServer:
             sock.bind(("127.0.0.1", 0))
             port = sock.getsockname()[1]
         self.host = f"http://127.0.0.1:{port}"
-        self.log = tempfile.TemporaryFile(mode="w+b")
-        self.process = subprocess.Popen(
+        # Held for the lifetime of the server process and closed by stop().
+        self.log = tempfile.TemporaryFile(mode="w+b")  # noqa: SIM115
+        self.process = subprocess.Popen(  # noqa: S603 — argv is fixed; binary and weights come from resolve_local_model()
             [binary, "-m", str(weights), "--mmproj", str(projector),
              "--offline", "--host", "127.0.0.1", "--port", str(port),
              "-c", "8192", "-np", "1", "--alias", model,

@@ -4,8 +4,8 @@ import logging
 import tkinter as tk
 from tkinter import ttk
 
-from ui.theme import get_palette, is_macos
 from ui.mode_switcher import ModeSwitcher
+from ui.theme import get_palette, is_macos
 from utils.preferences import load_preferences
 
 logger = logging.getLogger(__name__)
@@ -194,12 +194,11 @@ class MainWindow:
     @staticmethod
     def section_label(parent: tk.Widget, text: str) -> ttk.Label:
         """Create a bold section header label."""
-        label = ttk.Label(
+        return ttk.Label(
             parent,
             text=text,
             font=("SF Pro Text", 10, "bold") if is_macos() else ("Segoe UI", 9, "bold"),
         )
-        return label
 
     def checkbox(
         self,

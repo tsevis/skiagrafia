@@ -224,7 +224,7 @@ class ModelManager:
                 )
 
         try:
-            urllib.request.urlretrieve(url, tmp_path, reporthook=_reporthook)
+            urllib.request.urlretrieve(url, tmp_path, reporthook=_reporthook)  # noqa: S310 — validate_download_url() enforces HTTPS and the host allowlist
             tmp_path.replace(path)
         finally:
             tmp_path.unlink(missing_ok=True)
@@ -267,8 +267,8 @@ class ModelManager:
         if target_dir.is_symlink():
             raise SecurityError("Refusing to extract a model archive through a symlink.")
 
-        request = urllib.request.Request(url)
-        with urllib.request.urlopen(request, timeout=120) as response:
+        request = urllib.request.Request(url)  # noqa: S310 — validate_download_url() enforces HTTPS and the host allowlist
+        with urllib.request.urlopen(request, timeout=120) as response:  # noqa: S310 — validate_download_url() enforces HTTPS and the host allowlist
             total = response.headers.get("Content-Length")
             total_size = int(total) if total else None
             chunks: list[bytes] = []
@@ -287,19 +287,23 @@ class ModelManager:
 
         extract_parent = target_dir.parent
         extract_parent.mkdir(parents=True, exist_ok=True)
-        with zipfile.ZipFile(io.BytesIO(payload)) as archive:
-            with tempfile.TemporaryDirectory(prefix="skiagrafia-model-", dir=extract_parent) as staging_name:
-                staging = Path(staging_name)
-                extracted = staging / zip_root
-                ModelManager._extract_archive_safely(archive, staging, zip_root)
-                if not extracted.is_dir():
-                    raise SecurityError("Model archive did not contain its expected root directory.")
-                if target_dir.exists():
-                    # Preserve a partial user-owned checkout while only copying
-                    # the validated archive tree into the configured model root.
-                    shutil.copytree(extracted, target_dir, dirs_exist_ok=True)
-                else:
-                    extracted.rename(target_dir)
+        with (
+            zipfile.ZipFile(io.BytesIO(payload)) as archive,
+            tempfile.TemporaryDirectory(
+                prefix="skiagrafia-model-", dir=extract_parent
+            ) as staging_name,
+        ):
+            staging = Path(staging_name)
+            extracted = staging / zip_root
+            ModelManager._extract_archive_safely(archive, staging, zip_root)
+            if not extracted.is_dir():
+                raise SecurityError("Model archive did not contain its expected root directory.")
+            if target_dir.exists():
+                # Preserve a partial user-owned checkout while only copying
+                # the validated archive tree into the configured model root.
+                shutil.copytree(extracted, target_dir, dirs_exist_ok=True)
+            else:
+                extracted.rename(target_dir)
 
     @staticmethod
     def _extract_archive_safely(
@@ -381,7 +385,7 @@ class ModelManager:
 # as fallback when no explicit path is passed to their constructors.
 # Normal operation via the factory always passes explicit paths.
 
-from utils.preferences import DEFAULT_MODELS_DIR  # noqa: E402
+from utils.preferences import DEFAULT_MODELS_DIR  # noqa: E402 — shim kept below the class it backs
 
 _default_manager: ModelManager | None = None
 

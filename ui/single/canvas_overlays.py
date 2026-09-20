@@ -64,8 +64,7 @@ def _recolor_paths(svg_inner: str, fill_color: str) -> str:
         svg_inner,
     )
     # Replace all remaining fill attrs with the desired colour
-    result = re.sub(r'\sfill\s*=\s*"[^"]*"', f' fill="{fill_color}"', result)
-    return result
+    return re.sub(r'\sfill\s*=\s*"[^"]*"', f' fill="{fill_color}"', result)
 
 
 def _build_layer_svg(
@@ -107,7 +106,7 @@ def _render_svg_to_photo(svg_bytes: bytes, width: int, height: int) -> ImageTk.P
         img = Image.open(io.BytesIO(png_bytes)).convert("RGBA")
         return ImageTk.PhotoImage(img)
     except Exception:
-        logger.error("SVG→PNG render failed", exc_info=True)
+        logger.exception("SVG→PNG render failed")
         return None
 
 
@@ -140,7 +139,8 @@ def render_layer_masks(
         mask = getattr(layer, "mask", None)
         if mask is not None:
             matte = Image.fromarray(mask).resize((render_w, render_h), Image.Resampling.LANCZOS)
-            matte = matte.point(lambda value: round(value * layer_opacity))
+            # Bind the loop's opacity explicitly rather than closing over it.
+            matte = matte.point(lambda value, o=layer_opacity: round(value * o))
             overlay = Image.new("RGBA", (render_w, render_h), OVERLAY_PALETTE[i % len(OVERLAY_PALETTE)])
             overlay.putalpha(matte)
             photo = ImageTk.PhotoImage(overlay)
@@ -235,14 +235,13 @@ def render_mask_overlay(
     cx1 = x1 * zoom + pan_x
     cy1 = y1 * zoom + pan_y
 
-    item = canvas.create_rectangle(
+    return canvas.create_rectangle(
         cx0, cy0, cx1, cy1,
         fill=colour_hex,
         stipple="gray50",
         outline=colour_hex if selected else "",
         width=1.5 if selected else 0,
     )
-    return item
 
 
 def render_vector_overlay(
@@ -276,7 +275,7 @@ def render_vector_overlay(
         item = canvas.create_image(pan_x, pan_y, anchor=tk.NW, image=photo)
         return item, photo
     except Exception:
-        logger.error("Failed to render vector overlay", exc_info=True)
+        logger.exception("Failed to render vector overlay")
         return None
 
 
