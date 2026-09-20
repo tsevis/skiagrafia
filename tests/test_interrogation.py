@@ -263,10 +263,34 @@ class TestEscalationChain:
         )
         client = FakeVLMClient(vision_responses={"default": "object"})
         interrogator._clients["moondream"] = client
-        interrogator.interrogate(_tiny_image(size=40))
+        # Large enough that a quadrant still clears MIN_TILE_EDGE_PX; a
+        # smaller image is deliberately not tiled any more.
+        interrogator.interrogate(_tiny_image(size=512))
 
         # primary + guided (still low confidence) + 4 tiles = 6 vision calls
         assert len(client.vision_calls) >= 4
+
+    def test_tiling_skipped_when_a_quadrant_would_be_too_small(self) -> None:
+        """Four extra vision passes must buy something.
+
+        Tiles are half the width and half the height, so on a small image
+        each quadrant carries less detail than the whole picture already
+        did -- and the run pays four full model round-trips for it. The
+        dataset that exposed this has a median longest edge of 223px, which
+        tiles into ~110px quadrants.
+        """
+        interrogator = _make_interrogator(
+            composition_first=False,
+            enable_tiling=True,
+            fallback_mode="moondream_only",
+            profile="balanced",
+        )
+        client = FakeVLMClient(vision_responses={"default": "object"})
+        interrogator._clients["moondream"] = client
+        interrogator.interrogate(_tiny_image(size=200))
+
+        assert interrogator._tiles_are_useful(_tiny_image(size=200)) is False
+        assert len(client.vision_calls) < 4
 
     def test_tiling_skipped_for_fast_profile(self) -> None:
         interrogator = _make_interrogator(

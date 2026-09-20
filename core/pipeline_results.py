@@ -18,6 +18,27 @@ from numpy.typing import NDArray
 from pydantic import BaseModel, ConfigDict, Field
 
 
+def collapse_repeats(messages: list[str]) -> list[str]:
+    """Collapse identical messages to one line carrying a count.
+
+    A stage that rejects many candidates emits the same sentence once per
+    rejection: a real run produced "Empty or tiny mask for 'button'" ten
+    times for a single image, and four copies of the instance-ceiling
+    warning for another. Repetition adds nothing a count does not, and it
+    buries the warnings that actually differ.
+
+    Order is the order each message FIRST appeared, and a message seen once
+    is returned untouched.
+    """
+    counts: dict[str, int] = {}
+    for message in messages:
+        counts[message] = counts.get(message, 0) + 1
+    return [
+        message if count == 1 else f"{message} (x{count})"
+        for message, count in counts.items()
+    ]
+
+
 class _SourceImage(NamedTuple):
     """What loading an image produces, carried between pipeline stages.
 

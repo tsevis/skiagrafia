@@ -21,6 +21,7 @@ from orchestrator_fakes import (
     FakeDetector,
     FakeInterrogator,
     FakeSegmenter,
+    MultiInstanceDetector,
     _candidate,
     _make_caps,
     _write_image,
@@ -29,6 +30,7 @@ from orchestrator_fakes import (
 from core.interrogation import InterrogationCandidate
 from core.knowledge import KnowledgeDomain, KnowledgePack, ObjectKnowledge
 from core.orchestrator import Orchestrator
+from models.grounded_sam import DetectionResult
 
 # ── Fake Protocol implementations ───────────────────────────────────────────
 
@@ -445,3 +447,94 @@ class TestProcessChildren:
 
         assert result.error is None
         assert [layer.label for layer in result.layers] == ["chalice"]
+
+
+class TestInstanceCeiling:
+    def test_reaching_the_ceiling_warns_once_and_stops_detecting(
+        self, tmp_path: Path
+    ) -> None:
+        """The ceiling `break` only left the INNER loop.
+
+        The outer loop over parents kept going, so every remaining parent
+        still cost a full detection round-trip and appended the same warning
+        again. A real 231-image run produced the identical sentence up to
+        five times for one image.
+        """
+        from core.orchestrator import MAX_OBJECT_INSTANCES
+
+        # A grid inside the 64x64 test image: boxes outside it are clipped
+        # away before they can count towards the ceiling.
+        step = 6
+        cells = [
+            (x, y)
+            for y in range(0, IMG_SIZE, step)
+            for x in range(0, IMG_SIZE, step)
+        ][: MAX_OBJECT_INSTANCES + 5]
+        instances = [
+            DetectionResult(label="widget", bbox=(x, y, x + 4, y + 4), confidence=0.9)
+            for x, y in cells
+        ]
+        detector = MultiInstanceDetector(instances)
+        parents = [_candidate(f"widget{index}") for index in range(6)]
+        caps = _make_caps(FakeInterrogator(parents), detector, FakeSegmenter())
+
+        result = Orchestrator(caps, output_dir=tmp_path / "out").process(
+            _write_image(tmp_path / "in.png")
+        )
+
+        ceiling = [w for w in result.warnings if "object instances" in w]
+        assert ceiling == [
+            f"Stopped at {MAX_OBJECT_INSTANCES} object instances; "
+            "narrow the prompt or process a crop."
+        ]
+        # One parent already overflows the ceiling, so no further parent
+        # should have cost a detection round-trip.
+        assert len(detector.calls) == 1, (
+            "detection ran for parents that could never be accepted"
+        )
+
+
+class TestInstanceSizeComparison:
+    def test_largest_compares_one_metric_across_all_detections(self) -> None:
+        """The sort key switched units per element.
+
+        It read mask pixels when a detection carried a mask and bounding-box
+        area when it did not. A mask is far smaller than the box around it,
+        so in a list mixing detector sources -- MLX SAM 3 populates a mask,
+        the GroundingDINO fallback does not -- "largest" reliably picked the
+        UNMASKED detection, whatever its real size.
+        """
+        from core.detection_policy import instance_size
+
+        # A sparse mask inside a large box is what makes the two keys
+        # disagree: the old key scored this 100 (mask pixels) against the
+        # other's 3600 (box area) and called the smaller object larger.
+        sparse = np.zeros((100, 100), dtype=np.uint8)
+        sparse[:10, :10] = 255
+        big_box = DetectionResult(
+            label="a", bbox=(0, 0, 100, 100), confidence=0.9, mask=sparse,
+        )
+        unmasked = DetectionResult(label="b", bbox=(0, 0, 60, 60), confidence=0.9)
+
+        size = instance_size([big_box, unmasked])
+
+        assert size(big_box) > size(unmasked), (
+            "with one detection unmasked, every size must be a box area"
+        )
+
+    def test_mask_pixels_are_used_when_every_detection_has_one(self) -> None:
+        """A mask is the better measure, so it is used when all of them have it."""
+        from core.detection_policy import instance_size
+
+        wide_box_thin_object = DetectionResult(
+            label="a", bbox=(0, 0, 100, 100), confidence=0.9,
+            mask=np.pad(np.ones((2, 2), dtype=np.uint8) * 255, ((0, 98), (0, 98))),
+        )
+        small_box_solid = DetectionResult(
+            label="b", bbox=(0, 0, 10, 10), confidence=0.9,
+            mask=(np.ones((10, 10), dtype=np.uint8) * 255),
+        )
+
+        size = instance_size([wide_box_thin_object, small_box_solid])
+
+        assert size(small_box_solid) > size(wide_box_thin_object)

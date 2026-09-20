@@ -676,3 +676,38 @@ class TestStartCompletionOrdering:
         # completion early -- it must fire exactly once, with every job done.
         assert len(seen) == 1
         assert seen[0].completed == 3
+
+
+class TestCloseWaitsForInFlightWork:
+    def test_a_job_finishing_during_close_still_records_its_status(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """close() closed the state store while workers were still running.
+
+        shutdown(wait=False) leaves an already-started future running. When
+        it finishes, concurrent.futures invokes its done-callback from the
+        executor's own thread, and that callback writes the final status
+        through the shared SQLite store. With the connection already closed
+        the write raised sqlite3.ProgrammingError -- which Future's callback
+        machinery logs and SWALLOWS.
+
+        The image then kept whatever status it had mid-flight, so a resume
+        treated finished work as pending and summary() undercounted.
+        """
+        input_dir = tmp_path / "input"
+        input_dir.mkdir()
+        _write_image(input_dir / "a.png")
+        _patch_process_single(monkeypatch)
+
+        cfg = _make_config(tmp_path, max_workers=1)
+        runner = BatchRunner(cfg)
+        runner.start()
+
+        runner.close()
+
+        # Read through a FRESH connection: the point is what survived the
+        # close, not what the runner still had in hand.
+        state_db = Path(cfg.output_dir) / cfg.batch_id / "state.db"
+        record = StateManager(state_db).get("a")
+        assert record is not None
+        assert record.status == JobStatus.COMPLETE

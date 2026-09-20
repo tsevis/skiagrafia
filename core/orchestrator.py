@@ -23,6 +23,7 @@ import numpy as np
 from numpy.typing import NDArray
 
 from core.contracts import CapabilitySet
+from core.detection_policy import DetectionPolicyMixin
 from core.interrogation import (
     InterrogationCandidate,
     is_individual_glyph_label,
@@ -30,13 +31,16 @@ from core.interrogation import (
 from core.knowledge import KnowledgePack
 from core.layer_editing import all_objects_alpha, body_alpha
 from core.pipeline_geometry import (
-    bbox_area,
-    clip_mask_to_bbox,
     crop_to_bbox,
     mask_iou,
     safe_filename_label,
 )
-from core.pipeline_results import LayerResult, PipelineResult, _SourceImage
+from core.pipeline_results import (
+    LayerResult,
+    PipelineResult,
+    _SourceImage,
+    collapse_repeats,
+)
 from core.typography_matching import resolve_glyph_detections
 from models.grounded_sam import DetectionResult
 from processors.mask_ops import refine_mask
@@ -49,6 +53,8 @@ from utils.security import SecurityError, safe_child_path
 
 logger = logging.getLogger(__name__)
 
+
+
 MIN_CHILD_COVERAGE_PCT = 0.5
 # Parts are model suggestions, so use a stricter SAM 3 acceptance threshold.
 MIN_SAM3_PART_SCORE = 0.65
@@ -56,6 +62,17 @@ MAX_CHILD_PARENT_IOU = 0.85
 MAX_CHILD_CHILD_IOU = 0.80
 MIN_PARENT_COVERAGE_PCT = 0.5
 MIN_CONFIRMED_COVERAGE_PCT = 0.05
+# Ceiling on accepted parent instances for one image. Reaching it means the
+# prompt was too broad, and the run says so rather than growing without end.
+MAX_OBJECT_INSTANCES = 64
+# Below this many lit pixels a mask is noise, not an object.
+MIN_MASK_PIXELS = 8
+# Two masks overlapping this much are the same object detected twice.
+DUPLICATE_MASK_IOU = 0.90
+# A part must fall at least this far inside its parent to belong to it.
+MIN_PART_CONTAINMENT = 0.90
+# Context kept around a parent's box when cropping for part detection.
+PART_CROP_PADDING = 8
 PARENT_IOU_MERGE = 0.50
 PARENT_CONTAINMENT_MERGE = 0.75
 BBOX_IOU_MERGE = 0.60
@@ -99,7 +116,9 @@ PIPELINE_STEPS = STRUCTURAL_STEPS
 
 
 
-class Orchestrator:
+
+
+class Orchestrator(DetectionPolicyMixin):
     """Single-image pipeline -- 10 structural steps.
 
     v5.0: Receives a CapabilitySet via constructor injection.
@@ -214,6 +233,9 @@ class Orchestrator:
         self._write_vector_output(source, image_path, masks, result)
 
         result.warnings.extend(getattr(self._detector, "warnings", []))
+        # Collapsed once, at the end, rather than at each append: the stages
+        # that repeat a warning do not know how many times they will.
+        result.warnings = collapse_repeats(result.warnings)
         return result
 
     # ── Stage 0: load ───────────────────────────────────────────────────
@@ -266,6 +288,83 @@ class Orchestrator:
             )
         return detections, layer_labels
 
+    @staticmethod
+    def _fold_into_duplicate(
+        mask: NDArray[np.uint8],
+        parent: InterrogationCandidate,
+        accepted: list,
+        masks: dict[str, NDArray[np.uint8]],
+        children_by_parent: dict[str, list[str]],
+    ) -> bool:
+        """True when this mask is an object already accepted.
+
+        Containment and overlapping boxes alone do not imply duplication --
+        only near-identical masks do. The duplicate's parts are merged into
+        the layer already accepted so naming one of them twice does not lose
+        the parts discovered under the other.
+        """
+        duplicate = next(
+            (entry for entry in accepted
+             if mask_iou(mask, masks[entry[0].layer_id]) > DUPLICATE_MASK_IOU),
+            None,
+        )
+        if duplicate is None:
+            return False
+        existing_label = duplicate[1].display_label
+        extra = children_by_parent.get(parent.display_label, [])
+        children_by_parent[existing_label] = list(
+            dict.fromkeys(children_by_parent.get(existing_label, []) + extra)
+        )
+        return True
+
+    def _accept_parent(
+        self,
+        mask: NDArray[np.uint8],
+        detection: DetectionResult,
+        layer_label: str,
+        is_manual: bool,
+        parent: InterrogationCandidate,
+        accepted: list,
+        masks: dict[str, NDArray[np.uint8]],
+    ) -> None:
+        """Record one accepted parent instance and its refined mask.
+
+        The layer id is numbered from the count already accepted, so a
+        rejected candidate leaves no gap in the sequence.
+        """
+        layer_id = self._layer_id(len(accepted) + 1, layer_label)
+        masks[layer_id] = refine_mask(mask, min_contour_area=0)
+        accepted.append((
+            LayerResult(
+                layer_id=layer_id, label=layer_label, role="parent", bbox=detection.bbox,
+                confidence=detection.confidence,
+                source="manual" if is_manual else detection.source,
+            ),
+            parent,
+        ))
+
+    def _parent_mask(
+        self,
+        source: _SourceImage,
+        detection: DetectionResult,
+        layer_label: str,
+        is_manual: bool,
+        parent: InterrogationCandidate,
+        result: PipelineResult,
+    ) -> NDArray[np.uint8] | None:
+        """Segment one parent detection, or None when it is only noise.
+
+        Small legitimate objects are kept; what gets rejected is an empty or
+        near-empty mask, and the run records which label produced one.
+        """
+        self._report(3, f"Object mask: {parent.display_label}")
+        mask = self._detection_mask(source.detection, detection, layer_label, is_manual)
+        mask[source.alpha == 0] = 0
+        if np.count_nonzero(mask) < MIN_MASK_PIXELS:
+            result.warnings.append(f"Empty or tiny mask for '{parent.display_label}'.")
+            return None
+        return mask
+
     def _detect_parent_layers(
         self,
         source: _SourceImage,
@@ -284,6 +383,7 @@ class Orchestrator:
         image = source.detection
         masks: dict[str, NDArray[np.uint8]] = {}
         accepted = []
+        stopped_at_ceiling = False
         for parent in parents:
             detections, layer_labels = self._parent_proposals(
                 image, parent, manual_lookup, result
@@ -291,30 +391,28 @@ class Orchestrator:
             if not detections:
                 continue
             for (detection, is_manual), layer_label in zip(detections, layer_labels, strict=True):
-                if len(accepted) >= 64:
-                    result.warnings.append("Stopped at 64 object instances; narrow the prompt or process a crop.")
+                if len(accepted) >= MAX_OBJECT_INSTANCES:
+                    stopped_at_ceiling = True
                     break
-                self._report(3, f"Object mask: {parent.display_label}")
-                mask = self._detection_mask(image, detection, layer_label, is_manual)
-                mask[source.alpha == 0] = 0
-                # Keep small legitimate objects; reject only empty/tiny noise.
-                if np.count_nonzero(mask) < 8:
-                    result.warnings.append(f"Empty or tiny mask for '{parent.display_label}'.")
+                mask = self._parent_mask(source, detection, layer_label, is_manual, parent, result)
+                if mask is None or self._fold_into_duplicate(
+                    mask, parent, accepted, masks, children_by_parent
+                ):
                     continue
-                # Containment and overlapping boxes alone do not imply duplication.
-                duplicate = next((entry for entry in accepted if mask_iou(mask, masks[entry[0].layer_id]) > 0.9), None)
-                if duplicate:
-                    existing_label = duplicate[1].display_label
-                    extra = children_by_parent.get(parent.display_label, [])
-                    children_by_parent[existing_label] = list(dict.fromkeys(children_by_parent.get(existing_label, []) + extra))
-                    continue
-                layer_id = self._layer_id(len(accepted) + 1, layer_label)
-                layer = LayerResult(
-                    layer_id=layer_id, label=layer_label, role="parent", bbox=detection.bbox,
-                    confidence=detection.confidence, source="manual" if is_manual else detection.source,
+                self._accept_parent(
+                    mask, detection, layer_label, is_manual, parent, accepted, masks
                 )
-                masks[layer_id] = refine_mask(mask, min_contour_area=0)
-                accepted.append((layer, parent))
+            # Leaving the INNER loop is not enough: every remaining parent
+            # would still cost a full detection round-trip for instances
+            # that can no longer be accepted, and would report the ceiling
+            # again. Warn once, for the one thing that happened.
+            if stopped_at_ceiling:
+                break
+        if stopped_at_ceiling:
+            result.warnings.append(
+                f"Stopped at {MAX_OBJECT_INSTANCES} object instances; "
+                "narrow the prompt or process a crop."
+            )
         return masks, accepted
 
 
@@ -410,7 +508,7 @@ class Orchestrator:
             result.layers.append(layer)
             parent_mask = masks[layer.layer_id]
             y0, x0, y1, x1 = tight_bbox(parent_mask, padding=0)
-            crop, dx, dy = crop_to_bbox(image, (x0, y0, x1, y1), padding=8)
+            crop, dx, dy = crop_to_bbox(image, (x0, y0, x1, y1), padding=PART_CROP_PADDING)
             parts = self._parts_for(
                 parent, children_by_parent, crop, query_parts, parent_index, part_limit
             )
@@ -446,10 +544,10 @@ class Orchestrator:
         mask = np.zeros((source.height, source.width), dtype=np.uint8)
         mask[dy:dy + crop.shape[0], dx:dx + crop.shape[1]] = local
         area = np.count_nonzero(mask)
-        if area < 8:
+        if area < MIN_MASK_PIXELS:
             return None
         intersection = as_uint8(cv2.bitwise_and(mask, parent_mask))
-        if np.count_nonzero(intersection) / area < 0.90:
+        if np.count_nonzero(intersection) / area < MIN_PART_CONTAINMENT:
             return None
         mask = intersection
         if mask_iou(mask, parent_mask) > MAX_CHILD_PARENT_IOU:
@@ -624,73 +722,10 @@ class Orchestrator:
         slug = re.sub(r"[^a-z0-9]+", "-", label.lower()).strip("-")[:40] or "object"
         return f"object-{index:03d}-{slug}"
 
-    def _detect_instances(
-        self,
-        image: NDArray[np.uint8],
-        candidate: InterrogationCandidate,
-        manual_lookup: dict[str, list[tuple[int, int, int, int]]] | None,
-    ) -> list[tuple[DetectionResult, bool]]:
-        manual: list[tuple[DetectionResult, bool]] = []
-        while manual_lookup:
-            bbox = self._consume_manual_bbox(manual_lookup, candidate)
-            if bbox is None:
-                break
-            h, w = image.shape[:2]
-            x0, y0, x1, y1 = bbox
-            bbox = max(0, x0), max(0, y0), min(w, x1), min(h, y1)
-            if bbox[2] > bbox[0] and bbox[3] > bbox[1]:
-                manual.append((DetectionResult(label=candidate.display_label, bbox=bbox, confidence=1.0, source="manual"), True))
-        if manual:
-            return manual
-        detect_many = cast(
-            "Callable[..., list[DetectionResult]] | None",
-            getattr(self._detector, "detect_instances", None),
-        )
-        if candidate.role == "child" and self._quality != "detailed":
-            detect_many = cast(
-                "Callable[..., list[DetectionResult]] | None",
-                getattr(self._detector, "detect_part_instances", detect_many),
-            )
-        for phrase in candidate.detector_phrases or [candidate.display_label]:
-            if callable(detect_many):
-                detections = detect_many(image, phrase, self._box_threshold, self._text_threshold)
-            else:
-                detection = self._detector.detect_box(image, phrase, self._box_threshold, self._text_threshold)
-                detections = [detection] if detection else []
-            # Never pass invalid coordinates into a predictor.
-            h, w = image.shape[:2]
-            valid = []
-            for detection in detections:
-                x0, y0, x1, y1 = detection.bbox
-                bbox = max(0, x0), max(0, y0), min(w, x1), min(h, y1)
-                if bbox[2] > bbox[0] and bbox[3] > bbox[1]:
-                    valid.append(detection.model_copy(update={"bbox": bbox}))
-            if valid:
-                selection = candidate.selection
-                if selection in {"leftmost", "rightmost"}:
-                    valid = [sorted(valid, key=lambda d: (d.bbox[0] + d.bbox[2]) / 2)[0 if selection == "leftmost" else -1]]
-                elif selection in {"largest", "smallest"}:
-                    valid = [sorted(valid, key=lambda d: np.count_nonzero(d.mask) if d.mask is not None else bbox_area(d.bbox))[0 if selection == "smallest" else -1]]
-                return [(detection, False) for detection in valid]
-        return []
 
 
 
 
-    def _detection_mask(
-        self,
-        image: NDArray[np.uint8],
-        detection: DetectionResult,
-        label: str,
-        manual: bool = False,
-    ) -> NDArray[np.uint8]:
-        mask = detection.mask
-        if mask is None or manual:
-            mask = self._segmenter.segment(image, detection.bbox, label, prefer_full_box=manual)
-        if mask.shape != image.shape[:2]:
-            raise RuntimeError(f"Mask generation failed for '{label}': invalid dimensions.")
-        mask = (mask > 127).astype(np.uint8) * 255
-        return clip_mask_to_bbox(mask, detection.bbox) if manual else mask
 
     # ─────────────────────────────────────────────────────────────────────
     # Interrogation helper
@@ -714,90 +749,7 @@ class Orchestrator:
         )
         return interrogation.candidates, interrogation.children_by_parent
 
-    def _detect_candidate(
-        self,
-        image: NDArray[np.uint8],
-        candidate: InterrogationCandidate,
-        manual_lookup: dict[str, list[tuple[int, int, int, int]]] | None = None,
-    ) -> DetectionResult | None:
-        det, _is_manual = self._detect_candidate_ex(image, candidate, manual_lookup)
-        return det
 
-    def _detect_candidate_ex(
-        self,
-        image: NDArray[np.uint8],
-        candidate: InterrogationCandidate,
-        manual_lookup: dict[str, list[tuple[int, int, int, int]]] | None = None,
-    ) -> tuple[DetectionResult | None, bool]:
-        """Like _detect_candidate but also returns whether detection was manual."""
-        if manual_lookup:
-            manual_bbox = self._consume_manual_bbox(manual_lookup, candidate)
-            if manual_bbox is not None:
-                return DetectionResult(
-                    label=candidate.display_label,
-                    bbox=manual_bbox,
-                    confidence=1.0,
-                ), True
-        phrases = candidate.detector_phrases or [candidate.display_label]
-        for phrase in phrases:
-            detection = self._detector.detect_box(
-                image,
-                phrase,
-                self._box_threshold,
-                self._text_threshold,
-            )
-            if detection is not None:
-                return detection, False
-        return None, False
 
-    def _build_manual_lookup(
-        self,
-        manual_detections: list[dict] | None,
-    ) -> dict[str, list[tuple[int, int, int, int]]]:
-        lookup: dict[str, list[tuple[int, int, int, int]]] = {}
-        if not manual_detections:
-            return lookup
-        for detection in manual_detections:
-            bbox = detection.get("bbox")
-            label = str(detection.get("label", "")).strip().lower()
-            if not label or not bbox:
-                continue
-            lookup.setdefault(label, []).append(tuple(bbox))
-        return lookup
 
-    def _consume_manual_bbox(
-        self,
-        manual_lookup: dict[str, list[tuple[int, int, int, int]]],
-        candidate: InterrogationCandidate,
-    ) -> tuple[int, int, int, int] | None:
-        possible_labels = [
-            candidate.display_label.strip().lower(),
-            candidate.canonical_label.strip().lower(),
-            *[phrase.strip().lower() for phrase in candidate.detector_phrases],
-        ]
-        for label in possible_labels:
-            queue = manual_lookup.get(label)
-            if queue:
-                return queue.pop(0)
-        return None
 
-    def _child_candidate(
-        self,
-        parent: InterrogationCandidate,
-        child_label: str,
-    ) -> InterrogationCandidate:
-        knowledge = self._knowledge_pack.find_object(child_label) if self._knowledge_pack else None
-        detector_phrases = (
-            knowledge.ranked_detector_phrases(4)
-            if knowledge is not None
-            else [child_label, f"{child_label} detail", f"{parent.display_label} {child_label}"]
-        )
-        return InterrogationCandidate(
-            canonical_label=knowledge.canonical if knowledge else child_label,
-            display_label=knowledge.canonical if knowledge else child_label,
-            detector_phrases=detector_phrases,
-            source_model="child",
-            confidence=0.7,
-            role="child",
-            parent=parent.display_label,
-        )
