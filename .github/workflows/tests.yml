@@ -86,6 +86,18 @@ jobs:
       - name: Lint
         run: uv run ruff check .
 
+      # Basic mode, configured in [tool.pyright] in pyproject.toml — including
+      # venvPath/venv, without which pyright resolves against its own
+      # interpreter and reports numpy, torch, pydantic and cv2 as missing.
+      # `uv run` puts the synced .venv on the path, so those settings resolve
+      # here the same way they do locally.
+      #
+      # The pyright wheel fetches its own Node runtime the first time it runs,
+      # so this step reaches the network even though nothing else after the
+      # install does.
+      - name: Type-check
+        run: uv run pyright
+
       # Catches a module that does not parse at all, including one nothing
       # imports: the default run deselects the windowed tests, so a syntax
       # error inside one of those is invisible to pytest here.
