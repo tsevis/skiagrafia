@@ -285,6 +285,83 @@ class Orchestrator:
             )
         return detections, layer_labels
 
+    @staticmethod
+    def _fold_into_duplicate(
+        mask: NDArray[np.uint8],
+        parent: InterrogationCandidate,
+        accepted: list,
+        masks: dict[str, NDArray[np.uint8]],
+        children_by_parent: dict[str, list[str]],
+    ) -> bool:
+        """True when this mask is an object already accepted.
+
+        Containment and overlapping boxes alone do not imply duplication --
+        only near-identical masks do. The duplicate's parts are merged into
+        the layer already accepted so naming one of them twice does not lose
+        the parts discovered under the other.
+        """
+        duplicate = next(
+            (entry for entry in accepted
+             if mask_iou(mask, masks[entry[0].layer_id]) > DUPLICATE_MASK_IOU),
+            None,
+        )
+        if duplicate is None:
+            return False
+        existing_label = duplicate[1].display_label
+        extra = children_by_parent.get(parent.display_label, [])
+        children_by_parent[existing_label] = list(
+            dict.fromkeys(children_by_parent.get(existing_label, []) + extra)
+        )
+        return True
+
+    def _accept_parent(
+        self,
+        mask: NDArray[np.uint8],
+        detection: DetectionResult,
+        layer_label: str,
+        is_manual: bool,
+        parent: InterrogationCandidate,
+        accepted: list,
+        masks: dict[str, NDArray[np.uint8]],
+    ) -> None:
+        """Record one accepted parent instance and its refined mask.
+
+        The layer id is numbered from the count already accepted, so a
+        rejected candidate leaves no gap in the sequence.
+        """
+        layer_id = self._layer_id(len(accepted) + 1, layer_label)
+        masks[layer_id] = refine_mask(mask, min_contour_area=0)
+        accepted.append((
+            LayerResult(
+                layer_id=layer_id, label=layer_label, role="parent", bbox=detection.bbox,
+                confidence=detection.confidence,
+                source="manual" if is_manual else detection.source,
+            ),
+            parent,
+        ))
+
+    def _parent_mask(
+        self,
+        source: _SourceImage,
+        detection: DetectionResult,
+        layer_label: str,
+        is_manual: bool,
+        parent: InterrogationCandidate,
+        result: PipelineResult,
+    ) -> NDArray[np.uint8] | None:
+        """Segment one parent detection, or None when it is only noise.
+
+        Small legitimate objects are kept; what gets rejected is an empty or
+        near-empty mask, and the run records which label produced one.
+        """
+        self._report(3, f"Object mask: {parent.display_label}")
+        mask = self._detection_mask(source.detection, detection, layer_label, is_manual)
+        mask[source.alpha == 0] = 0
+        if np.count_nonzero(mask) < MIN_MASK_PIXELS:
+            result.warnings.append(f"Empty or tiny mask for '{parent.display_label}'.")
+            return None
+        return mask
+
     def _detect_parent_layers(
         self,
         source: _SourceImage,
@@ -303,6 +380,7 @@ class Orchestrator:
         image = source.detection
         masks: dict[str, NDArray[np.uint8]] = {}
         accepted = []
+        stopped_at_ceiling = False
         for parent in parents:
             detections, layer_labels = self._parent_proposals(
                 image, parent, manual_lookup, result
@@ -311,32 +389,27 @@ class Orchestrator:
                 continue
             for (detection, is_manual), layer_label in zip(detections, layer_labels, strict=True):
                 if len(accepted) >= MAX_OBJECT_INSTANCES:
-                    result.warnings.append(
-                        f"Stopped at {MAX_OBJECT_INSTANCES} object instances; "
-                        "narrow the prompt or process a crop."
-                    )
+                    stopped_at_ceiling = True
                     break
-                self._report(3, f"Object mask: {parent.display_label}")
-                mask = self._detection_mask(image, detection, layer_label, is_manual)
-                mask[source.alpha == 0] = 0
-                # Keep small legitimate objects; reject only empty/tiny noise.
-                if np.count_nonzero(mask) < MIN_MASK_PIXELS:
-                    result.warnings.append(f"Empty or tiny mask for '{parent.display_label}'.")
+                mask = self._parent_mask(source, detection, layer_label, is_manual, parent, result)
+                if mask is None or self._fold_into_duplicate(
+                    mask, parent, accepted, masks, children_by_parent
+                ):
                     continue
-                # Containment and overlapping boxes alone do not imply duplication.
-                duplicate = next((entry for entry in accepted if mask_iou(mask, masks[entry[0].layer_id]) > DUPLICATE_MASK_IOU), None)
-                if duplicate:
-                    existing_label = duplicate[1].display_label
-                    extra = children_by_parent.get(parent.display_label, [])
-                    children_by_parent[existing_label] = list(dict.fromkeys(children_by_parent.get(existing_label, []) + extra))
-                    continue
-                layer_id = self._layer_id(len(accepted) + 1, layer_label)
-                layer = LayerResult(
-                    layer_id=layer_id, label=layer_label, role="parent", bbox=detection.bbox,
-                    confidence=detection.confidence, source="manual" if is_manual else detection.source,
+                self._accept_parent(
+                    mask, detection, layer_label, is_manual, parent, accepted, masks
                 )
-                masks[layer_id] = refine_mask(mask, min_contour_area=0)
-                accepted.append((layer, parent))
+            # Leaving the INNER loop is not enough: every remaining parent
+            # would still cost a full detection round-trip for instances
+            # that can no longer be accepted, and would report the ceiling
+            # again. Warn once, for the one thing that happened.
+            if stopped_at_ceiling:
+                break
+        if stopped_at_ceiling:
+            result.warnings.append(
+                f"Stopped at {MAX_OBJECT_INSTANCES} object instances; "
+                "narrow the prompt or process a crop."
+            )
         return masks, accepted
 
 

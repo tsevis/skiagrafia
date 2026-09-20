@@ -21,6 +21,7 @@ from orchestrator_fakes import (
     FakeDetector,
     FakeInterrogator,
     FakeSegmenter,
+    MultiInstanceDetector,
     _candidate,
     _make_caps,
     _write_image,
@@ -29,6 +30,7 @@ from orchestrator_fakes import (
 from core.interrogation import InterrogationCandidate
 from core.knowledge import KnowledgeDomain, KnowledgePack, ObjectKnowledge
 from core.orchestrator import Orchestrator
+from models.grounded_sam import DetectionResult
 
 # ── Fake Protocol implementations ───────────────────────────────────────────
 
@@ -445,3 +447,48 @@ class TestProcessChildren:
 
         assert result.error is None
         assert [layer.label for layer in result.layers] == ["chalice"]
+
+
+class TestInstanceCeiling:
+    def test_reaching_the_ceiling_warns_once_and_stops_detecting(
+        self, tmp_path: Path
+    ) -> None:
+        """The ceiling `break` only left the INNER loop.
+
+        The outer loop over parents kept going, so every remaining parent
+        still cost a full detection round-trip and appended the same warning
+        again. A real 231-image run produced the identical sentence up to
+        five times for one image.
+        """
+        from core.orchestrator import MAX_OBJECT_INSTANCES
+
+        # A grid inside the 64x64 test image: boxes outside it are clipped
+        # away before they can count towards the ceiling.
+        step = 6
+        cells = [
+            (x, y)
+            for y in range(0, IMG_SIZE, step)
+            for x in range(0, IMG_SIZE, step)
+        ][: MAX_OBJECT_INSTANCES + 5]
+        instances = [
+            DetectionResult(label="widget", bbox=(x, y, x + 4, y + 4), confidence=0.9)
+            for x, y in cells
+        ]
+        detector = MultiInstanceDetector(instances)
+        parents = [_candidate(f"widget{index}") for index in range(6)]
+        caps = _make_caps(FakeInterrogator(parents), detector, FakeSegmenter())
+
+        result = Orchestrator(caps, output_dir=tmp_path / "out").process(
+            _write_image(tmp_path / "in.png")
+        )
+
+        ceiling = [w for w in result.warnings if "object instances" in w]
+        assert ceiling == [
+            f"Stopped at {MAX_OBJECT_INSTANCES} object instances; "
+            "narrow the prompt or process a crop."
+        ]
+        # One parent already overflows the ceiling, so no further parent
+        # should have cost a detection round-trip.
+        assert len(detector.calls) == 1, (
+            "detection ran for parents that could never be accepted"
+        )
