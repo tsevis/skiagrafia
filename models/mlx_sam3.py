@@ -5,12 +5,14 @@ import logging
 import sys
 import threading
 from pathlib import Path
+from typing import Any
 
 import numpy as np
 from numpy.typing import NDArray
 from PIL import Image
 
 from models.grounded_sam import DetectionResult, GroundedSAM
+from models.sam3_grounding import GroundedInstances, build_policy, ground_text_prompt
 from models.vendored_contracts import Sam3ImageModelLike
 
 logger = logging.getLogger(__name__)
@@ -18,11 +20,18 @@ _MLX_LOCK = threading.RLock()
 
 
 class MLXSAM3:
-    def __init__(self, source_dir: Path, fallback: GroundedSAM, confidence: float = 0.2) -> None:
+    def __init__(
+        self,
+        source_dir: Path,
+        fallback: GroundedSAM,
+        confidence: float = 0.2,
+        localization_confidence: float = 0.65,
+    ) -> None:
         self.source_dir = source_dir
         self.checkpoint = source_dir / "sam3-mod-weights/model.safetensors"
         self.fallback = fallback
         self.confidence = confidence
+        self.localization_confidence = localization_confidence
         self._processor: Sam3ImageModelLike | None = None
         self._image = None
         self._state = None
@@ -67,6 +76,50 @@ class MLXSAM3:
         self._processor = processor
         return processor
 
+    def _ground(
+        self, image: NDArray[np.uint8], label: str, require_presence: bool
+    ) -> GroundedInstances:
+        """Prompt the loaded model, reusing the cached image embedding."""
+        processor = self._load()
+        import mlx.core as mx
+
+        # Hold the actual array, never just id(array), to avoid id reuse.
+        # Pipeline input arrays are immutable for each processing pass.
+        if self._image is not image or self._state is None:
+            self._state = processor.set_image(Image.fromarray(image))
+            mx.eval(self._state)
+            self._image = image
+        state: dict[str, Any] = self._state
+        processor.reset_all_prompts(state)
+        h, w = image.shape[:2]
+        # Scores are read out here rather than through set_text_prompt, which
+        # would already have multiplied the presence veto into them.
+        return ground_text_prompt(
+            processor,
+            state,
+            label,
+            w,
+            h,
+            build_policy(self.confidence, self.localization_confidence, require_presence),
+        )
+
+    def _detections(
+        self, image: NDArray[np.uint8], label: str, grounded: GroundedInstances
+    ) -> list[DetectionResult]:
+        h, w = image.shape[:2]
+        results = []
+        for mask, box, score in zip(grounded.masks, grounded.boxes, grounded.scores, strict=True):
+            x0, y0, x1, y1 = box
+            bbox = (max(0, int(x0)), max(0, int(y0)), min(w, int(np.ceil(x1))), min(h, int(np.ceil(y1))))
+            if bbox[2] <= bbox[0] or bbox[3] <= bbox[1] or not mask.any():
+                continue
+            results.append(DetectionResult(
+                label=label, bbox=bbox, confidence=float(score),
+                mask=mask, source="mlx-sam3",
+            ))
+        # Spatial order keeps instance naming stable across prompt runs.
+        return sorted(results, key=lambda d: (d.bbox[0], d.bbox[1]))
+
     def detect_instances(
         self,
         image: NDArray[np.uint8],
@@ -74,40 +127,30 @@ class MLXSAM3:
         box_threshold: float = 0.35,
         text_threshold: float = 0.25,
         allow_fallback: bool = True,
+        require_presence: bool = False,
     ) -> list[DetectionResult]:
+        """Return every instance of `label` that MLX SAM 3 accepts.
+
+        Parameters
+        ----------
+        require_presence:
+            Keep SAM 3's presence veto, which discards an image the model does
+            not recognise the label in even when it localises something
+            confidently. Off by default because a label reaching this method
+            has already been confirmed upstream; see models/sam3_scoring.py.
+        """
         with _MLX_LOCK:
             if not self._failed:
                 try:
-                    processor = self._load()
-                    import mlx.core as mx
-
-                    # Hold the actual array, never just id(array), to avoid id reuse.
-                    # Pipeline input arrays are immutable for each processing pass.
-                    if self._image is not image:
-                        self._state = processor.set_image(Image.fromarray(image))
-                        mx.eval(self._state)
-                        self._image = image
-                    processor.reset_all_prompts(self._state)
-                    state = processor.set_text_prompt(label, self._state)
-                    mx.eval(state)
-                    masks = np.asarray(state["masks"])
-                    boxes = np.asarray(state["boxes"])
-                    scores = np.asarray(state["scores"])
-                    h, w = image.shape[:2]
-                    results = []
-                    for mask, box, score in zip(masks, boxes, scores, strict=True):
-                        x0, y0, x1, y1 = box
-                        bbox = (max(0, int(x0)), max(0, int(y0)), min(w, int(np.ceil(x1))), min(h, int(np.ceil(y1))))
-                        if bbox[2] <= bbox[0] or bbox[3] <= bbox[1]:
-                            continue
-                        results.append(DetectionResult(
-                            label=label, bbox=bbox, confidence=float(score),
-                            mask=(mask.reshape(h, w) > 0).astype(np.uint8) * 255,
-                            source="mlx-sam3",
-                        ))
+                    grounded = self._ground(image, label, require_presence)
+                    if grounded.rescued:
+                        logger.info(
+                            "MLX SAM 3 presence score %.4f rejected '%s'; kept the "
+                            "best localisation instead", grounded.presence, label,
+                        )
+                    results = self._detections(image, label, grounded)
                     if results:
-                        # Spatial order keeps instance naming stable across prompt runs.
-                        return sorted(results, key=lambda d: (d.bbox[0], d.bbox[1]))
+                        return results
                 except (
                     AttributeError,
                     ImportError,
@@ -133,7 +176,12 @@ class MLXSAM3:
         box_threshold: float = 0.35,
         text_threshold: float = 0.25,
     ) -> list[DetectionResult]:
-        return self.detect_instances(image, label, box_threshold, text_threshold, allow_fallback=False)
+        # Parts are the model's own suggestions, so recognition is still an
+        # open question and SAM 3's presence veto stays in force.
+        return self.detect_instances(
+            image, label, box_threshold, text_threshold,
+            allow_fallback=False, require_presence=True,
+        )
 
     def detect_box(
         self,
