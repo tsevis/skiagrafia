@@ -99,6 +99,21 @@ class FakeExecutor:
 
     def shutdown(self, wait: bool = True, cancel_futures: bool = False) -> None:
         self.shutdown_calls.append((wait, cancel_futures))
+        if cancel_futures:
+            # A real executor cancels only what has NOT started. Model the
+            # first max_workers submissions as already picked up by a
+            # worker, so a test can exercise a job that finishes after the
+            # caller asked to stop.
+            running = self.max_workers or 1
+            for future, *_ in self._pending[running:]:
+                future.cancel()
+            self._pending = self._pending[:running]
+        if wait:
+            # A real executor's shutdown(wait=True) lets in-flight work
+            # finish, which fires each future's done-callback. A fake that
+            # returns without doing so cannot show what happens to a
+            # callback that lands after the caller has torn things down.
+            self.drain()
 
 
 def _drain(runner: BatchRunner) -> None:

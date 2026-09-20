@@ -371,15 +371,33 @@ class BatchRunner:
         )
 
     def stop(self) -> None:
-        """Stop batch processing gracefully."""
+        """Stop batch processing gracefully.
+
+        Cancels what has not started and returns immediately, so a UI stays
+        responsive. Work already running in a worker is NOT waited for --
+        close() does that.
+        """
         self._running = False
         if self._executor:
             self._executor.shutdown(wait=False, cancel_futures=True)
             logger.info("Batch stopped")
 
     def close(self) -> None:
-        """Shut down executor and close state DB."""
+        """Shut down the executor and close the state store, in that order.
+
+        WAITS for in-flight work before closing the store. A future that is
+        already running is not cancelled by stop(), and when it finishes
+        concurrent.futures invokes its done-callback from the executor's own
+        thread -- that callback writes the job's final status through this
+        shared SQLite connection. Closing the connection first made every
+        such write raise sqlite3.ProgrammingError, which Future's callback
+        machinery logs and SWALLOWS: the image kept whatever status it had
+        mid-flight, so a later resume treated finished work as pending and
+        summary() undercounted it.
+        """
         self.stop()
+        if self._executor:
+            self._executor.shutdown(wait=True)
         self._state.close()
 
     def summary(self) -> BatchRunSummary:
