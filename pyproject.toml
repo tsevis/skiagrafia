@@ -107,6 +107,29 @@ ignore = [
 [dependency-groups]
 dev = [
     "pip-audit>=2.9,<3.0",
+    "pyright>=1.1.400,<2",
     "pytest>=9.0.3,<10",
     "ruff==0.15.2",
+]
+
+[tool.pyright]
+# basic, not strict. The pipeline passes numpy arrays and torch tensors
+# through several layers and strict would demand annotations on library
+# surfaces this project does not own. basic catches the errors that are
+# errors: a name that does not exist, an argument that cannot match, a None
+# that is not handled.
+typeCheckingMode = "basic"
+pythonVersion = "3.13"
+# Without these pyright resolves against its own interpreter and reports
+# numpy, torch, pydantic and cv2 as missing -- 97 phantom import errors, and
+# several hundred attribute errors cascading off them.
+venvPath = "."
+venv = ".venv"
+# Vendored model source is not this project's code to annotate, and the
+# output directory is not code at all.
+exclude = [
+    "models/vendor",
+    "skiagrafia_out",
+    "**/__pycache__",
+    ".venv",
 ]

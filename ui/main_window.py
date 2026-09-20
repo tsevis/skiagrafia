@@ -2,11 +2,17 @@ from __future__ import annotations
 
 import logging
 import tkinter as tk
+from collections.abc import Callable
 from tkinter import ttk
+from typing import TYPE_CHECKING
 
 from ui.mode_switcher import ModeSwitcher
 from ui.theme import get_palette, is_macos
 from utils.preferences import load_preferences
+
+if TYPE_CHECKING:
+    from ui.batch.batch_view import BatchView
+    from ui.single.single_view import SingleView
 
 logger = logging.getLogger(__name__)
 
@@ -39,8 +45,8 @@ class MainWindow:
         self._build_content_area()
 
         # Lazy imports to avoid circular deps
-        self._single_view: object | None = None
-        self._batch_view: object | None = None
+        self._single_view: SingleView | None = None
+        self._batch_view: BatchView | None = None
 
         # Show default mode
         default_mode = self.prefs.get("default_mode", "single")
@@ -127,7 +133,12 @@ class MainWindow:
         """Show the appropriate view for the given mode."""
         # Clear content
         for child in self._content.winfo_children():
-            child.pack_forget()
+            # winfo_children() may include a Toplevel, which (unlike an
+            # ordinary Widget) supports no geometry manager and never
+            # appears here in practice — this guard keeps that contract
+            # explicit instead of assuming it holds.
+            if isinstance(child, tk.Widget):
+                child.pack_forget()
 
         if mode == "single":
             self._subtitle_label.config(
@@ -205,19 +216,36 @@ class MainWindow:
         parent: tk.Widget,
         text: str,
         variable: tk.BooleanVar,
-        command: object = None,
+        command: Callable[[], object] | None = None,
     ) -> tk.Checkbutton | ttk.Checkbutton:
         """Create platform-appropriate checkbox."""
+        # tkinter's stubs don't accept None for `command` even though the
+        # widgets themselves treat a missing command the same way (verified:
+        # both leave the Tcl-side command unset) — so it is only passed
+        # through when one was actually given.
         if is_macos():
-            return ttk.Checkbutton(
-                parent, text=text, variable=variable, command=command
-            )
+            if command is not None:
+                return ttk.Checkbutton(
+                    parent, text=text, variable=variable, command=command
+                )
+            return ttk.Checkbutton(parent, text=text, variable=variable)
         p = self.palette
+        if command is not None:
+            return tk.Checkbutton(
+                parent,
+                text=text,
+                variable=variable,
+                command=command,
+                bg=p["entry_bg"],
+                fg=p["entry_fg"],
+                selectcolor=p["check_select"],
+                activebackground=p["entry_bg"],
+                activeforeground=p["entry_fg"],
+            )
         return tk.Checkbutton(
             parent,
             text=text,
             variable=variable,
-            command=command,
             bg=p["entry_bg"],
             fg=p["entry_fg"],
             selectcolor=p["check_select"],
@@ -231,20 +259,35 @@ class MainWindow:
         text: str,
         variable: tk.StringVar,
         value: str,
-        command: object = None,
+        command: Callable[[], object] | None = None,
     ) -> tk.Radiobutton | ttk.Radiobutton:
         """Create platform-appropriate radio button."""
+        # See checkbox() above: omit `command` entirely rather than pass None.
         if is_macos():
-            return ttk.Radiobutton(
-                parent, text=text, variable=variable, value=value, command=command
-            )
+            if command is not None:
+                return ttk.Radiobutton(
+                    parent, text=text, variable=variable, value=value, command=command
+                )
+            return ttk.Radiobutton(parent, text=text, variable=variable, value=value)
         p = self.palette
+        if command is not None:
+            return tk.Radiobutton(
+                parent,
+                text=text,
+                variable=variable,
+                value=value,
+                command=command,
+                bg=p["entry_bg"],
+                fg=p["entry_fg"],
+                selectcolor=p["check_select"],
+                activebackground=p["entry_bg"],
+                activeforeground=p["entry_fg"],
+            )
         return tk.Radiobutton(
             parent,
             text=text,
             variable=variable,
             value=value,
-            command=command,
             bg=p["entry_bg"],
             fg=p["entry_fg"],
             selectcolor=p["check_select"],

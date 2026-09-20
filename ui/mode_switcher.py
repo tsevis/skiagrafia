@@ -3,6 +3,7 @@ from __future__ import annotations
 import tkinter as tk
 from collections.abc import Callable
 from tkinter import ttk
+from typing import Any
 
 
 class ModeSwitcher(ttk.Frame):
@@ -16,7 +17,10 @@ class ModeSwitcher(ttk.Frame):
         self,
         parent: tk.Widget,
         on_mode_change: Callable[[str], None] | None = None,
-        **kwargs: object,
+        # Any: ttk.Frame's constructor accepts a heterogeneous mix of widget
+        # options (str, int, bool, callables, ...); no single concrete type
+        # covers a passthrough **kwargs without reproducing that whole stub.
+        **kwargs: Any,
     ) -> None:
         super().__init__(parent, **kwargs)
         self._mode = "single"

@@ -420,7 +420,7 @@ class CanvasPanel(CanvasDrawingMixin, CanvasEventsMixin):
         entry = ttk.Entry(dialog, textvariable=value)
         entry.pack(fill=tk.X, padx=10)
         entry.focus_set()
-        result = {"label": None}
+        result: dict[str, str | None] = {"label": None}
 
         def _confirm() -> None:
             result["label"] = value.get().strip() or None

@@ -494,7 +494,7 @@ class Orchestrator:
     def _resolve_glyph_detections(
         self,
         image: NDArray[np.uint8],
-        parent,
+        parent: InterrogationCandidate,
         detections: list,
         layer_labels: list[str],
         result: PipelineResult,
@@ -589,7 +589,7 @@ class Orchestrator:
         source: _SourceImage,
         crop: NDArray[np.uint8],
         offset: tuple[int, int],
-        detection,
+        detection: DetectionResult,
         part: str,
         parent_mask: NDArray[np.uint8],
         child_masks: list[NDArray[np.uint8]],

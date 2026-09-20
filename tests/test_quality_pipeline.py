@@ -3,6 +3,7 @@ import io
 import logging
 import xml.etree.ElementTree as ET
 from types import SimpleNamespace
+from typing import cast
 from unittest.mock import Mock
 
 import numpy as np
@@ -25,6 +26,12 @@ from models.local_vlm import LOCAL_FALLBACK, LOCAL_PRIMARY, resolve_local_model
 from models.vlm_client import LlamaCppVLMClient, OllamaVLMClient
 from processors.mask_ops import refine_mask
 from processors.vectorizer import VTracerVectorizer, assemble_svg
+
+
+def _not_none[T](value: T | None) -> T:
+    """Narrow an Optional this pipeline guarantees is set at this point."""
+    assert value is not None
+    return value
 
 
 class Instances(FakeDetector):
@@ -50,10 +57,10 @@ def test_repeated_objects_and_parts_have_independent_exports(tmp_path):
     assert result.all_objects_tiff_path is not None
     with Image.open(result.all_objects_tiff_path) as rgba:
         alpha = np.asarray(rgba)[..., 3]
-    expected = np.maximum.reduce([layer.alpha for layer in result.layers])
+    expected = np.maximum.reduce([_not_none(layer.alpha) for layer in result.layers])
     assert np.array_equal(alpha, expected)
-    assert not np.array_equal(children[0].mask, children[1].mask)
-    root = ET.parse(result.svg_path)
+    assert not np.array_equal(_not_none(children[0].mask), _not_none(children[1].mask))
+    root = ET.parse(_not_none(result.svg_path))
     ids = [node.attrib['id'] for node in root.iter() if 'id' in node.attrib]
     assert len(ids) == len(set(ids))
 
@@ -141,7 +148,7 @@ def test_vector_roundtrip_keeps_holes_and_thin_structure():
     mask[40:42, 50:62] = 255
     traced = VTracerVectorizer(preserve_detail=True).trace(mask)
     svg = assemble_svg(64, 64, [{"id": "ring", "svg_data": traced}])
-    png = load_cairosvg(logging.getLogger(__name__)).svg2png(bytestring=svg.encode())
+    png = _not_none(load_cairosvg(logging.getLogger(__name__))).svg2png(bytestring=svg.encode())
     rendered = np.array(Image.open(io.BytesIO(png)).convert("RGBA"))[..., 3] > 127
     truth = mask > 0
     assert (rendered & truth).sum() / (rendered | truth).sum() > .98
@@ -191,16 +198,16 @@ def test_layer_edit_reclips_children_and_updates_export(tmp_path):
     caps = _make_caps(FakeInterrogator([_candidate("bag")], {"bag": ["handle"]}), Instances(), FakeSegmenter())
     result = Orchestrator(caps, output_dir=tmp_path / "out").process(_write_image(tmp_path / "in.png"))
     parent = result.layers[0]
-    replacement = parent.mask.copy()
+    replacement = _not_none(parent.mask).copy()
     replacement[:25] = 0
     replace_layer_mask(result, parent.layer_id, replacement, np.zeros((64, 64, 3), np.uint8), caps)
     child = next(c for c in result.layers if c.parent_id == parent.layer_id)
-    assert not child.mask.any()
-    with Image.open(child.alpha_path) as rgba:
+    assert not _not_none(child.mask).any()
+    with Image.open(_not_none(child.alpha_path)) as rgba:
         assert not np.asarray(rgba)[..., 3].any()
-    with Image.open(result.all_objects_tiff_path) as rgba:
+    with Image.open(_not_none(result.all_objects_tiff_path)) as rgba:
         composite_alpha = np.asarray(rgba)[..., 3]
-    expected = np.maximum.reduce([layer.alpha for layer in result.layers])
+    expected = np.maximum.reduce([_not_none(layer.alpha) for layer in result.layers])
     assert np.array_equal(composite_alpha, expected)
 
 
@@ -263,8 +270,10 @@ def test_mlx_adapter_reuses_encoding_and_returns_all_masks(tmp_path, monkeypatch
     from models.mlx_sam3 import MLXSAM3
     mlx = types.ModuleType("mlx")
     core = types.ModuleType("mlx.core")
-    core.eval = lambda *_: None
-    mlx.core = core
+    # types.ModuleType has no declared `eval`/`core` attributes; monkeypatch
+    # both type-checks the assignment and restores it after the test.
+    monkeypatch.setattr(core, "eval", lambda *_: None, raising=False)
+    monkeypatch.setattr(mlx, "core", core, raising=False)
     monkeypatch.setitem(sys.modules, "mlx", mlx)
     monkeypatch.setitem(sys.modules, "mlx.core", core)
     processor = Mock()
@@ -273,7 +282,10 @@ def test_mlx_adapter_reuses_encoding_and_returns_all_masks(tmp_path, monkeypatch
         "masks": np.ones((2, 1, 16, 16), dtype=bool),
         "scores": np.array([.8, .9]), "boxes": np.array([[0, 0, 6, 6], [8, 8, 14, 14]]),
     }
-    adapter = MLXSAM3(tmp_path, Instances())
+    # MLXSAM3.fallback only ever calls detect_instances/segment/clear_cache on
+    # this, all of which Instances (via FakeDetector) provides; cast because
+    # MLXSAM3 pins the parameter to the concrete GroundedSAM class.
+    adapter = MLXSAM3(tmp_path, cast(GroundedSAM, Instances()))
     adapter._processor = processor
     image = np.zeros((16, 16, 3), np.uint8)
     assert len(adapter.detect_instances(image, "bag")) == 2

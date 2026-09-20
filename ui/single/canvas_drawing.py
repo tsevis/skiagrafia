@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import logging
 import tkinter as tk
+from typing import TYPE_CHECKING
 
 from PIL import Image, ImageDraw, ImageTk
 
@@ -20,11 +21,36 @@ from ui.single.canvas_overlays import (
 )
 from ui.theme import is_macos
 
+if TYPE_CHECKING:
+    from ui.main_window import MainWindow
+    from ui.single.single_view import SingleView
+
 logger = logging.getLogger(__name__)
 
 
 class CanvasDrawingMixin:
     """Canvas painting. Requires CanvasPanel's attributes."""
+
+    # Provided by CanvasPanel, which mixes this in. Annotations only:
+    # no assignment, so nothing exists at runtime and the MRO is untouched.
+    _app: MainWindow
+    _box_drag_current: tuple[float, float] | None
+    _box_drag_start: tuple[float, float] | None
+    _canvas: tk.Canvas
+    _compare_ratio: float
+    _draw_box_mode: tk.BooleanVar
+    _pan_x: float
+    _pan_y: float
+    _scan_preview_detections: list[dict]
+    _scan_preview_image: Image.Image | None
+    _show_scan_boxes: tk.BooleanVar
+    _show_scan_heatmap: tk.BooleanVar
+    _show_scan_labels: tk.BooleanVar
+    _source_image: Image.Image | None
+    _source_size: tuple[int, int]
+    _view: SingleView
+    _view_mode: tk.StringVar
+    _zoom: float
 
     def _draw_checkerboard(self, width: int, height: int) -> None:
         tile = 16
@@ -157,7 +183,7 @@ class CanvasDrawingMixin:
     def _draw_original_layer(self, display_w: int, display_h: int, mode: str) -> None:
         if self._source_image is None:
             return
-        resized = self._source_image.resize((display_w, display_h), Image.LANCZOS)
+        resized = self._source_image.resize((display_w, display_h), Image.Resampling.LANCZOS)
         self._photo_image = ImageTk.PhotoImage(resized)
         self._canvas.create_image(
             self._pan_x,
@@ -166,7 +192,7 @@ class CanvasDrawingMixin:
             image=self._photo_image,
         )
         if mode == "original" and self._scan_preview_image is not None:
-            preview = self._scan_preview_image.resize((display_w, display_h), Image.LANCZOS)
+            preview = self._scan_preview_image.resize((display_w, display_h), Image.Resampling.LANCZOS)
             split_px = int(display_w * self._compare_ratio)
             split_px = max(0, min(display_w, split_px))
             if split_px < display_w:

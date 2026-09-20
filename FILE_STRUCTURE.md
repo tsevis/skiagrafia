@@ -176,15 +176,41 @@ Use the isolated project interpreter for every Python command:
 ./.venv/bin/python -m pytest -q
 ./.venv/bin/python -m pytest -q -m gui
 ./.venv/bin/python -m ruff check .
+./.venv/bin/python -m pyright
 ./.venv/bin/python -m compileall -q .
 ./.venv/bin/python -m pip check
+./.venv/bin/python -m pip_audit
 uv lock --check
 git diff --check
 ```
 
+Or through `scripts/verify.sh`, which uses that interpreter for you:
+
+| mode | what it runs |
+| --- | --- |
+| *(none)* | the default pytest run |
+| `check` | **every gate except the windowed tests** — use this while working |
+| `types` | pyright alone |
+| `gui` | the one real-window smoke test |
+| `gui-full` | all windowed tests |
+| `all` | `check` plus every windowed test — for a release |
+
+`check` exists because `all` runs `-m "gui or gui_integration"`, which opens
+real windows on whoever's desktop is running it. That is correct before a
+release and wrong while working, and the two should not share one command.
+
 The `gui` marker is deliberately the fast real-window smoke gate. Full
 windowed integration tests use `-m gui_integration` and are opt-in, rather
 than part of ordinary development checks.
+
+`pyright` runs in **basic** mode, configured in `[tool.pyright]` in
+pyproject.toml. It needs `venvPath`/`venv` set there: without them it
+resolves against its own interpreter and reports numpy, torch, pydantic and
+cv2 as missing, with several hundred attribute errors cascading off that.
+
+`pip-audit` reads the **installed environment**, not the lock file, so it is
+only meaningful after `uv sync --frozen`. A `.venv` that has drifted from the
+lock will report packages the project no longer declares.
 
 ## Operational Limits
 

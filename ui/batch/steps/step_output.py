@@ -5,13 +5,14 @@ import subprocess
 import tkinter as tk
 from pathlib import Path
 from tkinter import ttk
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, cast
 
 from ui.theme import MACOS_OPEN, is_macos
 from utils.security import SecurityError, atomic_write_bytes, safe_child_path
 
 if TYPE_CHECKING:
     from ui.batch.batch_view import BatchView
+    from ui.batch.steps.step_progress import StepProgress
 
 logger = logging.getLogger(__name__)
 
@@ -100,7 +101,7 @@ class StepOutput:
 
     def _metric_card(
         self, parent: tk.Widget, title: str, value: str
-    ) -> ttk.Frame:
+    ) -> ttk.LabelFrame:
         card = ttk.LabelFrame(parent, text=title, padding=8)
         label = ttk.Label(
             card,
@@ -232,4 +233,4 @@ class StepOutput:
         self._view.go_to_step(4)
         progress_step = self._view._step_views[4]
         if progress_step and hasattr(progress_step, "start_retry"):
-            progress_step.start_retry(failed_paths)
+            cast("StepProgress", progress_step).start_retry(failed_paths)

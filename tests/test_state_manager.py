@@ -45,7 +45,9 @@ class TestPutAndGet:
         sm.put("foo", JobRecord(image_path="/a.png", status=JobStatus.PENDING))
         sm.put("foo", JobRecord(image_path="/a.png", status=JobStatus.COMPLETE))
 
-        assert sm.get("foo").status == JobStatus.COMPLETE
+        record = sm.get("foo")
+        assert record is not None
+        assert record.status == JobStatus.COMPLETE
         sm.close()
 
     def test_survives_reopen_of_same_db_path(self, tmp_path: Path) -> None:

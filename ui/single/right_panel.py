@@ -291,7 +291,7 @@ class RightPanel:
                 x1 = max(x0 + 1, min(source.width, int(x1)))
                 y1 = max(y0 + 1, min(source.height, int(y1)))
                 crop = source.convert("RGB").crop((x0, y0, x1, y1))
-                crop.thumbnail((56, 48), Image.LANCZOS)
+                crop.thumbnail((56, 48), Image.Resampling.LANCZOS)
                 preview = Image.new("RGB", (56, 48), "#F3F1EC")
                 offset = ((56 - crop.width) // 2, (48 - crop.height) // 2)
                 preview.paste(crop, offset)

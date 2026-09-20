@@ -8,8 +8,10 @@ from __future__ import annotations
 
 import io
 import sys
+from collections.abc import Iterator
 from pathlib import Path
 from types import SimpleNamespace
+from typing import Any, cast
 
 import pytest
 from PIL import Image
@@ -19,6 +21,17 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from utils import thumbnail
 
 
+def _render(*args: Any, **kwargs: Any) -> Image.Image:
+    """render_svg_thumbnail(), cast to what it actually returns here.
+
+    Its declared return type is ImageTk.PhotoImage, but the autouse
+    `_stub_photoimage` fixture replaces ImageTk.PhotoImage with an identity
+    passthrough (no Tk root in these tests), so the real runtime value is
+    the Image.Image produced just before that call.
+    """
+    return cast(Image.Image, thumbnail.render_svg_thumbnail(*args, **kwargs))
+
+
 @pytest.fixture(autouse=True)
 def _stub_photoimage(monkeypatch: pytest.MonkeyPatch) -> None:
     """Replace ImageTk.PhotoImage with an identity stub (no Tk root needed)."""
@@ -26,7 +39,7 @@ def _stub_photoimage(monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 @pytest.fixture(autouse=True)
-def _clear_cache() -> None:
+def _clear_cache() -> Iterator[None]:
     """Every test uses a distinct cache key, but clear defensively either way."""
     thumbnail.render_svg_thumbnail.cache_clear()
     yield
@@ -48,7 +61,7 @@ class TestRenderSvgThumbnailWithCairo:
         fake_cairo = SimpleNamespace(svg2png=lambda **kwargs: source_png)
         monkeypatch.setattr(thumbnail, "_get_cairosvg", lambda: fake_cairo)
 
-        result = thumbnail.render_svg_thumbnail("icon-a.svg", "#112233", size=4)
+        result = _render("icon-a.svg", "#112233", size=4)
 
         assert result.mode == "RGBA"
         assert result.size == (4, 4)
@@ -87,7 +100,7 @@ class TestRenderSvgThumbnailWithCairo:
             thumbnail, "_get_cairosvg", lambda: SimpleNamespace(svg2png=boom)
         )
 
-        result = thumbnail.render_svg_thumbnail("icon-c.svg", "#00ff00", size=6)
+        result = _render("icon-c.svg", "#00ff00", size=6)
 
         assert result.mode == "RGBA"
         assert result.size == (6, 6)
@@ -101,7 +114,7 @@ class TestRenderSvgThumbnailWithoutCairo:
     ) -> None:
         monkeypatch.setattr(thumbnail, "_get_cairosvg", lambda: None)
 
-        result = thumbnail.render_svg_thumbnail("icon-d.svg", "#ff00aa", size=5)
+        result = _render("icon-d.svg", "#ff00aa", size=5)
 
         assert result.mode == "RGBA"
         assert result.size == (5, 5)
@@ -111,7 +124,7 @@ class TestRenderSvgThumbnailWithoutCairo:
     def test_default_size_is_thirty_two(self, monkeypatch: pytest.MonkeyPatch) -> None:
         monkeypatch.setattr(thumbnail, "_get_cairosvg", lambda: None)
 
-        result = thumbnail.render_svg_thumbnail("icon-e.svg", "#010203")
+        result = _render("icon-e.svg", "#010203")
 
         assert result.size == (32, 32)
 
@@ -140,8 +153,8 @@ class TestThumbnailCache:
     ) -> None:
         monkeypatch.setattr(thumbnail, "_get_cairosvg", lambda: None)
 
-        red = thumbnail.render_svg_thumbnail("icon-g.svg", "#ff0000", size=4)
-        blue = thumbnail.render_svg_thumbnail("icon-g.svg", "#0000ff", size=4)
+        red = _render("icon-g.svg", "#ff0000", size=4)
+        blue = _render("icon-g.svg", "#0000ff", size=4)
 
         assert red.getpixel((2, 2)) != blue.getpixel((2, 2))
 

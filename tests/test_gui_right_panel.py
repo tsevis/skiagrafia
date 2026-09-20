@@ -27,7 +27,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 
 def _layer(label: str, role: str = "parent", **extra: object) -> dict:
-    layer = {"label": label, "role": role}
+    layer: dict[str, object] = {"label": label, "role": role}
     layer.update(extra)
     return layer
 
@@ -203,7 +203,10 @@ class TestThumbnails:
         boxes: list[tuple[int, int, int, int]] = []
         original = Image.Image.crop
 
-        def _spy(self, box=None):
+        def _spy(self, box: tuple[int, int, int, int] | None = None):
+            # right_panel always crops with an explicit bbox; this test
+            # exists to check what that bbox is, so a None here is a bug.
+            assert box is not None
             boxes.append(box)
             return original(self, box)
 

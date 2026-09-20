@@ -4,12 +4,33 @@ import logging
 import tkinter as tk
 from pathlib import Path
 from tkinter import ttk
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Protocol, cast
 
 from core.knowledge import load_knowledge_pack
 
 if TYPE_CHECKING:
+    from core.batch_template import BatchTemplate
     from ui.batch.batch_view import BatchView
+    from ui.batch.steps.step_progress import StepProgress
+
+    class _DnDWidget(Protocol):
+        """Shape tkinterdnd2 monkey-patches onto every BaseWidget instance.
+
+        tkinterdnd2 adds these methods to `tkinter.BaseWidget` at import
+        time (see `TkinterDnD._require`), so a plain `ttk.Label` gains them
+        only at runtime — this Protocol expresses that real, dynamically
+        acquired shape for the type checker.
+        """
+
+        def drop_target_register(self, *dndtypes: str) -> None: ...
+        def dnd_bind(self, sequence: str, func: object) -> object: ...
+
+    class _DropEvent(Protocol):
+        """Shape of a tkinterdnd2 `<<Drop>>` event: `DnDEvent` is declared
+        with no attributes (they're set dynamically), so a Protocol
+        expresses the one field this module actually reads."""
+
+        data: str
 
 logger = logging.getLogger(__name__)
 
@@ -47,7 +68,7 @@ class StepImport:
         dismiss_btn.bind("<Button-1>", lambda e: self._dismiss_template())
 
         if view.template is not None:
-            self._show_template_banner(view.template)
+            self._show_template_banner(cast("BatchTemplate", view.template))
 
         # Title
         ttk.Label(
@@ -74,8 +95,9 @@ class StepImport:
         self._drop_zone.pack(fill=tk.X, pady=(0, 12))
 
         try:
-            self._drop_zone.drop_target_register("DND_Files")
-            self._drop_zone.dnd_bind("<<Drop>>", self._on_drop)
+            drop_target = cast("_DnDWidget", self._drop_zone)
+            drop_target.drop_target_register("DND_Files")
+            drop_target.dnd_bind("<<Drop>>", self._on_drop)
         except Exception:
             logger.warning("tkinterdnd2 not available — drag-and-drop disabled")
 
@@ -130,7 +152,7 @@ class StepImport:
 
         self._scan_recent_batches()
 
-    def _on_drop(self, event: object) -> None:
+    def _on_drop(self, event: _DropEvent) -> None:
         path = event.data.strip().strip("{}")
         if Path(path).is_dir():
             self._set_folder(path)
@@ -157,7 +179,7 @@ class StepImport:
 
         logger.info("Batch folder selected: %s (%d images)", path, len(images))
 
-    def _show_template_banner(self, template: object) -> None:
+    def _show_template_banner(self, template: BatchTemplate) -> None:
         if hasattr(template, "name"):
             n_parents = len(getattr(template, "confirmed_labels", []))
             n_children = sum(
@@ -266,7 +288,7 @@ class StepImport:
         self._view.go_to_step(4)
         progress_step = self._view._step_views[4]
         if progress_step and hasattr(progress_step, "resume_existing"):
-            progress_step.resume_existing()
+            cast("StepProgress", progress_step).resume_existing()
 
     def _update_knowledge_pack(self, folder: Path) -> None:
         pack = load_knowledge_pack(folder)

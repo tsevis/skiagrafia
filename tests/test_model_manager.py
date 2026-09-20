@@ -26,7 +26,7 @@ from utils.security import SecurityError
 
 class TestEntryFiles:
     def test_returns_list_for_present_key(self) -> None:
-        entry = {"hf_files": ["a.json", "b.json"]}
+        entry: dict[str, object] = {"hf_files": ["a.json", "b.json"]}
         assert _entry_files(entry) == ["a.json", "b.json"]
 
     def test_returns_empty_for_missing_key(self) -> None:
@@ -36,7 +36,7 @@ class TestEntryFiles:
         assert _entry_files({"hf_files": "not-a-list"}) == []
 
     def test_reads_alternate_key(self) -> None:
-        entry = {"hf_weight_alternatives": ["model.safetensors"]}
+        entry: dict[str, object] = {"hf_weight_alternatives": ["model.safetensors"]}
         assert _entry_files(entry, "hf_weight_alternatives") == ["model.safetensors"]
 
 
@@ -79,7 +79,7 @@ class TestHfDirAvailable:
         target = tmp_path / "model"
         target.mkdir()
         (target / "config.json").touch()
-        entry = {"hf_files": ["config.json"]}
+        entry: dict[str, object] = {"hf_files": ["config.json"]}
         assert _hf_dir_available(entry, target) is True
 
 
@@ -428,7 +428,7 @@ class TestDownloadGithubZip:
         monkeypatch.setattr(model_manager.urllib.request, "urlopen", fake_urlopen)
 
         target = tmp_path / "Grounded-SAM-2"
-        entry = {
+        entry: dict[str, object] = {
             "url": "https://github.com/example/repo/archive/refs/heads/main.zip",
             "zip_root": "Grounded-SAM-2-main",
         }
@@ -456,7 +456,7 @@ class TestDownloadGithubZip:
         target.mkdir(parents=True)
         (target / "existing.txt").write_text("keep me")
 
-        entry = {
+        entry: dict[str, object] = {
             "url": "https://github.com/example/repo/archive/refs/heads/main.zip",
             "zip_root": "Grounded-SAM-2-main",
         }
@@ -478,7 +478,7 @@ class TestDownloadGithubZip:
         monkeypatch.setattr(model_manager.urllib.request, "urlopen", fake_urlopen)
         progress: list[tuple[int, int | None]] = []
 
-        entry = {"url": "https://github.com/x/y.zip", "zip_root": "root"}
+        entry: dict[str, object] = {"url": "https://github.com/x/y.zip", "zip_root": "root"}
         target = tmp_path / "dest"
 
         ModelManager._download_github_zip(

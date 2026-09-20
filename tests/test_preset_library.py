@@ -51,5 +51,9 @@ def test_apple_preset_contains_required_vocabulary_and_exclusions() -> None:
         "page backgrounds",
         "decorative borders",
     } <= set(pack.domain.exclusions)
-    assert "screen" in pack.find_object("iMac").parts
-    assert "buttons" in pack.find_object("keyboard").parts
+    imac = pack.find_object("iMac")
+    assert imac is not None
+    assert "screen" in imac.parts
+    keyboard = pack.find_object("keyboard")
+    assert keyboard is not None
+    assert "buttons" in keyboard.parts

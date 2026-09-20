@@ -2,10 +2,14 @@ from __future__ import annotations
 
 import tkinter as tk
 from tkinter import ttk
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, cast
 
 if TYPE_CHECKING:
+    from core.orchestrator import PipelineResult
     from ui.main_window import MainWindow
+    from ui.single.canvas_panel import CanvasPanel
+    from ui.single.left_panel import LeftPanel
+    from ui.single.right_panel import RightPanel
 
 
 class SingleView:
@@ -43,15 +47,15 @@ class SingleView:
         self._paned.add(self._right_panel.frame, weight=0)
 
     @property
-    def left_panel(self) -> object:
+    def left_panel(self) -> LeftPanel:
         return self._left_panel
 
     @property
-    def canvas_panel(self) -> object:
+    def canvas_panel(self) -> CanvasPanel:
         return self._canvas_panel
 
     @property
-    def right_panel(self) -> object:
+    def right_panel(self) -> RightPanel:
         return self._right_panel
 
     def on_image_loaded(self, image_path: str) -> None:
@@ -108,10 +112,14 @@ class SingleView:
         """Called when the 10-step pipeline finishes."""
         self._last_result = result
 
-        # Convert PipelineResult.layers → list[dict] for the right panel
+        # Convert PipelineResult.layers → list[dict] for the right panel.
+        # `result` stays `object` here (rather than PipelineResult) because
+        # left_panel.py and right_panel.py also call this with values typed
+        # only as `object`; narrowing is done locally via hasattr + cast.
         layers_data: list[dict] = []
         if hasattr(result, "layers"):
-            for layer in result.layers:
+            pipeline_result = cast("PipelineResult", result)
+            for layer in pipeline_result.layers:
                 layers_data.append({
                     "label": layer.label,
                     "layer_id": getattr(layer, "layer_id", ""),
@@ -122,9 +130,11 @@ class SingleView:
                     "bbox": layer.bbox,
                 })
 
-        if hasattr(result, "error") and result.error:
+        if hasattr(result, "error") and cast("PipelineResult", result).error:
             import logging
-            logging.getLogger(__name__).warning("Pipeline error: %s", result.error)
+            logging.getLogger(__name__).warning(
+                "Pipeline error: %s", cast("PipelineResult", result).error
+            )
 
         self._right_panel.update_layers(layers_data)
         self._canvas_panel.refresh_overlays()

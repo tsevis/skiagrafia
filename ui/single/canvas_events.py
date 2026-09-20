@@ -8,12 +8,55 @@ from __future__ import annotations
 
 import logging
 import tkinter as tk
+from tkinter import ttk
+from typing import TYPE_CHECKING, ClassVar
+
+if TYPE_CHECKING:
+    from PIL import Image
 
 logger = logging.getLogger(__name__)
 
 
 class CanvasEventsMixin:
     """Input handling. Requires CanvasPanel's attributes."""
+
+    # Provided by CanvasPanel, which mixes this in. Annotations only:
+    # no assignment, so nothing exists at runtime and the MRO is untouched.
+    ZOOM_STEP: ClassVar[float]
+    _canvas: tk.Canvas
+    _draw_box_mode: tk.BooleanVar
+    _h_scroll: ttk.Scrollbar
+    _scan_preview_image: Image.Image | None
+    _source_image: Image.Image | None
+    _source_size: tuple[int, int]
+    _v_scroll: ttk.Scrollbar
+    _view_mode: tk.StringVar
+    _zoom: float
+
+    # Methods provided by CanvasPanel. CanvasPanel defines the real
+    # implementations directly, so they always shadow these stubs in the
+    # MRO (CanvasPanel, CanvasDrawingMixin, CanvasEventsMixin) -- these
+    # exist only so pyright can see the calls below; if one is ever
+    # reached it means the host stopped providing it, so it fails loudly.
+    def _redraw(self) -> None:
+        raise NotImplementedError
+
+    def _zoom_at(
+        self,
+        factor: float,
+        cx: float | None = None,
+        cy: float | None = None,
+    ) -> None:
+        raise NotImplementedError
+
+    def zoom_to_cover(self, event: object = None) -> None:
+        raise NotImplementedError
+
+    def _update_compare_ratio_from_canvas_x(self, canvas_x: float) -> None:
+        raise NotImplementedError
+
+    def _finish_manual_box(self) -> None:
+        raise NotImplementedError
 
     def _on_scroll(self, event: tk.Event) -> None:
         """Zoom on scroll wheel, centred on cursor."""

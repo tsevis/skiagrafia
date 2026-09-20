@@ -20,7 +20,7 @@ from PIL import Image
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from core.contracts import CapabilitySet
+from core.contracts import AlphaRefiner, CapabilitySet, Vectorizer
 from core.interrogation import (
     InterrogationCandidate,
     InterrogationResult,
@@ -160,8 +160,8 @@ def _make_caps(
     interrogator: FakeInterrogator,
     detector: FakeDetector,
     segmenter: FakeSegmenter,
-    alpha_refiner: FakeAlphaRefiner | None = None,
-    vectorizer: FakeVectorizer | None = None,
+    alpha_refiner: AlphaRefiner | None = None,
+    vectorizer: Vectorizer | None = None,
 ) -> CapabilitySet:
     return CapabilitySet(
         interrogator=interrogator,
@@ -427,6 +427,7 @@ class TestDetectCandidate:
             np.zeros((10, 10, 3), dtype=np.uint8), candidate, manual_lookup
         )
         assert is_manual is True
+        assert det is not None
         assert det.bbox == (1, 2, 3, 4)
         assert det.confidence == 1.0
 
@@ -439,6 +440,7 @@ class TestDetectCandidate:
             np.zeros((10, 10, 3), dtype=np.uint8), candidate, None
         )
         assert is_manual is False
+        assert det is not None
         assert det.bbox == (1, 1, 2, 2)
         # "third" should never have been queried once "second" hit.
         assert detector.calls == ["first", "second"]

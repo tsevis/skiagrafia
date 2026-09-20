@@ -13,6 +13,7 @@ from __future__ import annotations
 import sys
 import types
 from pathlib import Path
+from typing import Any, cast
 
 import numpy as np
 import pytest
@@ -39,7 +40,9 @@ def test_transformers_v5_invert_attention_mask_compatibility() -> None:
         dtype = torch.float32
 
     _patch_bert_invert_attention_mask(LegacyBert)
-    output = LegacyBert().invert_attention_mask(torch.tensor([[1, 0]]))
+    # invert_attention_mask is added dynamically by the patch above, so the
+    # instance is cast to Any purely for the type checker.
+    output = cast(Any, LegacyBert()).invert_attention_mask(torch.tensor([[1, 0]]))
     assert output.shape == (1, 1, 1, 2)
     assert output[0, 0, 0, 0] == 0
     assert output[0, 0, 0, 1] < -1e30
@@ -63,7 +66,10 @@ class FakeSamPredictor:
     def set_image(self, image: NDArray) -> None:
         self.set_image_calls.append(image)
 
-    def predict(self, box, multimask_output: bool):
+    def predict(self, **kwargs: Any) -> tuple[NDArray, NDArray, None]:
+        """Signature matches `SamPredictorLike.predict` (models/vendored_contracts.py)."""
+        box = kwargs["box"]
+        multimask_output = kwargs["multimask_output"]
         self.predict_calls.append({"box": box, "multimask_output": multimask_output})
         if self._masks is not None:
             masks = self._masks
@@ -93,24 +99,29 @@ def _install_fake_grounding_dino(monkeypatch: pytest.MonkeyPatch, predict_fn) ->
         def __init__(self, *args, **kwargs) -> None:
             pass
 
+    # types.ModuleType has no declared `predict`/`Compose`/etc. attributes, so
+    # these are populated through monkeypatch.setattr() rather than
+    # dot-assignment -- it type-checks against the ModuleType stub (unlike a
+    # bare setattr() call) and restores each module after the test, exactly
+    # like every other patch in this file.
     inference_mod = types.ModuleType("grounding_dino.groundingdino.util.inference")
-    inference_mod.predict = predict_fn
+    monkeypatch.setattr(inference_mod, "predict", predict_fn, raising=False)
 
     transforms_mod = types.ModuleType("grounding_dino.groundingdino.datasets.transforms")
-    transforms_mod.Compose = FakeCompose
-    transforms_mod.RandomResize = _NoOpTransform
-    transforms_mod.ToTensor = _NoOpTransform
-    transforms_mod.Normalize = _NoOpTransform
+    monkeypatch.setattr(transforms_mod, "Compose", FakeCompose, raising=False)
+    monkeypatch.setattr(transforms_mod, "RandomResize", _NoOpTransform, raising=False)
+    monkeypatch.setattr(transforms_mod, "ToTensor", _NoOpTransform, raising=False)
+    monkeypatch.setattr(transforms_mod, "Normalize", _NoOpTransform, raising=False)
 
     util_mod = types.ModuleType("grounding_dino.groundingdino.util")
-    util_mod.inference = inference_mod
+    monkeypatch.setattr(util_mod, "inference", inference_mod, raising=False)
     datasets_mod = types.ModuleType("grounding_dino.groundingdino.datasets")
-    datasets_mod.transforms = transforms_mod
+    monkeypatch.setattr(datasets_mod, "transforms", transforms_mod, raising=False)
     groundingdino_mod = types.ModuleType("grounding_dino.groundingdino")
-    groundingdino_mod.util = util_mod
-    groundingdino_mod.datasets = datasets_mod
+    monkeypatch.setattr(groundingdino_mod, "util", util_mod, raising=False)
+    monkeypatch.setattr(groundingdino_mod, "datasets", datasets_mod, raising=False)
     grounding_dino_mod = types.ModuleType("grounding_dino")
-    grounding_dino_mod.groundingdino = groundingdino_mod
+    monkeypatch.setattr(grounding_dino_mod, "groundingdino", groundingdino_mod, raising=False)
 
     for name, mod in {
         "grounding_dino": grounding_dino_mod,
@@ -167,12 +178,18 @@ class TestPatchOnnxMlDtypes:
 
 
 class TestPatchBertHeadMask:
-    def _fake_bert_module(self):
+    def _fake_bert_module(self, monkeypatch: pytest.MonkeyPatch):
         class FakeBertModel:
-            pass
+            # Annotation only, deliberately never assigned: _patch_bert_head_mask
+            # installs this at runtime, and its `hasattr` guard must still see
+            # it as absent until that happens. A bare annotation satisfies the
+            # type checker without creating a real class attribute.
+            get_head_mask: Any
 
         module = types.ModuleType("transformers.models.bert.modeling_bert")
-        module.BertModel = FakeBertModel
+        # types.ModuleType has no declared `BertModel` attribute; monkeypatch
+        # both type-checks the assignment and restores it after the test.
+        monkeypatch.setattr(module, "BertModel", FakeBertModel, raising=False)
         return module, FakeBertModel
 
     def test_noop_when_transformers_bert_unimportable(
@@ -186,7 +203,7 @@ class TestPatchBertHeadMask:
     def test_skips_when_attribute_already_present(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        module, FakeBertModel = self._fake_bert_module()
+        module, FakeBertModel = self._fake_bert_module(monkeypatch)
         sentinel = object()
         FakeBertModel.get_head_mask = sentinel
         monkeypatch.setitem(
@@ -198,7 +215,7 @@ class TestPatchBertHeadMask:
     def test_installs_and_runs_patched_get_head_mask(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        module, FakeBertModel = self._fake_bert_module()
+        module, FakeBertModel = self._fake_bert_module(monkeypatch)
         monkeypatch.setitem(
             sys.modules, "transformers.models.bert.modeling_bert", module
         )
@@ -220,7 +237,7 @@ class TestPatchBertHeadMask:
 
 
 class TestPatchGetExtendedAttentionMask:
-    def _fake_module_utils_module(self):
+    def _fake_module_utils_module(self, monkeypatch: pytest.MonkeyPatch):
         calls: list[tuple] = []
 
         class FakeModuleUtilsMixin:
@@ -231,7 +248,10 @@ class TestPatchGetExtendedAttentionMask:
                 return "extended"
 
         module = types.ModuleType("transformers.modeling_utils")
-        module.ModuleUtilsMixin = FakeModuleUtilsMixin
+        # types.ModuleType has no declared `ModuleUtilsMixin` attribute;
+        # monkeypatch both type-checks the assignment and restores it after
+        # the test.
+        monkeypatch.setattr(module, "ModuleUtilsMixin", FakeModuleUtilsMixin, raising=False)
         return module, FakeModuleUtilsMixin, calls
 
     def test_noop_when_transformers_modeling_utils_unimportable(
@@ -243,7 +263,7 @@ class TestPatchGetExtendedAttentionMask:
     def test_wraps_and_discards_legacy_device_positional(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        module, FakeModuleUtilsMixin, calls = self._fake_module_utils_module()
+        module, FakeModuleUtilsMixin, calls = self._fake_module_utils_module(monkeypatch)
         monkeypatch.setitem(sys.modules, "transformers.modeling_utils", module)
         _patch_get_extended_attention_mask()
 
@@ -266,7 +286,7 @@ class TestPatchGetExtendedAttentionMask:
     def test_second_patch_call_is_idempotent(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        module, FakeModuleUtilsMixin, _ = self._fake_module_utils_module()
+        module, FakeModuleUtilsMixin, _ = self._fake_module_utils_module(monkeypatch)
         monkeypatch.setitem(sys.modules, "transformers.modeling_utils", module)
         _patch_get_extended_attention_mask()
         first_patched = FakeModuleUtilsMixin.get_extended_attention_mask
@@ -351,6 +371,7 @@ class TestDetectBox:
         gsam = _make_gsam_with_dino_stubbed()
 
         result = gsam.detect_box(_tiny_image(64), "widget", skip_synonyms=True)
+        assert isinstance(result, DetectionResult)
         # Second box (index 1, cx=cy=0.5, w=h=0.4 of a 64px image) wins.
         assert result.bbox == (19, 19, 45, 45)  # include the fractional right/bottom edge
 

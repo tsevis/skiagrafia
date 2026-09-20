@@ -448,7 +448,9 @@ class TestGuideEditor:
 
         editor._save_guide()
 
-        assert load_knowledge_pack(folder).name == "Liturgical objects"
+        pack = load_knowledge_pack(folder)
+        assert pack is not None
+        assert pack.name == "Liturgical objects"
 
     def test_path_label_reflects_the_saved_location(
         self, prefs_window, tk_root, tmp_path

@@ -6,11 +6,12 @@ import threading
 import tkinter as tk
 from pathlib import Path
 from tkinter import ttk
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, cast
 
 from PIL import Image, ImageOps
 
 from core.knowledge import load_knowledge_pack
+from ui.single.dnd_contracts import DndEvent, DndTarget
 from ui.single.left_panel_labels import LabelsSectionMixin
 
 if TYPE_CHECKING:
@@ -132,8 +133,11 @@ class LeftPanel(LabelsSectionMixin):
 
         # Register DnD
         try:
-            self._drop_zone.drop_target_register("DND_Files")
-            self._drop_zone.dnd_bind("<<Drop>>", self._on_drop)
+            # tkinterdnd2 grafts these onto the widget at runtime; the
+            # except below is what handles it not being installed.
+            drop_target = cast("DndTarget", self._drop_zone)
+            drop_target.drop_target_register("DND_Files")
+            drop_target.dnd_bind("<<Drop>>", self._on_drop)
         except Exception:
             logger.warning("tkinterdnd2 not available — drag-and-drop disabled")
 
@@ -149,7 +153,7 @@ class LeftPanel(LabelsSectionMixin):
         self._size_label = ttk.Label(self._info_frame, text="")
         self._size_label.pack(anchor=tk.W)
 
-    def _on_drop(self, event: object) -> None:
+    def _on_drop(self, event: DndEvent) -> None:
         """Handle file drop via tkinterdnd2."""
         path = event.data.strip().strip("{}")
         if Path(path).is_file():
@@ -256,16 +260,19 @@ class LeftPanel(LabelsSectionMixin):
         self._smoothing_var = tk.IntVar(value=5)
         self._length_var = tk.DoubleVar(value=4.0)
 
+        # No is_float column: it only ever repeated whether the variable is a
+        # DoubleVar, and two places saying the same thing is one place to get
+        # it wrong. _build_parameter_row reads it off the variable itself.
         sliders = [
-            ("Depth", self._depth_var, 1, 3, False),
-            ("Corner thr.", self._corner_var, 30, 90, False),
-            ("Speckle", self._speckle_var, 2, 20, False),
-            ("Smoothing", self._smoothing_var, 1, 10, False),
-            ("Length thr.", self._length_var, 2.0, 8.0, True),
+            ("Depth", self._depth_var, 1, 3),
+            ("Corner thr.", self._corner_var, 30, 90),
+            ("Speckle", self._speckle_var, 2, 20),
+            ("Smoothing", self._smoothing_var, 1, 10),
+            ("Length thr.", self._length_var, 2.0, 8.0),
         ]
 
-        for label_text, var, from_, to_, is_float in sliders:
-            self._build_parameter_row(section, label_text, var, from_, to_, is_float)
+        for label_text, var, from_, to_ in sliders:
+            self._build_parameter_row(section, label_text, var, from_, to_)
 
     # ── Process section ────────────────────────────────────────
 
@@ -450,11 +457,11 @@ class LeftPanel(LabelsSectionMixin):
         self,
         parent: ttk.Widget,
         label_text: str,
-        var: tk.Variable,
+        var: tk.IntVar | tk.DoubleVar,
         from_: float,
         to_: float,
-        is_float: bool,
     ) -> None:
+        is_float = isinstance(var, tk.DoubleVar)
         row = ttk.Frame(parent)
         row.pack(fill=tk.X, pady=1)
         ttk.Label(row, text=label_text, width=10).pack(side=tk.LEFT)
@@ -478,7 +485,7 @@ class LeftPanel(LabelsSectionMixin):
             except ValueError:
                 raw = float(var.get())
             clamped = min(max(raw, from_), to_)
-            if is_float:
+            if isinstance(var, tk.DoubleVar):
                 var.set(round(clamped, 1))
                 entry_var.set(f"{float(var.get()):.1f}")
             else:
@@ -490,7 +497,7 @@ class LeftPanel(LabelsSectionMixin):
 
         def _on_scale(val: str) -> None:
             numeric = float(val)
-            if is_float:
+            if isinstance(var, tk.DoubleVar):
                 var.set(round(numeric, 1))
                 entry_var.set(f"{float(var.get()):.1f}")
             else:

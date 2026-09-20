@@ -4,13 +4,15 @@ import cv2
 import numpy as np
 from numpy.typing import NDArray
 
+from utils.array_types import as_intp, as_uint8
+
 
 def boolean_subtract(
     parent_mask: NDArray[np.uint8],
     child_mask: NDArray[np.uint8],
 ) -> NDArray[np.uint8]:
     """Subtract child mask from parent, returning the body mask."""
-    return cv2.bitwise_and(parent_mask, cv2.bitwise_not(child_mask))
+    return as_uint8(cv2.bitwise_and(parent_mask, cv2.bitwise_not(child_mask)))
 
 
 def boolean_union(
@@ -18,7 +20,7 @@ def boolean_union(
     mask_b: NDArray[np.uint8],
 ) -> NDArray[np.uint8]:
     """Combine two masks via bitwise OR."""
-    return cv2.bitwise_or(mask_a, mask_b)
+    return as_uint8(cv2.bitwise_or(mask_a, mask_b))
 
 
 def boolean_intersect(
@@ -26,7 +28,7 @@ def boolean_intersect(
     mask_b: NDArray[np.uint8],
 ) -> NDArray[np.uint8]:
     """Intersect two masks via bitwise AND."""
-    return cv2.bitwise_and(mask_a, mask_b)
+    return as_uint8(cv2.bitwise_and(mask_a, mask_b))
 
 
 def refine_mask(
@@ -50,7 +52,7 @@ def refine_mask(
     count, labels, stats, _ = cv2.connectedComponentsWithStats(binary, connectivity=8)
     keep = np.zeros(count, dtype=np.uint8)
     keep[1:] = (stats[1:, cv2.CC_STAT_AREA] >= min_contour_area).astype(np.uint8) * 255
-    return keep[labels]
+    return keep[as_intp(labels)]
 
 
 def edge_refine(
@@ -61,7 +63,7 @@ def edge_refine(
     if iterations <= 0:
         return mask
     kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (3, 3))
-    return cv2.erode(mask, kernel, iterations=iterations)
+    return as_uint8(cv2.erode(mask, kernel, iterations=iterations))
 
 
 def mask_bbox(mask: NDArray[np.uint8]) -> tuple[int, int, int, int]:

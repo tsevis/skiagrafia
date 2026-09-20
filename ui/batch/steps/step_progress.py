@@ -6,7 +6,7 @@ import time
 import tkinter as tk
 from pathlib import Path
 from tkinter import ttk
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, cast
 
 from PIL import Image, ImageOps, ImageTk
 
@@ -15,7 +15,10 @@ from ui.theme import is_macos
 logger = logging.getLogger(__name__)
 
 if TYPE_CHECKING:
+    from core.batch_runner import BatchConfig
     from ui.batch.batch_view import BatchView
+    from ui.batch.steps.step_import import StepImport
+    from ui.batch.steps.step_output import StepOutput
 
 
 class StepProgress:
@@ -113,7 +116,7 @@ class StepProgress:
         step_import = self._view._step_views[0]
         image_paths: list[str] = []
         if step_import and hasattr(step_import, "get_image_paths"):
-            image_paths = step_import.get_image_paths()
+            image_paths = cast("StepImport", step_import).get_image_paths()
 
         if not image_paths:
             self._start_btn.config(state="normal", text="Start Processing")
@@ -159,7 +162,7 @@ class StepProgress:
 
     def _start_processing(
         self,
-        batch_config: object,
+        batch_config: BatchConfig,
     ) -> None:
         """Initialize GUI state and launch the common durable BatchRunner."""
         from core.batch_runner import BatchRunner
@@ -231,7 +234,7 @@ class StepProgress:
 
         step_output = self._view._step_views[5]
         if step_output and hasattr(step_output, "update_summary"):
-            step_output.update_summary(
+            cast("StepOutput", step_output).update_summary(
                 summary.svg_count,
                 summary.avg_layers,
                 summary.failed,
@@ -243,7 +246,7 @@ class StepProgress:
 
     def _metric_card(
         self, parent: tk.Widget, title: str, value: str
-    ) -> ttk.Frame:
+    ) -> ttk.LabelFrame:
         card = ttk.LabelFrame(parent, text=title, padding=8)
         label = ttk.Label(
             card,
@@ -370,7 +373,16 @@ class StepProgress:
             "complete": "\u2713",
             "failed": "\u2715",
         }
-        lbl.config(text=text_map.get(status, "\u2014"), **style)
+        # Unpacking a generic dict[str, str] via **style makes pyright check
+        # its values against every keyword tkinter's configure() accepts
+        # (anchor, relief, ...), not just the three keys this dict has \u2014
+        # naming them explicitly keeps the real (str-typed) keys intact.
+        lbl.config(
+            text=text_map.get(status, "\u2014"),
+            bg=style["bg"],
+            fg=style["fg"],
+            highlightbackground=style["highlightbackground"],
+        )
 
     def on_batch_complete(self) -> None:
         """Auto-advance to step 6 when batch is done."""
