@@ -79,6 +79,28 @@ class TypographyObservation:
         return tuple(element.glyph for element in self.elements)
 
 
+@dataclass(frozen=True)
+class GlyphInspection:
+    """The outcome of an optional glyph reading, and why it did not happen.
+
+    Three states have to stay distinguishable, because only one of them is a
+    downgrade the operator needs to see:
+
+    * a reading arrived -- ``observation`` is set;
+    * the label does not name individual glyphs, so nothing was asked -- both
+      fields are None;
+    * the reading was attempted and did not produce a usable answer --
+      ``unavailable_reason`` carries the operator-facing explanation.
+
+    Collapsing the last two into a bare ``None`` is what let the pipeline fall
+    back to composite rejection without telling anyone the one-to-one glyph
+    matching had been skipped.
+    """
+
+    observation: TypographyObservation | None = None
+    unavailable_reason: str | None = None
+
+
 def _label_words(label: str) -> list[str]:
     """Return natural-language words without treating ``letterbox`` as letter."""
     return re.findall(r"[^\W\d_]+|\d+", label.casefold(), flags=re.UNICODE)

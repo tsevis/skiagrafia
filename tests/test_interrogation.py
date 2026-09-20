@@ -14,6 +14,7 @@ import numpy as np
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from core.interrogation import (
+    GLYPH_READING_MAX_TOKENS,
     GuidedInterrogator,
     InterrogationCandidate,
     InterrogationSettings,
@@ -27,7 +28,7 @@ from core.typography_labels import (
     is_typography_label,
     parse_typography_observation,
 )
-from models.vlm_client import BaseVLMClient
+from models.vlm_client import MAX_TOKENS, BaseVLMClient, VLMResponseError
 
 # ── Fakes ────────────────────────────────────────────────────────────────
 
@@ -49,11 +50,13 @@ class FakeVLMClient(BaseVLMClient):
         self.children_response = children_response or []
         self.children_error = children_error
         self.vision_calls: list[str] = []
+        self.vision_budgets: list[int] = []
         self.text_calls: list[str] = []
         self.children_calls: list[str] = []
 
-    def query_vision(self, image, prompt: str) -> str:
+    def query_vision(self, image, prompt: str, *, num_predict: int = MAX_TOKENS) -> str:
         self.vision_calls.append(prompt)
+        self.vision_budgets.append(num_predict)
         for key, resp in self.vision_responses.items():
             if key in prompt:
                 return resp
@@ -597,11 +600,87 @@ class TestTypographyObservation:
         )
         interrogator._clients["moondream"] = client
 
-        observation = interrogator.inspect_individual_glyphs(_tiny_image(), _candidate("letters"))
+        inspection = interrogator.inspect_individual_glyphs(_tiny_image(), _candidate("letters"))
 
-        assert observation is not None
-        assert observation.glyphs == ("A",)
+        assert inspection.observation is not None
+        assert inspection.observation.glyphs == ("A",)
+        assert inspection.unavailable_reason is None
         assert len(client.vision_calls) == 1
+
+
+class TestGlyphInspectionReportsWhyItDidNotRun:
+    """A glyph reading that does not happen must say so.
+
+    The pipeline silently fell back to composite rejection whenever the local
+    model errored or answered with something unusable, so an operator saw a
+    warning naming the proposals it excluded and nothing about the check that
+    never ran.
+    """
+
+    def test_reports_the_reason_when_the_model_fails(self) -> None:
+        interrogator = GuidedInterrogator(_settings())
+
+        class FailingClient(FakeVLMClient):
+            def query_vision(self, image, prompt: str, **kwargs) -> str:
+                raise VLMResponseError(
+                    "VLM output exceeded its token budget; incomplete labels rejected"
+                )
+
+        interrogator._clients["moondream"] = FailingClient()
+
+        inspection = interrogator.inspect_individual_glyphs(
+            _tiny_image(), _candidate("letters")
+        )
+
+        assert inspection.observation is None
+        assert inspection.unavailable_reason is not None
+        assert "token budget" in inspection.unavailable_reason
+
+    def test_reports_the_reason_when_the_reading_is_unusable(self) -> None:
+        interrogator = GuidedInterrogator(_settings())
+        interrogator._clients["moondream"] = FakeVLMClient(
+            vision_responses={"Inspect the image as individual typography": '{"elements":[]}'}
+        )
+
+        inspection = interrogator.inspect_individual_glyphs(
+            _tiny_image(), _candidate("letters")
+        )
+
+        assert inspection.observation is None
+        assert inspection.unavailable_reason is not None
+
+    def test_a_non_glyph_label_is_not_reported_as_a_failure(self) -> None:
+        interrogator = GuidedInterrogator(_settings())
+        interrogator._clients["moondream"] = FakeVLMClient()
+
+        inspection = interrogator.inspect_individual_glyphs(
+            _tiny_image(), _candidate("text")
+        )
+
+        assert inspection.observation is None
+        assert inspection.unavailable_reason is None
+
+
+class TestGlyphReadingTokenBudget:
+    """200 tokens fits 8 glyphs, measured; a 12-glyph image is truncated.
+
+    See GLYPH_READING_MAX_TOKENS for the budget this asks for instead.
+    """
+
+    def test_asks_for_more_than_the_list_answer_budget(self) -> None:
+        interrogator = GuidedInterrogator(_settings())
+        client = FakeVLMClient(
+            vision_responses={
+                "Inspect the image as individual typography":
+                '{"elements":[{"glyph":"A","bbox":[0,0,500,1000]}]}'
+            }
+        )
+        interrogator._clients["moondream"] = client
+
+        interrogator.inspect_individual_glyphs(_tiny_image(), _candidate("letters"))
+
+        assert client.vision_budgets == [GLYPH_READING_MAX_TOKENS]
+        assert GLYPH_READING_MAX_TOKENS > MAX_TOKENS
 
 
 class TestCandidatesFromConfirmedLabels:

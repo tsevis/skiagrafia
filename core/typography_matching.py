@@ -15,7 +15,7 @@ from typing import Any, Protocol
 import numpy as np
 from numpy.typing import NDArray
 
-from core.interrogation import InterrogationCandidate, TypographyObservation
+from core.interrogation import InterrogationCandidate
 from core.pipeline_geometry import (
     bbox_area,
     bbox_iou,
@@ -23,6 +23,7 @@ from core.pipeline_geometry import (
     normalized_bbox_to_image,
     rectangle_union_area,
 )
+from core.typography_labels import GlyphInspection, TypographyObservation
 from models.grounded_sam import DetectionResult
 
 # A semantic box must overlap a detector proposal at least this much before
@@ -54,18 +55,28 @@ def inspect_individual_glyphs(
     interrogator: object,
     image: NDArray[np.uint8],
     candidate: InterrogationCandidate,
-) -> TypographyObservation | None:
+) -> GlyphInspection:
     """Ask the interrogator for an optional, local semantic glyph check.
 
-    Returns None when the capability is absent, or when it answers with
-    something that is not a TypographyObservation -- this is model output and
-    is not trusted to be the declared shape.
+    Reports an unavailable reason rather than a bare absence, so the caller
+    can tell the operator that the check did not run.  Anything that is not
+    the declared shape counts as unavailable: this is model output reaching a
+    Protocol the interrogator only optionally implements, and is not trusted.
     """
     inspect = getattr(interrogator, "inspect_individual_glyphs", None)
     if not callable(inspect):
-        return None
-    observation = inspect(image, candidate)
-    return observation if isinstance(observation, TypographyObservation) else None
+        return GlyphInspection(
+            unavailable_reason="this engine cannot read individual glyphs"
+        )
+    inspection = inspect(image, candidate)
+    if isinstance(inspection, GlyphInspection):
+        return inspection
+    # Tolerated for an interrogator still returning the bare observation.
+    if isinstance(inspection, TypographyObservation):
+        return GlyphInspection(observation=inspection)
+    return GlyphInspection(
+        unavailable_reason="the glyph reading was not of the expected shape"
+    )
 
 
 def match_typography_detections(
@@ -171,7 +182,8 @@ def resolve_glyph_detections(
     the orchestrator's types, and it leaves the caller owning its own result
     instead of having it written to from here.
     """
-    observation = inspect_individual_glyphs(interrogator, image, parent)
+    inspection = inspect_individual_glyphs(interrogator, image, parent)
+    observation = inspection.observation
     matched = (
         match_typography_detections(image, detections, observation, parent.display_label)
         if observation is not None
@@ -192,5 +204,12 @@ def resolve_glyph_detections(
         warnings.append(
             f"Typography reading for '{parent.display_label}' could not be matched "
             "one-to-one with local detections; retained only independently detected glyphs."
+        )
+    if inspection.unavailable_reason is not None:
+        # A reading that arrived and disagreed is reported above; this is the
+        # case where the check never ran at all, which used to be silent.
+        warnings.append(
+            f"Glyphs for '{parent.display_label}' could not be validated individually "
+            f"({inspection.unavailable_reason}); kept the detector's own proposals instead."
         )
     return detections, layer_labels, warnings
