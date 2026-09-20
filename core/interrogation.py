@@ -3,14 +3,19 @@ from __future__ import annotations
 import json
 import logging
 import re
-from dataclasses import dataclass
 
 import numpy as np
 from numpy.typing import NDArray
 from PIL import Image
-from pydantic import BaseModel, Field
 
+from core.interrogation_types import (
+    _VAGUE_TERMS,
+    InterrogationCandidate,
+    InterrogationResult,
+    InterrogationSettings,
+)
 from core.knowledge import KnowledgePack, ObjectKnowledge
+from core.reasoner_stage import ReasonerStageMixin
 from core.typography_labels import (
     GlyphInspection,
     is_individual_glyph_label,
@@ -18,7 +23,6 @@ from core.typography_labels import (
     parse_typography_observation,
 )
 from models.vlm_client import (
-    BACKEND_OLLAMA,
     MAX_PARENTS,
     BaseVLMClient,
     VLMResponseError,
@@ -43,15 +47,6 @@ MIN_TILE_EDGE_PX = 256
 # to 4000 tokens.
 GLYPH_READING_MAX_TOKENS = 800
 
-_VAGUE_TERMS = {
-    "object",
-    "item",
-    "artifact",
-    "decoration",
-    "ornament",
-    "thing",
-    "metal object",
-}
 _PART_BLACKLIST = {
     "coffee",
     "tea",
@@ -76,42 +71,9 @@ _LEADIN_RE = re.compile(
 )
 
 
-class InterrogationCandidate(BaseModel):
-    canonical_label: str
-    display_label: str
-    detector_phrases: list[str] = Field(default_factory=list)
-    source_model: str = "vlm"
-    confidence: float = 0.5
-    role: str = "parent"
-    parent: str | None = None
-    selection: str = "all"
 
 
-class InterrogationResult(BaseModel):
-    candidates: list[InterrogationCandidate] = Field(default_factory=list)
-    children_by_parent: dict[str, list[str]] = Field(default_factory=dict)
-    raw_responses: dict[str, str] = Field(default_factory=dict)
-    escalation_stage: str = "primary"
-    confidence_summary: str = ""
 
-
-@dataclass
-class InterrogationSettings:
-    host: str
-    primary_vlm: str
-    fallback_vlms: list[str]
-    reasoner_model: str
-    backend: str = BACKEND_OLLAMA  # "ollama" | "llamacpp"
-    profile: str = "balanced"
-    fallback_mode: str = "adaptive_auto"
-    composition_first: bool = True
-    enable_tiling: bool = True
-    max_aliases_per_object: int = 4
-    selection_request: str = ""
-    # Legacy alias retained for callers from the first Single-mode release.
-    user_prompt: str = ""
-    discover_parts: bool = True
-    selections: dict[str, str] | None = None
 
 
 def parse_label_candidates(raw: str, limit: int = MAX_PARENTS) -> list[str]:
@@ -154,7 +116,7 @@ def rank_detector_phrases(
     return phrases[:limit]
 
 
-class GuidedInterrogator:
+class GuidedInterrogator(ReasonerStageMixin):
     def __init__(self, settings: InterrogationSettings) -> None:
         self._settings = settings
         self._clients: dict[str, BaseVLMClient] = {}
@@ -671,46 +633,7 @@ class GuidedInterrogator:
         )
         return np.array(resized)
 
-    def _reason_and_rank(
-        self,
-        candidates: list[InterrogationCandidate],
-        knowledge_pack: KnowledgePack | None,
-        raw_responses: dict[str, str],
-        stage: str,
-    ) -> list[InterrogationCandidate]:
-        if not candidates:
-            return candidates
-        if not self._should_run_reasoner(candidates, knowledge_pack, stage):
-            return sorted(candidates, key=lambda c: c.confidence, reverse=True)
-        try:
-            client = self._get_client(self._settings.reasoner_model)
-            prompt = self._build_reasoner_prompt(candidates, knowledge_pack, raw_responses)
-            response = client.query_text(prompt)
-            raw_responses[f"reasoner:{self._settings.reasoner_model}"] = response
-            ranked = self._parse_reasoner_response(response, candidates)
-            if ranked:
-                return ranked
-        except (OSError, TimeoutError, ConnectionError, RuntimeError, VLMResponseError):
-            logger.info("Reasoner model unavailable, using heuristic ranking", exc_info=True)
-        return sorted(candidates, key=lambda c: c.confidence, reverse=True)
 
-    def _should_run_reasoner(
-        self,
-        candidates: list[InterrogationCandidate],
-        knowledge_pack: KnowledgePack | None,
-        stage: str,
-    ) -> bool:
-        if self._settings.profile == "fast":
-            return False
-        if self._settings.profile == "deep":
-            return True
-        if stage not in {"guided", "tiled"} and knowledge_pack is None:
-            return False
-        if any(c.confidence < 0.72 for c in candidates):
-            return True
-        if any(c.display_label.lower() in _VAGUE_TERMS for c in candidates):
-            return True
-        return knowledge_pack is not None and stage != "composition"
 
     def _should_force_primary_pass(self) -> bool:
         return self._settings.profile == "deep" or self._settings.fallback_mode == "always_enrich"
@@ -755,55 +678,4 @@ class GuidedInterrogator:
                 break
         return cleaned
 
-    def _build_reasoner_prompt(
-        self,
-        candidates: list[InterrogationCandidate],
-        knowledge_pack: KnowledgePack | None,
-        raw_responses: dict[str, str],
-    ) -> str:
-        domain = knowledge_pack.domain.name if knowledge_pack else "generic objects"
-        payload = [
-            {
-                "canonical_label": c.canonical_label,
-                "display_label": c.display_label,
-                "detector_phrases": c.detector_phrases,
-                "confidence": c.confidence,
-            }
-            for c in candidates
-        ]
-        return (
-            f"You are ranking visual detector labels for the domain '{domain}'. "
-            "Keep canonical labels precise, but prefer generic detector phrases that GroundingDINO can understand. "
-            "Return JSON with key 'candidates' containing the same candidates in ranked order. "
-            f"Candidates: {json.dumps(payload)} "
-            f"Raw model responses: {json.dumps(raw_responses)}"
-        )
 
-    def _parse_reasoner_response(
-        self,
-        response: str,
-        existing: list[InterrogationCandidate],
-    ) -> list[InterrogationCandidate]:
-        try:
-            start = response.index("{")
-            end = response.rindex("}") + 1
-            payload = json.loads(response[start:end])
-        except (ValueError, json.JSONDecodeError, TypeError):
-            return []
-        ranked: list[InterrogationCandidate] = []
-        by_label = {c.canonical_label: c for c in existing}
-        for item in payload.get("candidates", []):
-            label = item.get("canonical_label")
-            existing_candidate = by_label.get(label)
-            if existing_candidate is None:
-                continue
-            phrases = item.get("detector_phrases")
-            if isinstance(phrases, list) and phrases:
-                existing_candidate.detector_phrases = [
-                    str(p).strip() for p in phrases if str(p).strip()
-                ][: self._settings.max_aliases_per_object]
-            if existing_candidate not in ranked:
-                ranked.append(existing_candidate)
-        if ranked:
-            ranked.extend(candidate for candidate in existing if candidate not in ranked)
-        return ranked

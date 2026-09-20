@@ -504,7 +504,7 @@ class TestInstanceSizeComparison:
         the GroundingDINO fallback does not -- "largest" reliably picked the
         UNMASKED detection, whatever its real size.
         """
-        from core.orchestrator import instance_size
+        from core.detection_policy import instance_size
 
         # A sparse mask inside a large box is what makes the two keys
         # disagree: the old key scored this 100 (mask pixels) against the
@@ -524,7 +524,7 @@ class TestInstanceSizeComparison:
 
     def test_mask_pixels_are_used_when_every_detection_has_one(self) -> None:
         """A mask is the better measure, so it is used when all of them have it."""
-        from core.orchestrator import instance_size
+        from core.detection_policy import instance_size
 
         wide_box_thin_object = DetectionResult(
             label="a", bbox=(0, 0, 100, 100), confidence=0.9,
