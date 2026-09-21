@@ -37,6 +37,11 @@ class JobRecord(BaseModel):
     # Stored rather than inferred from output files so a later resume retains
     # the original processing metrics without scanning or trusting artefacts.
     layer_count: int = 0
+    # What the pipeline could not do on this image. Stored for the same reason
+    # as layer_count: this database is the only durable record of a batch, and
+    # the PipelineResult that carried these is discarded at the process
+    # boundary. Defaults to empty so rows written before it existed still load.
+    warnings: list[str] = []
 
 
 class StateManager:

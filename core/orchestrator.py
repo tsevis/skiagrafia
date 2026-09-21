@@ -219,7 +219,9 @@ class Orchestrator(DetectionPolicyMixin):
         holding the other four in your head.
         """
         source = self._load_source(image_path, result)
-        parents, children_by_parent = self._interrogate(source.detection, confirmed_labels)
+        parents, children_by_parent = self._interrogate(
+            source.detection, confirmed_labels, result
+        )
         manual_lookup = self._build_manual_lookup(manual_detections)
 
         masks, accepted = self._detect_parent_layers(
@@ -704,7 +706,13 @@ class Orchestrator(DetectionPolicyMixin):
                 raise RuntimeError("SVG export failed integrity validation.") from exc
             result.svg_path = str(path)
         else:
-            result.warnings.append("No usable object masks were found. Review the prompt or draw a box.")
+            # Only advise about the prompt when something actually looked at
+            # the image; _interrogate has already explained an unreachable
+            # model, and repeating this after it would contradict it.
+            if not any("never examined" in warning for warning in result.warnings):
+                result.warnings.append(
+                    "No usable object masks were found. Review the prompt or draw a box."
+                )
 
     def _output_path(self, filename: str) -> Path:
         """Create a flat output path under the configured, canonical root."""
@@ -735,6 +743,7 @@ class Orchestrator(DetectionPolicyMixin):
         self,
         image: NDArray[np.uint8],
         confirmed_labels: list[str] | None,
+        result: PipelineResult,
     ) -> tuple[list[InterrogationCandidate], dict[str, list[str]]]:
         interrogation = self._interrogator.interrogate(
             image,
@@ -747,6 +756,15 @@ class Orchestrator(DetectionPolicyMixin):
             interrogation.confidence_summary,
             [candidate.display_label for candidate in interrogation.candidates],
         )
+        if getattr(interrogation, "vision_unavailable", False):
+            # Recorded here rather than left to the "no masks" message below,
+            # which advises reviewing a prompt that was never delivered. On a
+            # long run this is every image after the local server stops.
+            result.warnings.append(
+                "Could not reach the local vision model, so this image was never "
+                f"examined ({interrogation.confidence_summary}). Nothing here "
+                "reflects the picture's contents."
+            )
         return interrogation.candidates, interrogation.children_by_parent
 
 

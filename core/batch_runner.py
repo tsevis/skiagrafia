@@ -303,23 +303,33 @@ class BatchRunner:
         """Handle completion of a single image."""
         try:
             result = future.result()
+            # Kept for both outcomes: a run that errored late can still have
+            # said something useful about what it managed first.
+            warnings = [str(warning) for warning in getattr(result, "warnings", [])]
+            record = self._state.get(image_id)
             if result.error:
-                self._state.update_status(
-                    image_id, JobStatus.FAILED, error=result.error
-                )
-            else:
-                record = self._state.get(image_id)
                 if record:
-                    updated = record.model_copy(
-                        update={
-                            "status": JobStatus.COMPLETE,
-                            "output_svg": result.svg_path,
-                            "output_tiff": result.tiff_path,
-                            "output_all_objects_tiff": result.all_objects_tiff_path,
-                            "layer_count": len(result.layers),
-                        }
+                    self._state.put(image_id, record.model_copy(update={
+                        "status": JobStatus.FAILED,
+                        "error": result.error,
+                        "warnings": warnings,
+                    }))
+                else:
+                    self._state.update_status(
+                        image_id, JobStatus.FAILED, error=result.error
                     )
-                    self._state.put(image_id, updated)
+            elif record:
+                updated = record.model_copy(
+                    update={
+                        "status": JobStatus.COMPLETE,
+                        "output_svg": result.svg_path,
+                        "output_tiff": result.tiff_path,
+                        "output_all_objects_tiff": result.all_objects_tiff_path,
+                        "layer_count": len(result.layers),
+                        "warnings": warnings,
+                    }
+                )
+                self._state.put(image_id, updated)
         except Exception as exc:
             self._state.update_status(
                 image_id, JobStatus.FAILED, error=str(exc)
