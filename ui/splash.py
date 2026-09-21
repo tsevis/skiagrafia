@@ -136,13 +136,8 @@ class SplashWindow:
         ttk.Separator(self._win, orient="horizontal").pack(fill="x", pady=(18, 0))
         footer = ttk.Frame(self._win, padding=(24, 12))
         footer.pack(fill="x")
-        mark = _scaled(STUDIO_MARK, height=22)
-        if mark is not None:
-            self._images.append(mark)
-            corner = ttk.Label(footer, image=mark, cursor="pointinghand")
-            corner.pack(side="left", padx=(0, 10))
-            corner.bind("<Button-1>", lambda _event: self.open_studio())
-
+        # One mark per window: it is in the key art's lockup above, and a
+        # second copy here read as a repeat rather than a signature.
         ttk.Label(
             footer, text="Created by Charis Tsevis, with the help of Claude Code."
         ).pack(side="left")
