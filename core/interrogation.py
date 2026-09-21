@@ -66,6 +66,39 @@ _GARBAGE_RE = re.compile(
     r"|^[\d\.\-,\s]+$" # pure numbers / decimals / punctuation
     r"|^\W+$"          # pure non-word characters
 )
+#: A model's way of saying it found nothing, as a whole chunk. Answered on a
+#: flat field, on noise and on a one-pixel image, and previously parsed as an
+#: object name -- so an empty picture offered "none" as something to select
+#: and cut out. None of these is ever the name of a real thing.
+_REFUSAL_RE = re.compile(
+    r"^(none|nothing|no objects?|no discernible [a-z ]+|n/?a|not applicable"
+    r"|no [a-z]+ (?:objects?|items?|things?)|unknown|unclear)$",
+    re.IGNORECASE,
+)
+
+#: The same refusal written as prose, which is what the local model actually
+#: does: "I cannot provide a list of objects because the image provided is a
+#: solid dark gray rectangle with no visible content". Split on its commas
+#: that became three object names, one of them nineteen words long.
+#:
+#: Matched against the whole answer and discards all of it: a model that
+#: refused named nothing, so there is nothing in the sentence to keep.
+_REFUSAL_OPENER_RE = re.compile(
+    r"^(i (cannot|can't|can not|am unable|'m unable|do not|don't)"
+    r"|sorry\b"
+    r"|unable to"
+    r"|there (are|is) no\b"
+    r"|no objects? (are|is|were|can be)\b"
+    r"|this image (contains|shows) no\b)",
+    re.IGNORECASE,
+)
+
+#: An object name is not a clause. Labels become segmentation prompts and
+#: folder names; the longest real one this pipeline has produced is four
+#: words ("power indicator light", "computer case"), and everything past that
+#: has been a fragment of a sentence the splitter tore in half.
+MAX_LABEL_WORDS = 5
+
 _LEADIN_RE = re.compile(
     r"^(the image (shows|features)|there is|there are|visible objects include|objects?:)\s+",
     re.IGNORECASE,
@@ -97,7 +130,7 @@ def parse_label_candidates(
     to recover.
     """
     text = raw.strip()
-    if not text:
+    if not text or _REFUSAL_OPENER_RE.match(text):
         return ([], 0) if report_dropped else []
     text = _LEADIN_RE.sub("", text)
 
@@ -111,6 +144,10 @@ def parse_label_candidates(
             continue
         if _GARBAGE_RE.search(chunk):
             continue
+        if _REFUSAL_RE.match(chunk.strip(" .")):
+            continue
+        if len(chunk.split()) > MAX_LABEL_WORDS:
+            continue
         if any(tok.isdigit() for tok in chunk.split()):
             continue
         if chunk.lower() not in {c.lower() for c in candidates}:
@@ -123,6 +160,9 @@ def parse_label_candidates(
         seen: list[str] = []
         for chunk in chunks:
             lowered = chunk.lower()
+            if _REFUSAL_RE.match(chunk.strip(" .")) or len(chunk.split()) > MAX_LABEL_WORDS:
+                # Not a name the cap threw away: not a name at all.
+                continue
             if lowered and lowered not in {value.lower() for value in seen}:
                 seen.append(chunk)
         return candidates, max(0, len(seen) - len(candidates))
