@@ -51,6 +51,8 @@ DEFAULT_PREFERENCES: dict[str, Any] = {
     # On the supported Python 3.13 runtime, use the local MLX SAM 3 source
     # when its verified checkpoint exists; otherwise retain SAM 2.1.
     "segmentation_backend": "auto",
+    # Shown once per launch; the about window is also on the Help menu.
+    "show_about_at_launch": True,
     "sam3_confidence": 0.2,
     # SAM 3 vetoes a whole image with one presence scalar when it does not
     # recognise the prompt, discarding correctly localised masks with it.

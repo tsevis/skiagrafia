@@ -8,6 +8,7 @@ from typing import TYPE_CHECKING
 
 from ui.container_utils import unpack_children
 from ui.mode_switcher import ModeSwitcher
+from ui.splash import SplashWindow, apply_window_icon
 from ui.theme import get_palette, is_macos
 from utils.preferences import load_preferences
 
@@ -27,6 +28,7 @@ class MainWindow:
     def __init__(self, root: tk.Tk) -> None:
         self.root = root
         self.root.title("Skiagrafia")
+        apply_window_icon(self.root)
         self._configure_default_window_size()
         self.root.minsize(1200, 760)
 
@@ -52,6 +54,16 @@ class MainWindow:
         # Show default mode
         default_mode = self.prefs.get("default_mode", "single")
         self._show_mode(default_mode)
+
+        # After the window exists, so the about window can centre on it. Once
+        # per launch: a relaunch during work should not put a window in front
+        # of someone every time.
+        if self.prefs.get("show_about_at_launch", True):
+            self.root.after(120, self.show_about)
+
+    def show_about(self) -> None:
+        """Open the about window. Also reachable from the Help menu."""
+        SplashWindow(self.root, self.palette)
 
     def _configure_default_window_size(self) -> None:
         """Open large and centered for a modern laptop display."""
