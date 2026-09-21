@@ -34,7 +34,22 @@ APP_ICON = ASSETS / "AppIcon.png"
 
 #: Width of the window, and therefore of the key art above it.
 WIDTH = 660
-KEY_ART_HEIGHT = 208
+#: The art is 2048x807 and is drawn full width, so this is its own height at
+#: that width. A shorter panel crops the bottom of the picture -- which is
+#: where the lockup and the studio mark are.
+KEY_ART_HEIGHT = 260
+
+#: Where the studio mark sits *in the artwork*. It is composited into the
+#: bitmap by the native application's `Scripts/make-keyart.py`, so this window
+#: draws no mark of its own; these numbers only place the click target over
+#: the one that is already there, and must stay in step with that script and
+#: with SplashView.swift.
+MARK_INSET = 26
+MARK_BOTTOM = 22
+MARK_HEIGHT = 51
+MARK_WIDTH = 52
+#: Between the mark and the type beside it.
+LOCKUP_GAP = 13
 
 EXPLANATION = (
     "Skiagrafia — σκιαγραφία — is the Greek for outlining: drawing a thing by "
@@ -155,31 +170,46 @@ class SplashWindow:
         ttk.Button(footer, text="Continue", command=self.close).pack(side="right")
 
     def _draw_lockup(self, canvas: tk.Canvas) -> None:
-        """The studio mark bottom-left, with the name beside it.
+        """The name and the strapline, beside the mark already in the artwork.
 
-        The mark is the link: clicking it opens tsevis.com. It sits on the
-        same baseline as the title so the two read as one object.
+        Nothing draws a mark here. The artwork carries one, and a second one
+        laid over it appeared as two marks at two sizes -- the native
+        application composites it into the bitmap for reasons recorded in
+        `SplashView.swift`, and this window shows the same bitmap.
         """
-        mark_height = 42
-        mark = _scaled(STUDIO_MARK, height=mark_height)
-        left = 22
-        baseline = KEY_ART_HEIGHT - 26
-        if mark is not None:
-            self._images.append(mark)
-            item = canvas.create_image(left, baseline, image=mark, anchor="sw")
-            canvas.tag_bind(item, "<Button-1>", lambda _event: self.open_studio())
-            canvas.itemconfigure(item, tags=("studio-mark",))
-            canvas.config(cursor="")
-            left += mark.width() + 13
-
+        left = MARK_INSET + MARK_WIDTH + LOCKUP_GAP
+        baseline = KEY_ART_HEIGHT - MARK_BOTTOM
         canvas.create_text(
-            left, baseline - 16, text="Skiagrafia", anchor="sw",
+            left, baseline - 17, text="Skiagrafia", anchor="sw",
             fill="#ffffff", font=("Helvetica Neue", 30, "bold"),
         )
         canvas.create_text(
             left, baseline, text="Separates a photograph into real, editable layers.",
             anchor="sw", fill="#e8e8ea", font=("Helvetica Neue", 11),
         )
+        canvas.bind("<Button-1>", self._on_canvas_click)
+        canvas.bind("<Motion>", lambda event: self._on_canvas_motion(canvas, event))
+
+    @staticmethod
+    def _over_mark(event: tk.Event) -> bool:
+        """Whether the pointer is over the mark drawn into the artwork.
+
+        A canvas rectangle with no fill is not clickable in Tk, so the region
+        is tested rather than drawn.
+        """
+        top = KEY_ART_HEIGHT - MARK_BOTTOM - MARK_HEIGHT
+        return (
+            MARK_INSET <= event.x <= MARK_INSET + MARK_WIDTH
+            and top <= event.y <= top + MARK_HEIGHT
+        )
+
+    def _on_canvas_click(self, event: tk.Event) -> None:
+        if self._over_mark(event):
+            self.open_studio()
+
+    def _on_canvas_motion(self, canvas: tk.Canvas, event: tk.Event) -> None:
+        """The mark is a link, so it has to look like one under the pointer."""
+        canvas.configure(cursor="pointinghand" if self._over_mark(event) else "")
 
     def open_studio(self) -> None:
         webbrowser.open(STUDIO_URL)
