@@ -136,6 +136,13 @@ class SplashWindow:
         ttk.Separator(self._win, orient="horizontal").pack(fill="x", pady=(18, 0))
         footer = ttk.Frame(self._win, padding=(24, 12))
         footer.pack(fill="x")
+        mark = _scaled(STUDIO_MARK, height=22)
+        if mark is not None:
+            self._images.append(mark)
+            corner = ttk.Label(footer, image=mark, cursor="pointinghand")
+            corner.pack(side="left", padx=(0, 10))
+            corner.bind("<Button-1>", lambda _event: self.open_studio())
+
         ttk.Label(
             footer, text="Created by Charis Tsevis, with the help of Claude Code."
         ).pack(side="left")
@@ -187,3 +194,19 @@ class SplashWindow:
         with contextlib.suppress(tk.TclError):
             self._win.grab_release()
         self._win.destroy()
+
+
+def makers_mark(parent: tk.Misc, height: int = 18) -> ttk.Label | None:
+    """The studio mark as a clickable label, or None if the artwork is absent.
+
+    Used by the main window's status bar as well as the about window, so the
+    same mark and the same link appear in both.
+    """
+    image = _scaled(STUDIO_MARK, height=height)
+    if image is None:
+        return None
+    label = ttk.Label(parent, image=image, cursor="pointinghand")
+    # Tk keeps no strong reference to an image; the widget must hold it.
+    label._skiagrafia_mark = image  # type: ignore[attr-defined]
+    label.bind("<Button-1>", lambda _event: webbrowser.open(STUDIO_URL))
+    return label

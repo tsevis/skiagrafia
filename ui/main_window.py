@@ -8,7 +8,7 @@ from typing import TYPE_CHECKING
 
 from ui.container_utils import unpack_children
 from ui.mode_switcher import ModeSwitcher
-from ui.splash import SplashWindow, apply_window_icon
+from ui.splash import SplashWindow, apply_window_icon, makers_mark
 from ui.theme import get_palette, is_macos
 from utils.preferences import load_preferences
 
@@ -45,6 +45,10 @@ class MainWindow:
 
         # Build layout
         self._build_top_bar()
+        # Packed before the content area so it keeps the foot of the window:
+        # a frame packed with `expand=True` would otherwise take the space
+        # this needs and push it off the bottom edge.
+        self._build_status_bar()
         self._build_content_area()
 
         # Lazy imports to avoid circular deps
@@ -132,6 +136,26 @@ class MainWindow:
         ttk.Separator(self.root, orient=tk.HORIZONTAL).pack(
             fill=tk.X, padx=0, pady=(8, 0)
         )
+
+    def _build_status_bar(self) -> None:
+        """The studio mark in the window's bottom-left corner, linked to
+        tsevis.com. Follows HipparchusMac: a bar across the foot of the window
+        rather than an overlay, so it cannot cover a control."""
+        bar = ttk.Frame(self.root)
+        bar.pack(side=tk.BOTTOM, fill=tk.X)
+        ttk.Separator(bar, orient="horizontal").pack(fill=tk.X)
+        inner = ttk.Frame(bar, padding=(12, 6))
+        inner.pack(fill=tk.X)
+
+        mark = makers_mark(inner, height=18)
+        if mark is not None:
+            mark.pack(side=tk.LEFT, padx=(0, 10))
+        self._status_label = ttk.Label(inner, text="Ready")
+        self._status_label.pack(side=tk.LEFT)
+
+    def set_status(self, message: str) -> None:
+        """Set the line beside the studio mark."""
+        self._status_label.config(text=message)
 
     def _build_content_area(self) -> None:
         """Build the main content area where views are swapped."""
