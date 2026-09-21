@@ -170,20 +170,21 @@ class StepOutput:
             subprocess.run(["xdg-open", str(output_dir)], check=False)  # noqa: S603,S607
 
     def _export_svg_bundle(self) -> None:
-        self._export_bundle("*.svg", "SVG")
+        self._export_bundle("svg", "SVG")
 
     def _export_tiff_bundle(self) -> None:
-        self._export_bundle("*.tiff", "TIFF")
+        self._export_bundle("tiff", "TIFF")
 
-    def _export_bundle(self, pattern: str, format_name: str) -> None:
+    def _export_bundle(self, extension: str, format_name: str) -> None:
         """Copy generated files to a user-selected folder without symlink writes."""
         from tkinter import filedialog, messagebox
 
+        from core.output_layout import collect_by_format
+
         source_dir = self._output_dir()
-        files = [
-            path for path in sorted(source_dir.glob(pattern))
-            if path.is_file() and not path.is_symlink()
-        ]
+        # Looks in the format's folder and, for runs finished before there
+        # were folders, in the run root as well.
+        files = collect_by_format(source_dir, extension)
         if not files:
             messagebox.showinfo(
                 "Nothing to export",

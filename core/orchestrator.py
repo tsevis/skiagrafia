@@ -30,6 +30,7 @@ from core.interrogation import (
 )
 from core.knowledge import KnowledgePack
 from core.layer_editing import all_objects_alpha, body_alpha
+from core.output_layout import output_path
 from core.pipeline_geometry import (
     crop_to_bbox,
     mask_iou,
@@ -49,7 +50,7 @@ from processors.source_image import detection_image, load_source_image
 from processors.vectorizer import assemble_svg
 from utils.array_types import as_uint8
 from utils.coord_math import tight_bbox
-from utils.security import SecurityError, safe_child_path
+from utils.security import SecurityError
 
 logger = logging.getLogger(__name__)
 
@@ -739,8 +740,8 @@ class Orchestrator(DetectionPolicyMixin):
                 )
 
     def _output_path(self, filename: str) -> Path:
-        """Create a flat output path under the configured, canonical root."""
-        return safe_child_path(self._output_dir, filename)
+        """Create an output path under the run root, shelved by format."""
+        return output_path(self._output_dir, filename)
 
     @staticmethod
     def _image_token(image_path: Path) -> str:
