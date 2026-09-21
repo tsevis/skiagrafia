@@ -11,7 +11,9 @@ from __future__ import annotations
 
 import sys
 from pathlib import Path
+from types import ModuleType
 
+import numpy
 from PIL import Image
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
@@ -62,3 +64,67 @@ def test_loading_artwork_never_raises_into_the_startup_path() -> None:
     from ui.splash import _scaled
 
     assert _scaled(ASSETS / "AppIcon.png", width=64) is None
+
+
+def test_the_key_art_panel_is_as_tall_as_the_art_it_draws() -> None:
+    """The panel is a fixed height and the art is drawn into it at full width,
+    so a panel shorter than the art crops its own bottom edge -- which is
+    exactly where the lockup and the studio mark live.
+    """
+    from ui import splash
+
+    art = Image.open(ASSETS / "SplashKeyArt.png")
+    drawn_height = round(art.height * splash.WIDTH / art.width)
+
+    assert drawn_height == splash.KEY_ART_HEIGHT
+
+
+def test_the_studio_mark_is_already_in_the_key_art() -> None:
+    """The mark is composited into the bitmap by `Scripts/make-keyart.py` in
+    the native application's repository, because a mark laid out beside the
+    type rendered as nothing there. The about window therefore must not draw
+    its own: two marks appear, at two sizes.
+
+    This checks the reason that rule exists. If the artwork is ever
+    regenerated without the mark, the window loses it silently and this is
+    what says so.
+    """
+    from ui import splash
+
+    mark = _mark_ink_in_the_key_art(Image.open(ASSETS / "SplashKeyArt.png"), splash)
+
+    assert mark > 0.25, f"no studio mark found where the layout says it is ({mark:.3f})"
+
+
+def _mark_ink_in_the_key_art(art: Image.Image, splash: ModuleType) -> float:
+    """Fraction of the mark's box in the artwork covered by the mark's own ink.
+
+    The mark is a solid plate, so comparing coverage is enough and does not
+    depend on the photograph behind it.
+    """
+    panel = art.resize(
+        (splash.WIDTH, splash.KEY_ART_HEIGHT), Image.Resampling.LANCZOS
+    ).convert("RGB")
+    top = splash.KEY_ART_HEIGHT - splash.MARK_BOTTOM - splash.MARK_HEIGHT
+    box = panel.crop(
+        (
+            splash.MARK_INSET,
+            top,
+            splash.MARK_INSET + splash.MARK_WIDTH,
+            top + splash.MARK_HEIGHT,
+        )
+    )
+    plate = _plate_colour()
+    pixels = numpy.asarray(box, dtype=numpy.int16)
+    close = numpy.all(numpy.abs(pixels - numpy.array(plate)) <= 40, axis=-1)
+    return float(close.mean())
+
+
+def _plate_colour() -> tuple[int, int, int]:
+    """The mark's own background colour, read from the artwork rather than
+    written down: the file's corner is transparent, not plate."""
+    mark = numpy.asarray(Image.open(ASSETS / "TVDLogo.png").convert("RGBA"))
+    opaque = mark[mark[..., 3] > 200][:, :3]
+    colours, counts = numpy.unique(opaque, axis=0, return_counts=True)
+    red, green, blue = colours[counts.argmax()]
+    return int(red), int(green), int(blue)
