@@ -71,6 +71,7 @@ class LeftPanel(LabelsSectionMixin):
         self._scroll_canvas.bind("<Leave>", self._unbind_mousewheel)
 
         self._build_image_section()
+        self._build_destination_section()
         self._build_labels_section()
         self._build_parameters_section()
         self._build_process_section()
@@ -236,6 +237,24 @@ class LeftPanel(LabelsSectionMixin):
         self._unload_guide_btn.config(state=tk.DISABLED)
 
     # ── Labels section ─────────────────────────────────────────
+
+    # ── Destination section ────────────────────────────────────
+
+    def _build_destination_section(self) -> None:
+        """Where this image's layers and exports are written.
+
+        It used to be settable only in Preferences and in the export dialog,
+        so the panel that runs the work never said where the work would go.
+        """
+        from ui.destination_row import DestinationRow
+
+        section = ttk.LabelFrame(self._inner, text="Destination", padding=6)
+        section.pack(fill=tk.X, padx=6, pady=3)
+
+        self._destination_row = DestinationRow(
+            section, self._app.prefs, wraplength=self.PANEL_WIDTH - 40
+        )
+        self._destination_row.frame.pack(fill=tk.X)
 
     def _build_parameters_section(self) -> None:
         section = ttk.LabelFrame(self._inner, text="Parameters", padding=6)
