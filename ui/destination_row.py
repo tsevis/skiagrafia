@@ -40,7 +40,7 @@ class DestinationRow:
         # across a wide step it is the only button that is.
         ttk.Button(
             self.frame, text="Choose Destination Folder…", command=self._browse
-        ).pack(anchor=tk.W, fill=tk.X if fill_width else None, pady=(4, 0))
+        ).pack(anchor=tk.W, fill=tk.X if fill_width else tk.NONE, pady=(4, 0))
 
         # Packed only when there is something to say, so an untouched panel
         # carries no empty warning row.
