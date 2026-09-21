@@ -120,6 +120,8 @@ class GuidedInterrogator(ReasonerStageMixin):
     def __init__(self, settings: InterrogationSettings) -> None:
         self._settings = settings
         self._clients: dict[str, BaseVLMClient] = {}
+        self._unreachable_models: list[str] = []
+        self._models_answered = 0
 
     def interrogate(
         self,
@@ -141,6 +143,9 @@ class GuidedInterrogator(ReasonerStageMixin):
         stage = "primary"
         raw_responses: dict[str, str] = {}
         candidates = []
+        # Reset per run: this records whether THIS image was looked at.
+        self._unreachable_models = []
+        self._models_answered = 0
 
         if self._settings.composition_first:
             stage = "composition"
@@ -218,12 +223,19 @@ class GuidedInterrogator(ReasonerStageMixin):
             if not self._should_escalate(candidates)
             else "uncertain object proposals; review required"
         )
+        unavailable = bool(self._unreachable_models) and self._models_answered == 0
+        if unavailable:
+            confidence_summary = (
+                "could not reach any vision model: "
+                + ", ".join(dict.fromkeys(self._unreachable_models))
+            )
         return InterrogationResult(
             candidates=candidates,
             children_by_parent=self._known_parts(candidates, knowledge_pack),
             raw_responses=raw_responses,
             escalation_stage=stage,
             confidence_summary=confidence_summary,
+            vision_unavailable=unavailable,
         )
 
     def set_confirmed_selections(self, selections: dict[str, str]) -> None:
@@ -243,10 +255,14 @@ class GuidedInterrogator(ReasonerStageMixin):
         try:
             client = self._get_client(model)
             response = client.query_vision(prepared_image, prompt)
-        except (OSError, TimeoutError, ConnectionError, RuntimeError, VLMResponseError):
+        except (OSError, TimeoutError, ConnectionError, RuntimeError, VLMResponseError) as exc:
             logger.warning("Vision interrogation failed for model %s", model, exc_info=True)
+            # Distinguished from an empty answer: the caller must be able to
+            # say "could not look" rather than "found nothing".
+            self._unreachable_models.append(f"{model} ({type(exc).__name__})")
             return []
 
+        self._models_answered += 1
         raw_responses[f"{prompt_style}:{model}"] = response
         selections = {}
         if self._selection_request:

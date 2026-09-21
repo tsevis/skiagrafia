@@ -43,6 +43,12 @@ class InterrogationResult(BaseModel):
     raw_responses: dict[str, str] = Field(default_factory=dict)
     escalation_stage: str = "primary"
     confidence_summary: str = ""
+    #: True when no vision stage could reach its model at all. Without this a
+    #: caller cannot tell "the image contains nothing" from "nothing was ever
+    #: looked at", and the run blames the operator's prompt for a server that
+    #: was down. False whenever at least one model answered, including when it
+    #: answered with nothing.
+    vision_unavailable: bool = False
 
 
 @dataclass

@@ -151,6 +151,18 @@ class MLXSAM3:
                     results = self._detections(image, label, grounded)
                     if results:
                         return results
+                    if allow_fallback:
+                        # MLX ran and accepted nothing. Falling through to
+                        # GroundingDINO + SAM 2.1 is not a neutral retry: the
+                        # detections it returns carry no mask, so the mask is
+                        # re-derived from the box, instance_size() degrades to
+                        # bbox area for the whole list, and the part gate on
+                        # `source == "mlx-sam3"` stops applying. Only the
+                        # exception path below used to record the switch.
+                        self.warnings.append(
+                            f"MLX SAM 3 recognised no '{label}'; used GroundingDINO + SAM 2.1 "
+                            "for it instead."
+                        )
                 except (
                     AttributeError,
                     ImportError,
@@ -205,4 +217,10 @@ class MLXSAM3:
     def clear_cache(self) -> None:
         with _MLX_LOCK:
             self._image = self._state = None
+            # The orchestrator drains `warnings` into every PipelineResult it
+            # builds. Keeping them across images made run two report run one's
+            # problems as its own, which is a false report rather than a
+            # missing one. `_failed` deliberately stays sticky: a broken MLX
+            # runtime does not heal between images.
+            self.warnings = []
             self.fallback.clear_cache()
