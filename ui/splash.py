@@ -78,7 +78,15 @@ def _scaled(
         width = max(1, round(image.width * height / image.height))
     if width and height:
         image = image.resize((width, height), Image.Resampling.LANCZOS)
-    return ImageTk.PhotoImage(image)
+    try:
+        return ImageTk.PhotoImage(image)
+    except (RuntimeError, tk.TclError):
+        # Pillow raises RuntimeError -- not TclError -- when Tk has no root
+        # yet or is shutting down. This runs from apply_window_icon() while
+        # the main window is still being built, so an exception here would
+        # stop the application opening over a decoration.
+        logger.info("Tk was not ready for artwork: %s", path, exc_info=True)
+        return None
 
 
 def apply_window_icon(root: tk.Tk) -> None:
