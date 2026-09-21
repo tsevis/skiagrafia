@@ -112,6 +112,22 @@ class StepImport:
         self._guide_label = ttk.Label(self._folder_info, text="", foreground="gray")
         self._guide_label.pack(anchor=tk.W)
 
+        # Where this batch is written. Chosen in the first step, beside the
+        # folder it reads: before, it could only be set in Preferences, and
+        # the Output step at the far end of the wizard came too late to be
+        # a choice at all.
+        from ui.destination_row import DestinationRow
+
+        ttk.Separator(self.frame, orient=tk.HORIZONTAL).pack(fill=tk.X, pady=12)
+        ttk.Label(
+            self.frame,
+            text="Destination",
+            font=("SF Pro Text", 11, "bold"),
+        ).pack(anchor=tk.W, pady=(0, 6))
+        self._destination_row = DestinationRow(self.frame, self._app.prefs,
+                                               on_change=self._scan_recent_batches)
+        self._destination_row.frame.pack(fill=tk.X)
+
         # Recent batches section
         ttk.Separator(self.frame, orient=tk.HORIZONTAL).pack(fill=tk.X, pady=12)
         ttk.Label(
