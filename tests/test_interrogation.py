@@ -783,3 +783,60 @@ class TestFilterChildPartsProfiles:
         interrogator = GuidedInterrogator(_settings())
         parts = interrogator._filter_child_parts(["cross handle", "handle cross"], "cross handle")
         assert parts == []
+
+
+def test_a_model_saying_there_is_nothing_here_does_not_become_an_object() -> None:
+    """A blank field scans to the literal candidate `none`.
+
+    Observed through the native adapter on a flat grey image, on 16-bit noise
+    and on a one-pixel image: the model's way of saying it found nothing
+    arrived in the interface as something to select and cut out.
+    """
+    from core.interrogation import parse_label_candidates
+
+    for refusal in ("none", "None.", "nothing", "no objects", "N/A", "no discernible objects"):
+        assert parse_label_candidates(refusal) == [], refusal
+
+
+def test_a_refusal_beside_real_objects_is_dropped_and_the_objects_are_kept() -> None:
+    from core.interrogation import parse_label_candidates
+
+    assert parse_label_candidates("monitor, none, keyboard") == ["monitor", "keyboard"]
+
+
+def test_a_refusal_is_not_counted_as_a_name_the_cap_threw_away() -> None:
+    """`report_dropped` exists to warn that the model named more objects than
+    the cap allowed. Counting a refusal there would report an object that was
+    never named."""
+    from core.interrogation import parse_label_candidates
+
+    assert parse_label_candidates("none", report_dropped=True) == ([], 0)
+
+
+def test_a_refusal_written_as_a_sentence_yields_no_objects_at_all() -> None:
+    """Observed verbatim from the local model on a flat grey field and on
+    16-bit noise. Split on its commas, one refusal became three object names,
+    one of them 19 words long -- offered in the interface as things to cut out.
+    """
+    from core.interrogation import parse_label_candidates
+
+    refusals = (
+        "I cannot provide a list of objects because the image provided is a "
+        "solid dark gray rectangle with no visible content",
+        "I cannot provide a list of objects because the image provided is a "
+        "blank, noisy, or corrupted file containing only random pixels",
+        "I'm unable to identify any objects in this image",
+        "Sorry, there are no identifiable objects here",
+    )
+    for refusal in refusals:
+        assert parse_label_candidates(refusal) == [], refusal
+
+
+def test_an_object_name_is_not_a_sentence() -> None:
+    """Labels drive segmentation prompts and become folder names. A clause is
+    neither."""
+    from core.interrogation import parse_label_candidates
+
+    answer = "monitor, a rectangular beige box sitting on the desk beside the keyboard"
+
+    assert parse_label_candidates(answer) == ["monitor"]
