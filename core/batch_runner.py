@@ -66,7 +66,7 @@ class BatchConfig(BaseModel):
     discover_parts: bool = True
     # GUI batches freeze this exact list after interrogation.  A resume must
     # never discover a newly-added folder file that did not pass Triage.
-    input_images: list[str] = Field(default_factory=list)
+    input_images: list[str] | None = None
     # The human-approved labels and instance policies are image-specific.
     # Keeping them in the worker config preserves GUI Triage semantics when
     # BatchRunner resumes an interrupted run.
@@ -116,10 +116,18 @@ def _process_single(
     Rebuilds model clients from scratch in each worker process (model weights
     cannot be shared across process boundaries).
     """
-    orchestrator = _worker_orchestrator(json.dumps(config_dict, sort_keys=True))
     labels = config_dict.get("labels_by_image", {}).get(
         image_path, config_dict.get("confirmed_labels")
     )
+    # Checked before a worker builds its models: with an empty list the
+    # interrogator reports "user-confirmed labels" and returns none of them,
+    # and the run goes on to write an unlabelled all-objects file.
+    if not labels:
+        raise ValueError(
+            f"No labels were confirmed for {Path(image_path).name}, so there is "
+            "nothing to separate. Interrogate the batch, or confirm a label."
+        )
+    orchestrator = _worker_orchestrator(json.dumps(config_dict, sort_keys=True))
     selections = config_dict.get("selections_by_image", {}).get(image_path, {})
     orchestrator.set_confirmed_selections(selections)
     return orchestrator.process(image_path, labels)
@@ -200,12 +208,18 @@ class BatchRunner:
         self._executor: ProcessPoolExecutor | None = None
         self._futures: dict[str, Future] = {}
         self._running = False
+        self._closed_summary: BatchRunSummary | None = None
 
     def discover_images(self) -> list[Path]:
         """Scan input folder for supported image files."""
         folder = Path(self._config.input_folder)
         extensions = {".png", ".jpg", ".jpeg", ".tiff", ".tif", ".bmp", ".webp"}
-        if self._config.input_images:
+        if self._config.input_images is not None:
+            if not self._config.input_images:
+                raise ValueError(
+                    "This batch was frozen to no images. Triage kept none of them, "
+                    "which is not the same as keeping all of them."
+                )
             self._image_paths = [Path(path) for path in self._config.input_images]
             invalid = [
                 path
@@ -408,10 +422,16 @@ class BatchRunner:
         self.stop()
         if self._executor:
             self._executor.shutdown(wait=True)
+        # Taken before the store shuts: reading the result of a finished run
+        # is the ordinary next thing to do, and the records are only in the
+        # database this is about to close.
+        self._closed_summary = self.summary()
         self._state.close()
 
     def summary(self) -> BatchRunSummary:
         """Reconstruct output metrics and failed paths from durable state."""
+        if self._closed_summary is not None:
+            return self._closed_summary
         records = self._state.all_records()
         completed_records = [
             record for record in records.values() if record.status == JobStatus.COMPLETE

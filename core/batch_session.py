@@ -238,7 +238,7 @@ def load_resumable_batch(run_dir: str | Path) -> ResumableBatch | None:
             or config.confirmed_labels != triage.approved_labels
         ):
             return None
-        input_images = list(config.input_images)
+        input_images = list(config.input_images or [])
         if not input_images or len(input_images) != len(set(input_images)):
             return None
         if set(input_images) != set(interrogation.candidates_by_image):

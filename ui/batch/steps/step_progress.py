@@ -168,7 +168,7 @@ class StepProgress:
         from core.batch_runner import BatchRunner
 
         self._start_btn.config(state="disabled", text="Processing...")
-        image_paths = list(getattr(batch_config, "input_images", []))
+        image_paths = list(getattr(batch_config, "input_images", None) or [])
         self.init_thumbnails(image_paths)
         self._total = len(image_paths)
         self._runner_finished = False
