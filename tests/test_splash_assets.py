@@ -48,3 +48,17 @@ def test_the_mark_has_a_transparent_margin_rather_than_filling_its_box() -> None
     alpha = mark.split()[3]
 
     assert alpha.getextrema()[0] == 0, "expected transparent margin in the artwork"
+
+
+def test_loading_artwork_never_raises_into_the_startup_path() -> None:
+    """`apply_window_icon` runs while the main window is being built, and its
+    own docstring calls the icon a cosmetic loss. Pillow raises RuntimeError,
+    not TclError, when Tk is not ready for an image -- so the one exception the
+    caller guarded was not the one that could reach it.
+
+    Checked with no Tk root at all, which is the strictest form of "not ready"
+    and needs no window.
+    """
+    from ui.splash import _scaled
+
+    assert _scaled(ASSETS / "AppIcon.png", width=64) is None
