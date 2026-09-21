@@ -24,6 +24,7 @@ class DestinationRow:
         prefs: dict[str, Any],
         on_change: Callable[[], None] | None = None,
         wraplength: int = 260,
+        fill_width: bool = True,
     ) -> None:
         self._prefs = prefs
         self._on_change = on_change
@@ -35,9 +36,11 @@ class DestinationRow:
         )
         self._path_label.pack(anchor=tk.W, fill=tk.X)
 
+        # Full width suits a narrow panel, where every control is; stretched
+        # across a wide step it is the only button that is.
         ttk.Button(
             self.frame, text="Choose Destination Folder…", command=self._browse
-        ).pack(anchor=tk.W, fill=tk.X, pady=(4, 0))
+        ).pack(anchor=tk.W, fill=tk.X if fill_width else None, pady=(4, 0))
 
         # Packed only when there is something to say, so an untouched panel
         # carries no empty warning row.

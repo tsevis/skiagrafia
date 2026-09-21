@@ -125,7 +125,8 @@ class StepImport:
             font=("SF Pro Text", 11, "bold"),
         ).pack(anchor=tk.W, pady=(0, 6))
         self._destination_row = DestinationRow(self.frame, self._app.prefs,
-                                               on_change=self._scan_recent_batches)
+                                               on_change=self._scan_recent_batches,
+                                               wraplength=600, fill_width=False)
         self._destination_row.frame.pack(fill=tk.X)
 
         # Recent batches section
