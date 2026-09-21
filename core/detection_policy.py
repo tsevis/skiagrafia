@@ -88,7 +88,15 @@ class DetectionPolicyMixin:
             "Callable[..., list[DetectionResult]] | None",
             getattr(self._detector, "detect_instances", None),
         )
-        if candidate.role == "child" and self._quality != "detailed":
+        if candidate.role == "child":
+            # Every quality profile, not all but `detailed`. This entry point
+            # is what sets SAM 3's requirePresence, and a part is the model's
+            # own suggestion, so its recognition question is genuinely open.
+            # Routing `detailed` past it let the localisation rescue accept a
+            # part the model does not recognise -- on the corpus the rule was
+            # measured against, "printer" on g4cube.png at 0.901 and "mouse"
+            # on imac_dal.png at 0.946. A higher quality setting must not be
+            # a more permissive one.
             detect_many = cast(
                 "Callable[..., list[DetectionResult]] | None",
                 getattr(self._detector, "detect_part_instances", detect_many),
