@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import logging
 import re
+from typing import Literal, overload
 
 import numpy as np
 from numpy.typing import NDArray
@@ -76,10 +77,28 @@ _LEADIN_RE = re.compile(
 
 
 
-def parse_label_candidates(raw: str, limit: int = MAX_PARENTS) -> list[str]:
+@overload
+def parse_label_candidates(raw: str, limit: int = ...) -> list[str]: ...
+
+
+@overload
+def parse_label_candidates(
+    raw: str, limit: int = ..., *, report_dropped: Literal[True]
+) -> tuple[list[str], int]: ...
+
+
+def parse_label_candidates(
+    raw: str, limit: int = MAX_PARENTS, *, report_dropped: bool = False
+) -> list[str] | tuple[list[str], int]:
+    """Object names from a model's free-text answer, capped at `limit`.
+
+    With `report_dropped`, also returns how many distinct names were named and
+    then discarded by the cap -- information the caller previously had no way
+    to recover.
+    """
     text = raw.strip()
     if not text:
-        return []
+        return ([], 0) if report_dropped else []
     text = _LEADIN_RE.sub("", text)
 
     chunks = [c.strip(" .:") for c in _SPLIT_RE.split(text) if c.strip()]
@@ -98,6 +117,15 @@ def parse_label_candidates(raw: str, limit: int = MAX_PARENTS) -> list[str]:
             candidates.append(chunk)
         if len(candidates) >= limit:
             break
+    if report_dropped:
+        # How many distinct names were named and then thrown away. A model
+        # listing twelve object types silently lost four.
+        seen: list[str] = []
+        for chunk in chunks:
+            lowered = chunk.lower()
+            if lowered and lowered not in {value.lower() for value in seen}:
+                seen.append(chunk)
+        return candidates, max(0, len(seen) - len(candidates))
     return candidates
 
 

@@ -157,6 +157,8 @@ class Orchestrator(DetectionPolicyMixin):
         self._text_threshold = text_threshold
         self._progress = progress_callback or (lambda step, msg: None)
         self._knowledge_pack = knowledge_pack
+        #: Parents the part-discovery budget skipped during the current run.
+        self._budgeted_part_parents: list[str] = []
         self._quality = quality
 
     def _report(self, step: int, msg: str | None = None) -> None:
@@ -218,6 +220,7 @@ class Orchestrator(DetectionPolicyMixin):
         stage can be read -- and a suspect stage stepped through -- without
         holding the other four in your head.
         """
+        self._budgeted_part_parents = []
         source = self._load_source(image_path, result)
         parents, children_by_parent = self._interrogate(
             source.detection, confirmed_labels, result
@@ -234,6 +237,12 @@ class Orchestrator(DetectionPolicyMixin):
         self._write_all_objects_alpha(source, image_path, all_alpha, result)
         self._write_vector_output(source, image_path, masks, result)
 
+        if self._budgeted_part_parents:
+            names = ", ".join(f"'{name}'" for name in self._budgeted_part_parents)
+            result.warnings.append(
+                f"Part discovery was not run for {names}: the semantic effort setting "
+                "budgets how many objects are asked about."
+            )
         result.warnings.extend(getattr(self._detector, "warnings", []))
         # Collapsed once, at the end, rather than at each append: the stages
         # that repeat a warning do not know how many times they will.
@@ -436,7 +445,12 @@ class Orchestrator(DetectionPolicyMixin):
         round-trip per parent.
         """
         parts = children_by_parent.get(parent.display_label, [])
-        if parts or not callable(query_parts) or parent_index >= part_limit:
+        if parts or not callable(query_parts):
+            return parts
+        if parent_index >= part_limit:
+            # Budgeted, not absent: with twenty parents on `balanced` only the
+            # first three are asked, and the rest reported no parts at all.
+            self._budgeted_part_parents.append(parent.display_label)
             return parts
         self._report(4, f"Inspecting visible parts: {parent.display_label}")
         return query_parts(crop, parent, self._knowledge_pack)
@@ -467,11 +481,21 @@ class Orchestrator(DetectionPolicyMixin):
                     logger.info(
                         "Excluded tentative part %s (SAM 3 score %.3f)", part, detection.confidence
                     )
+                    result.warnings.append(
+                        f"Excluded a tentative '{part}' on '{layer.label}' that scored below "
+                        "the part threshold."
+                    )
                     continue
                 mask = self._contained_child_mask(
                     source, crop, offset, detection, part, parent_mask, child_masks
                 )
                 if mask is None:
+                    # Four independent reasons, all previously silent, while
+                    # the parent path warns for the equivalent rejection.
+                    result.warnings.append(
+                        f"Excluded a '{part}' on '{layer.label}': too small, outside its "
+                        "parent, the parent again, or a duplicate of another part."
+                    )
                     continue
                 child_masks.append(mask)
                 child_id = f"{layer.layer_id}-part-{len(child_masks):03d}"
