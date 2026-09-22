@@ -204,11 +204,24 @@ parts = []
 detector_phrases = ["Apple building", "office building"]
 
 # ── Scene vocabulary, from what the 376-page run actually saw ──────
-# Every term below was observed at least five times. Aliases are
-# plurals folded onto their singular, which is morphology and needs
-# no judgement. Qualified forms were NOT folded: "apple logo" is not
-# "logo" in this book, a robot arm is not an arm, and a conveyor belt
-# is not a belt.
+# Every term below was seen at least five times. Plurals are folded
+# onto their singular. Qualified forms are NOT: "apple logo" is not
+# "logo" in this book, a robot arm is not an arm, a conveyor belt is
+# not a belt, and a text box is not a box.
+
+[[objects]]
+canonical = "person"
+aliases = ["boy", "man", "men", "people", "woman"]
+parts = ["head", "hair", "face", "eye", "nose", "mouth", "ear", "beard", "mustache", "hand", "arm", "leg", "finger"]
+description = "a person, without guessing who they are or their gender"
+detector_phrases = ["person"]
+# seen 125 times
+
+[[objects]]
+canonical = "screen"
+aliases = ["computer screen", "display", "screens"]
+detector_phrases = ["screen"]
+# seen 59 times
 
 [[objects]]
 canonical = "shirt"
@@ -216,10 +229,16 @@ detector_phrases = ["shirt"]
 # seen 57 times
 
 [[objects]]
-canonical = "screen"
-aliases = ["screens"]
-detector_phrases = ["screen"]
-# seen 48 times
+canonical = "text"
+aliases = ["text block", "text box"]
+detector_phrases = ["text"]
+# seen 46 times
+
+[[objects]]
+canonical = "computer"
+aliases = ["computers"]
+detector_phrases = ["computer"]
+# seen 44 times
 
 [[objects]]
 canonical = "button"
@@ -233,20 +252,19 @@ detector_phrases = ["monitor"]
 # seen 36 times
 
 [[objects]]
-canonical = "text"
-detector_phrases = ["text"]
+canonical = "logo"
+detector_phrases = ["logo"]
 # seen 34 times
-
-[[objects]]
-canonical = "hand"
-aliases = ["hands"]
-detector_phrases = ["hand"]
-# seen 32 times
 
 [[objects]]
 canonical = "glasses"
 detector_phrases = ["glasses"]
 # seen 31 times
+
+[[objects]]
+canonical = "mouse"
+detector_phrases = ["mouse"]
+# seen 28 times
 
 [[objects]]
 canonical = "cable"
@@ -283,11 +301,6 @@ detector_phrases = ["chair"]
 # seen 20 times
 
 [[objects]]
-canonical = "hair"
-detector_phrases = ["hair"]
-# seen 20 times
-
-[[objects]]
 canonical = "window"
 aliases = ["windows"]
 detector_phrases = ["window"]
@@ -306,9 +319,9 @@ detector_phrases = ["suit"]
 # seen 16 times
 
 [[objects]]
-canonical = "nose"
-detector_phrases = ["nose"]
-# seen 14 times
+canonical = "watch"
+detector_phrases = ["watch"]
+# seen 15 times
 
 [[objects]]
 canonical = "speaker"
@@ -316,20 +329,9 @@ detector_phrases = ["speaker"]
 # seen 14 times
 
 [[objects]]
-canonical = "mouth"
-detector_phrases = ["mouth"]
-# seen 13 times
-
-[[objects]]
 canonical = "label"
 aliases = ["labels"]
 detector_phrases = ["label"]
-# seen 12 times
-
-[[objects]]
-canonical = "eye"
-aliases = ["eyes"]
-detector_phrases = ["eye"]
 # seen 12 times
 
 [[objects]]
@@ -350,14 +352,9 @@ detector_phrases = ["computer case"]
 # seen 11 times
 
 [[objects]]
-canonical = "head"
-detector_phrases = ["head"]
-# seen 11 times
-
-[[objects]]
-canonical = "ear"
-aliases = ["ears"]
-detector_phrases = ["ear"]
+canonical = "case"
+aliases = ["casing"]
+detector_phrases = ["case"]
 # seen 11 times
 
 [[objects]]
@@ -373,6 +370,11 @@ detector_phrases = ["vent"]
 [[objects]]
 canonical = "microphone"
 detector_phrases = ["microphone"]
+# seen 10 times
+
+[[objects]]
+canonical = "building"
+detector_phrases = ["building"]
 # seen 10 times
 
 [[objects]]
@@ -427,18 +429,13 @@ detector_phrases = ["camera"]
 # seen 8 times
 
 [[objects]]
-canonical = "text block"
-detector_phrases = ["text block"]
-# seen 7 times
-
-[[objects]]
 canonical = "belt"
 detector_phrases = ["belt"]
 # seen 7 times
 
 [[objects]]
-canonical = "computer screen"
-detector_phrases = ["computer screen"]
+canonical = "tablet"
+detector_phrases = ["tablet"]
 # seen 7 times
 
 [[objects]]
@@ -462,23 +459,8 @@ detector_phrases = ["calculator"]
 # seen 6 times
 
 [[objects]]
-canonical = "mustache"
-detector_phrases = ["mustache"]
-# seen 6 times
-
-[[objects]]
-canonical = "casing"
-detector_phrases = ["casing"]
-# seen 6 times
-
-[[objects]]
 canonical = "handle"
 detector_phrases = ["handle"]
-# seen 6 times
-
-[[objects]]
-canonical = "beard"
-detector_phrases = ["beard"]
 # seen 6 times
 
 [[objects]]
@@ -505,11 +487,6 @@ detector_phrases = ["sign"]
 [[objects]]
 canonical = "bottle"
 detector_phrases = ["bottle"]
-# seen 5 times
-
-[[objects]]
-canonical = "text box"
-detector_phrases = ["text box"]
 # seen 5 times
 
 [[objects]]
@@ -544,11 +521,6 @@ detector_phrases = ["panel"]
 # seen 5 times
 
 [[objects]]
-canonical = "woman"
-detector_phrases = ["woman"]
-# seen 5 times
-
-[[objects]]
 canonical = "lamp"
 detector_phrases = ["lamp"]
 # seen 5 times
@@ -567,11 +539,6 @@ detector_phrases = ["device"]
 [[objects]]
 canonical = "stylus"
 detector_phrases = ["stylus"]
-# seen 5 times
-
-[[objects]]
-canonical = "case"
-detector_phrases = ["case"]
 # seen 5 times
 
 [[objects]]

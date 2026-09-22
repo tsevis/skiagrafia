@@ -84,11 +84,34 @@ class KnowledgePack(BaseModel):
         return self.find_object(label) is not None
 
     def find_object(self, label: str) -> ObjectKnowledge | None:
+        """The object this label NAMES, or None.
+
+        Only the canonical term and its aliases name a thing. Generic terms
+        and detector phrases say how to FIND it -- "to locate Steve Jobs,
+        look for a person" -- and matching on those turned every observed
+        `man` and `person` into a specific named individual. The book saw
+        those two words 107 times.
+        """
         wanted = label.strip().lower()
         for obj in self.objects:
-            if obj.canonical.lower() == wanted:
+            names = {obj.canonical.strip().lower()}
+            names.update(alias.strip().lower() for alias in obj.aliases)
+            if wanted in names:
                 return obj
-            if wanted in {term.lower() for term in obj.all_terms()}:
+        return None
+
+    def find_detection_hints(self, label: str) -> ObjectKnowledge | None:
+        """The object whose detector phrases suit this label, or None.
+
+        Wider than `find_object`: a generic term or detector phrase counts
+        here. Someone who observes "computer" should get the detector the
+        richer phrases an Apple computer entry carries, while the layer
+        keeps the name they actually used. An author who wants a term to
+        name as well as find lists it under `aliases`.
+        """
+        wanted = label.strip().lower()
+        for obj in self.objects:
+            if wanted in {term.strip().lower() for term in obj.all_terms()}:
                 return obj
         return None
 

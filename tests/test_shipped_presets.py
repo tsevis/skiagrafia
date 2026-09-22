@@ -36,13 +36,54 @@ def test_no_shipped_guide_names_the_same_object_twice(path: Path) -> None:
     )
 
 
-def test_the_closed_apple_guide_admits_its_own_terms_and_refuses_others() -> None:
-    pack = KnowledgePack.load(
+def _closed_apple_guide() -> KnowledgePack:
+    return KnowledgePack.load(
         Path(__file__).resolve().parent.parent
         / "core" / "presets" / "apple_the_first_50_years_closed.toml"
     )
 
+
+def test_the_closed_apple_guide_refuses_a_term_it_does_not_list() -> None:
+    pack = _closed_apple_guide()
+
     assert pack.domain.closed_vocabulary
     assert pack.admits("shirt")
-    assert pack.admits("hands"), "a plural should resolve to its singular"
     assert not pack.admits("trombone")
+
+
+def test_a_plural_resolves_to_its_singular() -> None:
+    found = _closed_apple_guide().find_object("cables")
+
+    assert found is not None
+    assert found.canonical == "cable"
+
+
+def test_nobody_is_named_from_the_fact_that_they_are_a_person() -> None:
+    # The guide lists Steve Jobs with "man" and "person" among the terms a
+    # detector should search for. Those must not name him.
+    pack = _closed_apple_guide()
+
+    for observed in ("man", "woman", "people", "person"):
+        found = pack.find_object(observed)
+        assert found is not None, observed
+        assert found.canonical == "person", f"{observed} named {found.canonical}"
+
+
+def test_a_body_part_is_a_part_of_a_person_not_an_object_of_its_own() -> None:
+    pack = _closed_apple_guide()
+    person = pack.find_object("person")
+
+    assert person is not None
+    assert "hand" in person.parts
+    assert not pack.admits("hand"), "a loose hand is not a thing to cut out"
+
+
+def test_a_screen_and_a_monitor_stay_different_things() -> None:
+    # A screen is a surface, a monitor is a device. The guide already
+    # carries a CRT monitor; merging them would lose that.
+    pack = _closed_apple_guide()
+    screen = pack.find_object("computer screen")
+    monitor = pack.find_object("monitor")
+
+    assert screen is not None and screen.canonical == "screen"
+    assert monitor is not None and monitor.canonical == "monitor"

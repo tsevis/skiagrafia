@@ -361,6 +361,7 @@ class GuidedInterrogator(ReasonerStageMixin):
             self._candidate_from_label(
                 label=label,
                 knowledge=knowledge_pack.find_object(label) if knowledge_pack else None,
+                hints=knowledge_pack.find_detection_hints(label) if knowledge_pack else None,
                 source_model=model,
                 confidence=0.8 if prompt_style == "primary" else 0.72,
             )
@@ -486,6 +487,7 @@ class GuidedInterrogator(ReasonerStageMixin):
                 self._candidate_from_label(
                     label=label,
                     knowledge=knowledge,
+                    hints=knowledge_pack.find_detection_hints(label) if knowledge_pack else None,
                     source_model="confirmed",
                     confidence=1.0,
                 )
@@ -500,9 +502,14 @@ class GuidedInterrogator(ReasonerStageMixin):
         knowledge: ObjectKnowledge | None,
         source_model: str,
         confidence: float,
+        hints: ObjectKnowledge | None = None,
     ) -> InterrogationCandidate:
         canonical = knowledge.canonical if knowledge else label.strip().lower()
         display = knowledge.canonical if knowledge else label.strip().lower()
+        # Naming and finding are separate lookups: `hints` may be an entry
+        # this label merely resembles, which is enough to search for but
+        # not enough to rename the layer after.
+        knowledge = knowledge or hints
         detector_phrases = (
             knowledge.ranked_detector_phrases(self._settings.max_aliases_per_object)
             if knowledge
