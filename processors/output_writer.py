@@ -5,6 +5,7 @@ import os
 import xml.etree.ElementTree as ET
 from pathlib import Path
 
+import cv2
 import numpy as np
 from numpy.typing import NDArray
 from PIL import Image
@@ -54,6 +55,37 @@ def write_svg(svg_content: str, output_path: Path) -> Path:
     return output_path
 
 
+# How much real colour to keep around an object before the rest is cleared.
+# Compositing that grows or blurs a matte reads the colour under the
+# transparency; black there shows up as a dark fringe. Eight pixels costs
+# about one percentage point of the saving and removes that risk.
+COLOUR_BLEED_PIXELS = 8
+
+
+def _clear_colour_far_from_the_object(
+    rgba: NDArray[np.uint8], alpha: NDArray[np.uint8]
+) -> NDArray[np.uint8]:
+    """Zero the RGB channels well outside the mask, in place.
+
+    A layer used to carry the whole source photograph in RGB and mask it
+    only in alpha. LZW cannot compress a photograph, so a layer covering
+    0.5% of the page still cost a full uncompressed frame -- the 9,779
+    layers of the APPLE50 book came to 19 GB at a median coverage of
+    0.46%. Clearing colour where nothing is visible leaves a flat field
+    the compression collapses, and leaves the canvas, the position and
+    the alpha exactly as they were.
+    """
+    if COLOUR_BLEED_PIXELS <= 0:
+        return rgba
+    span = 2 * COLOUR_BLEED_PIXELS + 1
+    near = cv2.dilate(
+        (alpha > 0).astype(np.uint8),
+        cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (span, span)),
+    )
+    rgba[..., :3][near == 0] = 0
+    return rgba
+
+
 def write_tiff(
     image: NDArray[np.uint8],
     output_path: Path,
@@ -74,6 +106,7 @@ def write_tiff(
             rgba = np.dstack([image, image, image, alpha])
         else:
             rgba = np.dstack([image, alpha])
+        rgba = _clear_colour_far_from_the_object(rgba, alpha)
         pil_img = Image.fromarray(rgba, mode="RGBA")
     else:
         if len(image.shape) == 2:
@@ -114,6 +147,7 @@ def write_png(
             rgba = np.dstack([image, image, image, alpha])
         else:
             rgba = np.dstack([image, alpha])
+        rgba = _clear_colour_far_from_the_object(rgba, alpha)
         pil_img = Image.fromarray(rgba, mode="RGBA")
     else:
         if len(image.shape) == 2:
