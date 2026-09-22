@@ -641,6 +641,18 @@ class Orchestrator(DetectionPolicyMixin):
                 alpha = np.minimum(alpha, alphas[layer.parent_id])
             alphas[layer.layer_id] = alpha
             layer.alpha = alpha
+            # A matte can survive detection and still come out empty: the
+            # refinement can clear it, the source's own transparency can,
+            # and a child clipped to a parent it does not overlap will.
+            # The book wrote 23 such files, each a full canvas of nothing.
+            # Say which layer produced nothing rather than leave a file
+            # that looks like an answer.
+            if not alpha.any():
+                result.warnings.append(
+                    f"'{layer.label}' came out empty after refinement, so no "
+                    "layer file was written for it."
+                )
+                continue
             path = self._output_path(f"{self._image_token(image_path)}_{layer.layer_id}.tiff")
             try:
                 write_tiff(source.rgb, path, alpha, icc_profile=source.icc)
