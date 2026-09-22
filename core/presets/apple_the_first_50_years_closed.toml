@@ -1,0 +1,590 @@
+[domain]
+name = "Apple — The First 50 Years"
+description = "Historical editorial imagery about Apple Inc. from 1976 to 2026. The collection includes Apple computers, consumer devices, prototypes, peripherals, circuit boards, packaging, logos, retail environments, offices, historical documents, advertisements, diagrams, and people associated with Apple."
+exclusions = ["captions", "headlines", "paragraphs", "printed text", "diagrams", "charts", "screenshots", "photographs printed inside another photograph", "page backgrounds", "decorative borders"]
+# The listed objects are the only terms a model may propose. Without
+# this the same book produced 626 distinct labels over 1,957 uses,
+# 65% of them used exactly once.
+closed_vocabulary = true
+
+[batch_defaults]
+enable_tiling = true
+max_aliases_per_object = 4
+
+[[objects]]
+canonical = "Apple computer"
+aliases = ["Apple desktop computer", "Apple personal computer"]
+generic_terms = ["computer", "desktop computer"]
+description = "Apple computer hardware shown as a standalone physical product"
+parts = ["screen", "buttons", "ports", "speakers", "casing", "cables", "connectors", "circuit board", "removable accessory"]
+detector_phrases = ["Apple computer", "desktop computer"]
+
+[[objects]]
+canonical = "Macintosh computer"
+aliases = ["Mac", "Macintosh"]
+generic_terms = ["computer", "desktop computer"]
+description = "historical Apple Macintosh computer"
+parts = ["screen", "buttons", "ports", "speakers", "casing", "cables", "connectors"]
+detector_phrases = ["Macintosh computer", "Mac computer"]
+
+[[objects]]
+canonical = "Apple II computer"
+aliases = ["Apple II", "Apple 2"]
+generic_terms = ["computer", "desktop computer"]
+description = "Apple II personal computer"
+parts = ["keyboard", "ports", "casing", "cables", "connectors", "circuit board"]
+detector_phrases = ["Apple II computer", "Apple II"]
+
+[[objects]]
+canonical = "iMac"
+aliases = ["Apple iMac"]
+generic_terms = ["all in one computer", "desktop computer"]
+description = "Apple iMac computer"
+parts = ["screen", "buttons", "ports", "speakers", "casing", "cables", "connectors"]
+detector_phrases = ["iMac", "Apple iMac"]
+
+[[objects]]
+canonical = "iPhone"
+aliases = ["Apple iPhone"]
+generic_terms = ["smartphone", "mobile phone"]
+description = "Apple iPhone device"
+parts = ["screen", "buttons", "ports", "speakers", "casing", "connectors"]
+detector_phrases = ["iPhone", "Apple phone"]
+
+[[objects]]
+canonical = "iPad"
+aliases = ["Apple iPad"]
+generic_terms = ["tablet", "tablet computer"]
+description = "Apple iPad tablet"
+parts = ["screen", "buttons", "ports", "speakers", "casing", "connectors"]
+detector_phrases = ["iPad", "Apple tablet"]
+
+[[objects]]
+canonical = "iPod"
+aliases = ["Apple iPod"]
+generic_terms = ["music player", "portable media player"]
+description = "Apple iPod device"
+parts = ["screen", "buttons", "ports", "casing", "connectors"]
+detector_phrases = ["iPod", "Apple music player"]
+
+[[objects]]
+canonical = "Apple Watch"
+aliases = ["Apple smartwatch"]
+generic_terms = ["smartwatch", "watch"]
+description = "Apple Watch wearable"
+parts = ["screen", "buttons", "casing", "removable accessory"]
+detector_phrases = ["Apple Watch", "smartwatch"]
+
+[[objects]]
+canonical = "AirPods"
+aliases = ["Apple AirPods"]
+generic_terms = ["wireless earbuds", "earbuds"]
+description = "Apple wireless earphones or charging case"
+parts = ["casing", "connectors", "removable accessory"]
+detector_phrases = ["AirPods", "wireless earbuds"]
+
+[[objects]]
+canonical = "Newton device"
+aliases = ["Apple Newton", "Newton MessagePad"]
+generic_terms = ["PDA", "handheld computer"]
+description = "Apple Newton prototype or personal digital assistant"
+parts = ["screen", "buttons", "ports", "casing"]
+detector_phrases = ["Apple Newton", "Newton device"]
+
+[[objects]]
+canonical = "keyboard"
+aliases = ["Apple keyboard"]
+generic_terms = ["computer keyboard"]
+description = "standalone Apple keyboard peripheral"
+parts = ["buttons", "cables", "connectors", "casing"]
+detector_phrases = ["computer keyboard", "Apple keyboard"]
+
+[[objects]]
+canonical = "computer mouse"
+aliases = ["Apple mouse"]
+generic_terms = ["mouse"]
+description = "standalone computer mouse peripheral"
+parts = ["buttons", "cables", "connectors", "casing"]
+detector_phrases = ["computer mouse", "Apple mouse"]
+
+[[objects]]
+canonical = "CRT monitor"
+aliases = ["CRT display", "Apple monitor"]
+generic_terms = ["computer monitor", "display"]
+description = "standalone cathode ray tube computer monitor"
+parts = ["screen", "buttons", "ports", "speakers", "casing", "cables"]
+detector_phrases = ["CRT monitor", "computer monitor"]
+
+[[objects]]
+canonical = "printer"
+aliases = ["Apple printer"]
+generic_terms = ["computer printer"]
+description = "Apple printer peripheral"
+parts = ["buttons", "ports", "casing", "cables", "connectors"]
+detector_phrases = ["printer", "Apple printer"]
+
+[[objects]]
+canonical = "circuit board"
+aliases = ["motherboard", "logic board"]
+generic_terms = ["printed circuit board", "PCB"]
+description = "visible electronic circuit board"
+parts = ["microchip", "ports", "connectors", "cables"]
+detector_phrases = ["circuit board", "logic board"]
+
+[[objects]]
+canonical = "microchip"
+aliases = ["integrated circuit", "processor chip"]
+generic_terms = ["computer chip", "chip"]
+description = "visible electronic microchip"
+parts = []
+detector_phrases = ["microchip", "integrated circuit"]
+
+[[objects]]
+canonical = "prototype device"
+aliases = ["Apple prototype"]
+generic_terms = ["electronic prototype", "prototype"]
+description = "experimental Apple hardware prototype"
+parts = ["screen", "buttons", "ports", "speakers", "casing", "cables", "connectors"]
+detector_phrases = ["prototype device", "Apple prototype"]
+
+[[objects]]
+canonical = "product box"
+aliases = ["Apple packaging", "Apple box"]
+generic_terms = ["retail box", "product packaging"]
+description = "Apple product box or retail packaging"
+parts = []
+detector_phrases = ["product box", "Apple packaging"]
+
+[[objects]]
+canonical = "Apple logo"
+aliases = ["Apple Inc logo"]
+generic_terms = ["logo"]
+description = "visible Apple corporate logo"
+parts = []
+detector_phrases = ["Apple logo", "Apple Inc logo"]
+
+[[objects]]
+canonical = "Steve Jobs"
+aliases = ["Steven Jobs"]
+generic_terms = ["person", "man"]
+description = "Steve Jobs shown as a person"
+parts = []
+detector_phrases = ["Steve Jobs", "person"]
+
+[[objects]]
+canonical = "Steve Wozniak"
+aliases = ["Woz", "Stephen Wozniak"]
+generic_terms = ["person", "man"]
+description = "Steve Wozniak shown as a person"
+parts = []
+detector_phrases = ["Steve Wozniak", "person"]
+
+[[objects]]
+canonical = "Apple employee"
+aliases = ["Apple staff member"]
+generic_terms = ["person", "people"]
+description = "person associated with Apple"
+parts = []
+detector_phrases = ["person", "people"]
+
+[[objects]]
+canonical = "Apple Store"
+aliases = ["Apple retail store"]
+generic_terms = ["retail environment", "store interior"]
+description = "Apple retail environment"
+parts = []
+detector_phrases = ["Apple Store", "retail store"]
+
+[[objects]]
+canonical = "Apple building"
+aliases = ["Apple office", "Apple headquarters"]
+generic_terms = ["building", "office building"]
+description = "Apple office or corporate building"
+parts = []
+detector_phrases = ["Apple building", "office building"]
+
+# ── Scene vocabulary, from what the 376-page run actually saw ──────
+# Every term below was observed at least five times. Aliases are
+# plurals folded onto their singular, which is morphology and needs
+# no judgement. Qualified forms were NOT folded: "apple logo" is not
+# "logo" in this book, a robot arm is not an arm, and a conveyor belt
+# is not a belt.
+
+[[objects]]
+canonical = "shirt"
+detector_phrases = ["shirt"]
+# seen 57 times
+
+[[objects]]
+canonical = "screen"
+aliases = ["screens"]
+detector_phrases = ["screen"]
+# seen 48 times
+
+[[objects]]
+canonical = "button"
+aliases = ["buttons"]
+detector_phrases = ["button"]
+# seen 43 times
+
+[[objects]]
+canonical = "monitor"
+detector_phrases = ["monitor"]
+# seen 36 times
+
+[[objects]]
+canonical = "text"
+detector_phrases = ["text"]
+# seen 34 times
+
+[[objects]]
+canonical = "hand"
+aliases = ["hands"]
+detector_phrases = ["hand"]
+# seen 32 times
+
+[[objects]]
+canonical = "glasses"
+detector_phrases = ["glasses"]
+# seen 31 times
+
+[[objects]]
+canonical = "cable"
+aliases = ["cables"]
+detector_phrases = ["cable"]
+# seen 24 times
+
+[[objects]]
+canonical = "phone"
+detector_phrases = ["phone"]
+# seen 23 times
+
+[[objects]]
+canonical = "icon"
+aliases = ["icons"]
+detector_phrases = ["icon"]
+# seen 22 times
+
+[[objects]]
+canonical = "laptop"
+detector_phrases = ["laptop"]
+# seen 22 times
+
+[[objects]]
+canonical = "tie"
+aliases = ["ties"]
+detector_phrases = ["tie"]
+# seen 20 times
+
+[[objects]]
+canonical = "chair"
+aliases = ["chairs"]
+detector_phrases = ["chair"]
+# seen 20 times
+
+[[objects]]
+canonical = "hair"
+detector_phrases = ["hair"]
+# seen 20 times
+
+[[objects]]
+canonical = "window"
+aliases = ["windows"]
+detector_phrases = ["window"]
+# seen 19 times
+
+[[objects]]
+canonical = "tree"
+aliases = ["trees"]
+detector_phrases = ["tree"]
+# seen 16 times
+
+[[objects]]
+canonical = "suit"
+aliases = ["suits"]
+detector_phrases = ["suit"]
+# seen 16 times
+
+[[objects]]
+canonical = "nose"
+detector_phrases = ["nose"]
+# seen 14 times
+
+[[objects]]
+canonical = "speaker"
+detector_phrases = ["speaker"]
+# seen 14 times
+
+[[objects]]
+canonical = "mouth"
+detector_phrases = ["mouth"]
+# seen 13 times
+
+[[objects]]
+canonical = "label"
+aliases = ["labels"]
+detector_phrases = ["label"]
+# seen 12 times
+
+[[objects]]
+canonical = "eye"
+aliases = ["eyes"]
+detector_phrases = ["eye"]
+# seen 12 times
+
+[[objects]]
+canonical = "book"
+aliases = ["books"]
+detector_phrases = ["book"]
+# seen 12 times
+
+[[objects]]
+canonical = "paper"
+aliases = ["papers"]
+detector_phrases = ["paper"]
+# seen 11 times
+
+[[objects]]
+canonical = "computer case"
+detector_phrases = ["computer case"]
+# seen 11 times
+
+[[objects]]
+canonical = "head"
+detector_phrases = ["head"]
+# seen 11 times
+
+[[objects]]
+canonical = "ear"
+aliases = ["ears"]
+detector_phrases = ["ear"]
+# seen 11 times
+
+[[objects]]
+canonical = "jacket"
+detector_phrases = ["jacket"]
+# seen 10 times
+
+[[objects]]
+canonical = "vent"
+detector_phrases = ["vent"]
+# seen 10 times
+
+[[objects]]
+canonical = "microphone"
+detector_phrases = ["microphone"]
+# seen 10 times
+
+[[objects]]
+canonical = "hinge"
+detector_phrases = ["hinge"]
+# seen 10 times
+
+[[objects]]
+canonical = "frame"
+detector_phrases = ["frame"]
+# seen 9 times
+
+[[objects]]
+canonical = "apple"
+detector_phrases = ["apple"]
+# seen 9 times
+
+[[objects]]
+canonical = "stand"
+detector_phrases = ["stand"]
+# seen 9 times
+
+[[objects]]
+canonical = "pants"
+detector_phrases = ["pants"]
+# seen 8 times
+
+[[objects]]
+canonical = "table"
+aliases = ["tables"]
+detector_phrases = ["table"]
+# seen 8 times
+
+[[objects]]
+canonical = "jeans"
+detector_phrases = ["jeans"]
+# seen 8 times
+
+[[objects]]
+canonical = "ring"
+detector_phrases = ["ring"]
+# seen 8 times
+
+[[objects]]
+canonical = "box"
+detector_phrases = ["box"]
+# seen 8 times
+
+[[objects]]
+canonical = "camera"
+detector_phrases = ["camera"]
+# seen 8 times
+
+[[objects]]
+canonical = "text block"
+detector_phrases = ["text block"]
+# seen 7 times
+
+[[objects]]
+canonical = "belt"
+detector_phrases = ["belt"]
+# seen 7 times
+
+[[objects]]
+canonical = "computer screen"
+detector_phrases = ["computer screen"]
+# seen 7 times
+
+[[objects]]
+canonical = "menu"
+detector_phrases = ["menu"]
+# seen 6 times
+
+[[objects]]
+canonical = "mouse cursor"
+detector_phrases = ["mouse cursor"]
+# seen 6 times
+
+[[objects]]
+canonical = "folder"
+detector_phrases = ["folder"]
+# seen 6 times
+
+[[objects]]
+canonical = "calculator"
+detector_phrases = ["calculator"]
+# seen 6 times
+
+[[objects]]
+canonical = "mustache"
+detector_phrases = ["mustache"]
+# seen 6 times
+
+[[objects]]
+canonical = "casing"
+detector_phrases = ["casing"]
+# seen 6 times
+
+[[objects]]
+canonical = "handle"
+detector_phrases = ["handle"]
+# seen 6 times
+
+[[objects]]
+canonical = "beard"
+detector_phrases = ["beard"]
+# seen 6 times
+
+[[objects]]
+canonical = "cup"
+detector_phrases = ["cup"]
+# seen 6 times
+
+[[objects]]
+canonical = "trackball"
+detector_phrases = ["trackball"]
+# seen 6 times
+
+[[objects]]
+canonical = "line"
+aliases = ["lines"]
+detector_phrases = ["line"]
+# seen 6 times
+
+[[objects]]
+canonical = "sign"
+detector_phrases = ["sign"]
+# seen 6 times
+
+[[objects]]
+canonical = "bottle"
+detector_phrases = ["bottle"]
+# seen 5 times
+
+[[objects]]
+canonical = "text box"
+detector_phrases = ["text box"]
+# seen 5 times
+
+[[objects]]
+canonical = "clock"
+detector_phrases = ["clock"]
+# seen 5 times
+
+[[objects]]
+canonical = "document"
+detector_phrases = ["document"]
+# seen 5 times
+
+[[objects]]
+canonical = "plant"
+detector_phrases = ["plant"]
+# seen 5 times
+
+[[objects]]
+canonical = "slot"
+detector_phrases = ["slot"]
+# seen 5 times
+
+[[objects]]
+canonical = "key"
+aliases = ["keys"]
+detector_phrases = ["key"]
+# seen 5 times
+
+[[objects]]
+canonical = "panel"
+detector_phrases = ["panel"]
+# seen 5 times
+
+[[objects]]
+canonical = "woman"
+detector_phrases = ["woman"]
+# seen 5 times
+
+[[objects]]
+canonical = "lamp"
+detector_phrases = ["lamp"]
+# seen 5 times
+
+[[objects]]
+canonical = "earpiece"
+detector_phrases = ["earpiece"]
+# seen 5 times
+
+[[objects]]
+canonical = "device"
+aliases = ["devices"]
+detector_phrases = ["device"]
+# seen 5 times
+
+[[objects]]
+canonical = "stylus"
+detector_phrases = ["stylus"]
+# seen 5 times
+
+[[objects]]
+canonical = "case"
+detector_phrases = ["case"]
+# seen 5 times
+
+[[objects]]
+canonical = "desk"
+detector_phrases = ["desk"]
+# seen 5 times
+
+[[objects]]
+canonical = "strap"
+detector_phrases = ["strap"]
+# seen 5 times
+
+[[objects]]
+canonical = "road"
+detector_phrases = ["road"]
+# seen 5 times
