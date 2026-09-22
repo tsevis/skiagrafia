@@ -86,3 +86,8 @@ class PipelineResult(BaseModel):
     error: str | None = None
     warnings: list[str] = Field(default_factory=list)
     tiff_files: list[str] = Field(default_factory=list)
+    #: Peak resident memory of the worker that produced this, in MB. The
+    #: worker is a separate process, so this is the only footprint figure
+    #: the coordinator can be sure of -- and after a worker dies it is the
+    #: only evidence of how large it had grown. None when not measured.
+    worker_peak_rss_mb: float | None = None
