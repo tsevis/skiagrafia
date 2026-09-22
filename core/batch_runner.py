@@ -11,6 +11,7 @@ import time
 import uuid
 from collections.abc import Callable
 from concurrent.futures import Future, ProcessPoolExecutor
+from concurrent.futures.process import BrokenProcessPool
 from pathlib import Path
 
 from pydantic import BaseModel, Field
@@ -105,6 +106,9 @@ class BatchRunSummary(BaseModel):
     avg_layers: float = 0.0
     failed_image_paths: list[str] = Field(default_factory=list)
     status_by_image: dict[str, str] = Field(default_factory=dict)
+    # Set when the run ended for a reason that is not the images' fault, so
+    # a caller can say "a worker kept dying" rather than "N images failed".
+    stop_reason: str = ""
 
 
 def _process_single(
@@ -186,6 +190,11 @@ class BatchRunner:
     Manages parallel processing of images with state persistence.
     """
 
+    # How many times a pool may be rebuilt without a single image finishing
+    # in between. A one-off death recovers long before this; a pool that
+    # cannot get anywhere stops instead of rebuilding for ever.
+    MAX_FRUITLESS_REBUILDS = 3
+
     def __init__(
         self,
         config: BatchConfig,
@@ -209,6 +218,15 @@ class BatchRunner:
         self._futures: dict[str, Future] = {}
         self._running = False
         self._closed_summary: BatchRunSummary | None = None
+        # A worker death breaks the whole pool: every future still queued
+        # against it raises at once. Only the callbacks belonging to the
+        # live generation are acted on; the rest are that one death's echo.
+        self._pool_workers = 1
+        self._pool_generation = 0
+        self._submission_order: list[str] = []
+        self._completed_this_generation = 0
+        self._fruitless_rebuilds = 0
+        self._stop_reason = ""
 
     def discover_images(self) -> list[Path]:
         """Scan input folder for supported image files."""
@@ -274,8 +292,10 @@ class BatchRunner:
         # The model stages share one GPU; parallel model replicas multiply
         # memory and contend for Metal. Reuse one warm worker on this path.
         workers = 1 if sys.platform == "darwin" or self._config.vlm_backend == "local" else self._config.max_workers
+        self._pool_workers = workers
         self._executor = ProcessPoolExecutor(max_workers=workers)
 
+        self._submission_order = []
         for img_path in self._image_paths:
             image_id = self._image_ids[str(img_path)]
             record = self._state.get(image_id)
@@ -288,6 +308,7 @@ class BatchRunner:
                 _process_single, str(img_path), config_dict
             )
             self._futures[image_id] = future
+            self._submission_order.append(image_id)
 
         logger.info(
             "Batch started: %d images, %d workers",
@@ -302,7 +323,7 @@ class BatchRunner:
         submitted_any = bool(self._futures)
         for image_id, future in list(self._futures.items()):
             future.add_done_callback(
-                functools.partial(self._on_complete, image_id)
+                functools.partial(self._on_complete, image_id, self._pool_generation)
             )
 
         if not submitted_any:
@@ -313,8 +334,13 @@ class BatchRunner:
             if self._completion_cb:
                 self._completion_cb(progress)
 
-    def _on_complete(self, image_id: str, future: Future) -> None:
+    def _on_complete(self, image_id: str, generation: int, future: Future) -> None:
         """Handle completion of a single image."""
+        # A future from a pool that has already died and been replaced. Its
+        # image is either finished or queued again; either way this callback
+        # is the echo of one death, not news about this image.
+        if generation != self._pool_generation:
+            return
         try:
             result = future.result()
             # Kept for both outcomes: a run that errored late can still have
@@ -344,11 +370,19 @@ class BatchRunner:
                     }
                 )
                 self._state.put(image_id, updated)
+        except BrokenProcessPool:
+            # The worker died. Every future still queued raises this, so
+            # this says nothing about THIS image -- one page was in flight
+            # and the rest were never read.
+            self._recover_from_pool_death()
+            return
         except Exception as exc:
             self._state.update_status(
                 image_id, JobStatus.FAILED, error=str(exc)
             )
             logger.exception("Image %s failed: %s", image_id, exc)
+        else:
+            self._completed_this_generation += 1
 
         self._futures.pop(image_id, None)
 
@@ -364,6 +398,82 @@ class BatchRunner:
             self._running = False
             if self._completion_cb:
                 self._completion_cb(progress)
+
+    def _recover_from_pool_death(self) -> None:
+        """Lose the page that was running; give the rest of the queue a new pool.
+
+        A dead worker used to end the batch: `ProcessPoolExecutor` marks the
+        pool broken and every queued future raises, so on the 376-page run
+        one death at page 199 recorded 178 failures in four seconds, 177 of
+        which had never been read. The page itself was fine.
+        """
+        self._pool_generation += 1
+        outstanding = list(self._futures)
+        self._futures.clear()
+
+        # With one worker the page in flight is the earliest submitted one
+        # that has not finished. With more, this names one of the several
+        # that were running: the executor cannot tell them apart either, and
+        # charging one page is closer than charging the whole queue.
+        victim = next(
+            (image_id for image_id in self._submission_order if image_id in outstanding),
+            None,
+        )
+        if victim is not None:
+            outstanding.remove(victim)
+            self._state.update_status(
+                victim,
+                JobStatus.FAILED,
+                error="The worker processing this image died, which stopped the "
+                      "pool. Other images were not affected.",
+            )
+            record = self._state.get(victim)
+            if record is not None:
+                self._emit_job(victim, record.image_path, JobStatus.FAILED)
+            logger.error("Worker died on %s; rebuilding the pool", victim)
+
+        if self._completed_this_generation == 0:
+            self._fruitless_rebuilds += 1
+        else:
+            self._fruitless_rebuilds = 0
+        self._completed_this_generation = 0
+
+        if not outstanding or self._fruitless_rebuilds >= self.MAX_FRUITLESS_REBUILDS:
+            self._stop_reason = (
+                f"A worker died {self._fruitless_rebuilds} times without finishing "
+                f"an image, so the run stopped with {len(outstanding)} images "
+                "unattempted."
+            ) if outstanding else (
+                "A worker died on the last image in the queue."
+            )
+            if outstanding:
+                logger.error("%s", self._stop_reason)
+            self._running = False
+            progress = self._get_progress()
+            if self._progress_cb:
+                self._progress_cb(progress)
+            if self._completion_cb:
+                self._completion_cb(progress)
+            return
+
+        self._stop_reason = ""
+        if self._executor:
+            self._executor.shutdown(wait=False)
+        self._executor = ProcessPoolExecutor(max_workers=self._pool_workers)
+        config_dict = self._config.model_dump()
+        for image_id in self._submission_order:
+            if image_id not in outstanding:
+                continue
+            record = self._state.get(image_id)
+            if record is None:
+                continue
+            future = self._executor.submit(_process_single, record.image_path, config_dict)
+            self._futures[image_id] = future
+        for image_id, future in list(self._futures.items()):
+            future.add_done_callback(
+                functools.partial(self._on_complete, image_id, self._pool_generation)
+            )
+        logger.info("Pool rebuilt; %d images requeued", len(self._futures))
 
     def _emit_job(self, image_id: str, image_path: str, status: JobStatus) -> None:
         if self._job_cb is None:
@@ -454,6 +564,7 @@ class BatchRunner:
             status_by_image={
                 record.image_path: record.status.value for record in records.values()
             },
+            stop_reason=self._stop_reason,
         )
 
     @property
