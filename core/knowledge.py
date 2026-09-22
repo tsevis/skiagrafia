@@ -14,6 +14,13 @@ class KnowledgeDomain(BaseModel):
     name: str = ""
     description: str = ""
     exclusions: list[str] = Field(default_factory=list)
+    #: When true, the objects listed here are the only terms a model may
+    #: propose. A run without a guide produced 626 distinct labels over one
+    #: book, 65% of them used once: `screen`, `computer screen` and
+    #: `screens` each became a layer of their own. Aliases already collapse
+    #: onto a canonical term; this refuses the ones nothing knows about,
+    #: and names them. Off by default: an existing guide behaves as before.
+    closed_vocabulary: bool = False
 
 
 class BatchGuideDefaults(BaseModel):
@@ -65,6 +72,16 @@ class KnowledgePack(BaseModel):
     @property
     def name(self) -> str:
         return self.domain.name or Path(self.path).stem
+
+    def admits(self, label: str) -> bool:
+        """Whether a model may propose this term.
+
+        An open guide admits anything; a closed one admits only what it
+        can resolve to one of its objects.
+        """
+        if not self.domain.closed_vocabulary:
+            return True
+        return self.find_object(label) is not None
 
     def find_object(self, label: str) -> ObjectKnowledge | None:
         wanted = label.strip().lower()
