@@ -67,6 +67,10 @@ markers = [
     "gui_integration: full real-window integration test; excluded from the default and smoke runs",
 ]
 
+[project.scripts]
+# The GUI is main.py; this is the same pipeline without a window.
+skiagrafia = "cli:main"
+
 [tool.ruff]
 # scripts/verify.sh runs `ruff check .` as a gate.  Without this section ruff
 # falls back to whatever config the machine happens to carry, so the gate
