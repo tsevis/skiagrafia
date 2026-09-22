@@ -4,7 +4,7 @@
 >
 > A desktop application for AI-powered image segmentation, masking, and vectorization.
 
-[![Version](https://img.shields.io/badge/version-0.5.0-blue.svg)](https://github.com/tsevis/skiagrafia)
+[![Version](https://img.shields.io/badge/version-0.6.0-blue.svg)](https://github.com/tsevis/skiagrafia)
 [![Python](https://img.shields.io/badge/python-3.13-blue.svg)](https://www.python.org/downloads/)
 [![Platform](https://img.shields.io/badge/platform-macOS%20Apple%20Silicon-lightgrey.svg)](https://support.apple.com/en-us/116943)
 [![Architecture](https://img.shields.io/badge/architecture-v5.2-orange.svg)](FILE_STRUCTURE.md)
@@ -39,6 +39,10 @@ llama-server -hf Qwen/Qwen3-VL-8B-Instruct-GGUF:Q4_K_M --port 8080 -c 8192
 
 # Run the application
 ./run.sh
+
+# …or run a folder without a window
+skiagrafia PAGES --output OUT --limit 3     # rehearse on three images first
+skiagrafia PAGES --output OUT --detach      # then the whole folder
 ```
 
 On first launch, a **setup wizard** checks for the core fallback weights
@@ -106,6 +110,10 @@ Skiagrafia addresses a common challenge in design and production workflows: conv
 - Saved batch setups for editable reruns
 - Template system for reusable configurations
 - Progress tracking and error recovery
+- Output separated by format: `svg/` and `tiff/` under each run
+- Runs resume: images already finished are skipped on a re-run
+- A dead worker costs the image it was holding, not the rest of the queue
+- A command line for the same pipeline, with no window
 
 ### ML Pipeline (10-step)
 
@@ -122,6 +130,9 @@ Skiagrafia addresses a common challenge in design and production workflows: conv
 - Canonical names, aliases, detector phrases, and child parts per object
 - Live TOML preview as you edit
 - Batch defaults (preferred VLM, tiling, fallback chain) per domain
+- `closed_vocabulary` makes the listed objects the only terms a model may
+  propose; anything else is refused and named, rather than dropped quietly
+- Aliases name an object, generic terms and detector phrases only find it
 
 ### Technical
 
@@ -299,7 +310,37 @@ Hugging Face cache.
 6. **Output** — review SVG/layer metrics and foreground `all-objects` TIFFs,
    export either bundle to a chosen folder, and retry only failed inputs
 
-See the [User Manual](docs/MANUAL.md) for a full walkthrough of both modes.
+### Command Line
+
+The same pipeline with no window, for folders too large to sit in front of.
+
+```bash
+skiagrafia PAGES --output OUT [options]
+```
+
+| Option | What it does |
+| --- | --- |
+| `--labels a,b` | separate these labels. Omit it and the VLM is asked what is in each image |
+| `--guide g.toml` | a Domain Guide naming the objects and their terms |
+| `--limit N` | process only the first N images |
+| `--detach` | run in a session of its own and print the process id |
+| `--output-mode` | what a run produces (default `vector+bitmap`) |
+| `--quiet` | errors only |
+
+**Rehearse before you commit.** `--limit 3` costs minutes and is how most
+faults in a long run are found — a label set that comes back empty, a guide
+that refuses more than expected, a layer count far from what you wanted.
+
+**Runs resume.** Images already finished in the destination are skipped, so
+re-running after an interruption picks up where it stopped. Exit codes: `0`
+clean, `1` the run lost images, `2` nothing had a label to separate.
+
+**Long runs want `--detach`.** It uses a double fork and `setsid` rather than
+`nohup`, which only ignores SIGHUP: a terminal torn down as a process group
+takes its jobs with it.
+
+See the [User Manual](docs/MANUAL.md) for a full walkthrough of the windowed
+modes.
 
 ---
 

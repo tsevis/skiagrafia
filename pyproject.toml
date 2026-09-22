@@ -1,6 +1,6 @@
 [project]
 name = "skiagrafia"
-version = "0.5.0"
+version = "0.6.0"
 description = "Semantic vectorizing & masking creator"
 requires-python = ">=3.13,<3.14"
 dependencies = [
@@ -46,8 +46,10 @@ requires = ["setuptools>=68.0"]
 build-backend = "setuptools.build_meta"
 
 [tool.setuptools]
-# Flat layout: the launcher is a top-level module, not inside a package.
-py-modules = ["main"]
+# Flat layout: the launchers are top-level modules, not inside a package.
+# `cli` must be here or the console script this project installs cannot
+# import it -- the command exists and fails on its first line.
+py-modules = ["main", "cli"]
 
 [tool.setuptools.packages.find]
 # Declared explicitly — auto-discovery cannot tell the source packages apart
