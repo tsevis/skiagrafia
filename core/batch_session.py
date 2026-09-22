@@ -177,6 +177,21 @@ def load_processing_snapshot(path: str | Path) -> BatchProcessingSnapshot:
     )
 
 
+def partition_by_labelled(
+    labels_by_image: dict[str, list[str]],
+) -> tuple[list[str], list[str]]:
+    """Split images into those triage left with labels, and those it did not.
+
+    Triage intersects the approved labels with each image's own candidates,
+    so an image can come out of it with an empty list. Freezing that list
+    into a run made the image fail later, one worker and one model load
+    after the fact, for something knowable before the run began.
+    """
+    labelled = [path for path, labels in labels_by_image.items() if labels]
+    bare = [path for path, labels in labels_by_image.items() if not labels]
+    return labelled, bare
+
+
 def triage_labels_for_image(
     candidates: list[dict[str, Any]],
     approved_labels: list[str],

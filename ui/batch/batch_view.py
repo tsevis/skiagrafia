@@ -1,11 +1,14 @@
 from __future__ import annotations
 
+import logging
 import tkinter as tk
 from pathlib import Path
 from tkinter import ttk
 from typing import TYPE_CHECKING, ClassVar, cast
 
 from ui.container_utils import unpack_children
+
+logger = logging.getLogger(__name__)
 
 if TYPE_CHECKING:
     from core.batch_runner import BatchConfig
@@ -361,6 +364,7 @@ class BatchView:
         from core.batch_runner import BatchConfig
         from core.batch_session import (
             BatchProcessingSnapshot,
+            partition_by_labelled,
             write_processing_snapshot,
         )
 
@@ -374,6 +378,27 @@ class BatchView:
             labels, selections = self.labels_for_image(image_path)
             labels_by_image[image_path] = labels
             selections_by_image[image_path] = selections
+
+        # An image whose approved labels do not appear among its own
+        # candidates comes out of Triage with nothing. Freezing it anyway
+        # made it fail a worker and a model load later, for something
+        # knowable here.
+        image_paths, without_labels = partition_by_labelled(labels_by_image)
+        if not image_paths:
+            raise ValueError(
+                "No image has any of the confirmed labels among its own "
+                "candidates. Confirm a label that Interrogate actually found."
+            )
+        if without_labels:
+            logger.info(
+                "%d of %d images have none of the confirmed labels and are "
+                "left out of this run: %s",
+                len(without_labels), len(labels_by_image),
+                ", ".join(Path(p).name for p in without_labels[:5]),
+            )
+            for image_path in without_labels:
+                labels_by_image.pop(image_path, None)
+                selections_by_image.pop(image_path, None)
 
         prefs = self.app.prefs
         quality = {
