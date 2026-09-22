@@ -1,10 +1,10 @@
 # Skiagrafia — File Structure
 
-> **v0.5.0 · Python 3.13 · Apple Silicon**
+> **v0.6.0 · Python 3.13 · Apple Silicon**
 >
 > A local semantic vectorizing and masking desktop application.
 
-[![Version](https://img.shields.io/badge/version-0.5.0-blue.svg)](https://github.com/tsevis/skiagrafia)
+[![Version](https://img.shields.io/badge/version-0.6.0-blue.svg)](https://github.com/tsevis/skiagrafia)
 [![Python](https://img.shields.io/badge/python-3.13-blue.svg)](https://www.python.org/downloads/)
 [![Platform](https://img.shields.io/badge/platform-macOS%20Apple%20Silicon-lightgrey.svg)](https://support.apple.com/en-us/116943)
 [![Architecture](https://img.shields.io/badge/architecture-v5.2-orange.svg)](README.md#architecture)
@@ -27,7 +27,8 @@ instructions.
 ```text
 skiagrafia/
 ├── main.py                         # Application bootstrap and Tk root
-├── pyproject.toml                  # v0.5.0 metadata, Python/runtime dependencies
+├── cli.py                          # Headless batch: the same pipeline, no window
+├── pyproject.toml                  # v0.6.0 metadata, Python/runtime dependencies
 ├── uv.lock                         # Locked Python 3.13 dependency resolution
 ├── run.sh                          # Validates and launches .venv/bin/python
 ├── scripts/
@@ -41,6 +42,7 @@ skiagrafia/
 │   ├── orchestrator.py             # Single-image structural pipeline and outputs
 │   ├── pipeline_results.py         # Source, layer and run result models
 │   ├── pipeline_geometry.py        # Pure mask/bbox maths and filename-safe labels
+│   ├── output_layout.py            # One folder per format under a run's root
 │   ├── interrogation.py            # VLM candidates and selection policy
 │   ├── typography_labels.py        # Does a label name typography, or single glyphs
 │   ├── typography_matching.py      # Semantic glyphs matched to detector boxes
@@ -52,7 +54,8 @@ skiagrafia/
 │   ├── layer_editing.py            # Layer edits plus all-objects TIFF recomposition
 │   ├── preset_library.py           # Bundled preset discovery
 │   └── presets/
-│       └── apple_the_first_50_years.toml
+│       ├── apple_the_first_50_years.toml
+│       └── apple_the_first_50_years_closed.toml   # the same, vocabulary closed
 │
 ├── models/                         # Local model adapters
 │   ├── vlm_client.py               # Ollama and existing llama.cpp HTTP clients
