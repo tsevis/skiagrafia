@@ -14,6 +14,13 @@ class KnowledgeDomain(BaseModel):
     name: str = ""
     description: str = ""
     exclusions: list[str] = Field(default_factory=list)
+    #: When true, the objects listed here are the only terms a model may
+    #: propose. A run without a guide produced 626 distinct labels over one
+    #: book, 65% of them used once: `screen`, `computer screen` and
+    #: `screens` each became a layer of their own. Aliases already collapse
+    #: onto a canonical term; this refuses the ones nothing knows about,
+    #: and names them. Off by default: an existing guide behaves as before.
+    closed_vocabulary: bool = False
 
 
 class BatchGuideDefaults(BaseModel):
@@ -66,12 +73,45 @@ class KnowledgePack(BaseModel):
     def name(self) -> str:
         return self.domain.name or Path(self.path).stem
 
+    def admits(self, label: str) -> bool:
+        """Whether a model may propose this term.
+
+        An open guide admits anything; a closed one admits only what it
+        can resolve to one of its objects.
+        """
+        if not self.domain.closed_vocabulary:
+            return True
+        return self.find_object(label) is not None
+
     def find_object(self, label: str) -> ObjectKnowledge | None:
+        """The object this label NAMES, or None.
+
+        Only the canonical term and its aliases name a thing. Generic terms
+        and detector phrases say how to FIND it -- "to locate Steve Jobs,
+        look for a person" -- and matching on those turned every observed
+        `man` and `person` into a specific named individual. The book saw
+        those two words 107 times.
+        """
         wanted = label.strip().lower()
         for obj in self.objects:
-            if obj.canonical.lower() == wanted:
+            names = {obj.canonical.strip().lower()}
+            names.update(alias.strip().lower() for alias in obj.aliases)
+            if wanted in names:
                 return obj
-            if wanted in {term.lower() for term in obj.all_terms()}:
+        return None
+
+    def find_detection_hints(self, label: str) -> ObjectKnowledge | None:
+        """The object whose detector phrases suit this label, or None.
+
+        Wider than `find_object`: a generic term or detector phrase counts
+        here. Someone who observes "computer" should get the detector the
+        richer phrases an Apple computer entry carries, while the layer
+        keeps the name they actually used. An author who wants a term to
+        name as well as find lists it under `aliases`.
+        """
+        wanted = label.strip().lower()
+        for obj in self.objects:
+            if wanted in {term.strip().lower() for term in obj.all_terms()}:
                 return obj
         return None
 

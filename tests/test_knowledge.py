@@ -139,10 +139,16 @@ class TestKnowledgePackFindObject:
         pack = self._pack()
         assert pack.find_object("cup") is not None
 
-    def test_matches_generic_term_or_detector_phrase(self) -> None:
+    def test_a_generic_term_finds_the_object_without_naming_it(self) -> None:
+        # Aliases name a thing; generic terms and detector phrases say how
+        # to locate it. Matching those when naming turned every observed
+        # "man" into "Steve Jobs". An author who wants a term to do both
+        # lists it under aliases.
         pack = self._pack()
-        assert pack.find_object("drinking vessel") is not None
-        assert pack.find_object("ornate cup") is not None
+        assert pack.find_object("drinking vessel") is None
+        assert pack.find_object("ornate cup") is None
+        assert pack.find_detection_hints("drinking vessel") is not None
+        assert pack.find_detection_hints("ornate cup") is not None
 
     def test_returns_none_when_nothing_matches(self) -> None:
         pack = self._pack()

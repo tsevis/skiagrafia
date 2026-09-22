@@ -793,6 +793,14 @@ class Orchestrator(DetectionPolicyMixin):
             interrogation.confidence_summary,
             [candidate.display_label for candidate in interrogation.candidates],
         )
+        turned_away = list(getattr(interrogation, "labels_outside_vocabulary", []))
+        if turned_away:
+            # A closed Domain Guide refused these. Named here because the
+            # person reads the run's warnings, not the interrogation result.
+            result.warnings.append(
+                "The Domain Guide does not list these terms, so they were not "
+                f"separated: {', '.join(turned_away)}."
+            )
         if getattr(interrogation, "vision_unavailable", False):
             # Recorded here rather than left to the "no masks" message below,
             # which advises reviewing a prompt that was never delivered. On a

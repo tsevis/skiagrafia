@@ -49,6 +49,10 @@ class InterrogationResult(BaseModel):
     #: was down. False whenever at least one model answered, including when it
     #: answered with nothing.
     vision_unavailable: bool = False
+    #: Terms a model proposed that a closed Domain Guide does not list.
+    #: Reported rather than dropped in silence: a label asked for and not
+    #: delivered is exactly the gap this application promises to name.
+    labels_outside_vocabulary: list[str] = Field(default_factory=list)
 
 
 @dataclass
