@@ -335,9 +335,6 @@ class TestStartSuccessPath:
             "avg_layers": 1.0,
             "failed_image_paths": [],
             "status_by_image": {str(image_path): "complete"},
-            # Empty unless the run ended for a reason that is not the
-            # images' fault -- a worker that kept dying, say.
-            "stop_reason": "",
         }
         assert calls[0][1]["labels_by_image"] == {
             str(image_path): ["Apple computer"]
