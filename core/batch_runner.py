@@ -18,7 +18,7 @@ from pathlib import Path
 from pydantic import BaseModel, Field
 
 from core.factory import build_capabilities, build_knowledge_pack
-from core.orchestrator import Orchestrator, PipelineResult
+from core.orchestrator import Orchestrator, PipelineResult, peak_resident_mb
 from core.state_manager import JobRecord, JobStatus, StateManager
 
 logger = logging.getLogger(__name__)
@@ -135,7 +135,15 @@ def _process_single(
     orchestrator = _worker_orchestrator(json.dumps(config_dict, sort_keys=True))
     selections = config_dict.get("selections_by_image", {}).get(image_path, {})
     orchestrator.set_confirmed_selections(selections)
-    return orchestrator.process(image_path, labels)
+    result = orchestrator.process(image_path, labels)
+    # Measured in the worker, because the worker is where the memory is.
+    # After it dies this is the only evidence of how large it had grown.
+    result.worker_peak_rss_mb = peak_resident_mb()
+    logger.info(
+        "%s finished in a worker holding %.0f MB",
+        Path(image_path).name, result.worker_peak_rss_mb,
+    )
+    return result
 
 
 @functools.lru_cache(maxsize=1)
@@ -233,6 +241,7 @@ class BatchRunner:
         self._pool_generation = 0
         self._submission_order: list[str] = []
         self._completed_this_generation = 0
+        self._last_worker_rss_mb: float | None = None
         self._fruitless_rebuilds = 0
         self._stop_reason = ""
         self._closed_summary: BatchRunSummary | None = None
@@ -408,6 +417,9 @@ class BatchRunner:
             logger.exception("Image %s failed: %s", image_id, exc)
         else:
             self._completed_this_generation += 1
+            reported = getattr(result, "worker_peak_rss_mb", None)
+            if reported:
+                self._last_worker_rss_mb = reported
 
         self._futures.pop(image_id, None)
 
@@ -464,11 +476,19 @@ class BatchRunner:
         )
         if victim is not None:
             outstanding.remove(victim)
+            footprint = (
+                f"it was holding {self._last_worker_rss_mb:.0f} MB after "
+                f"{self._completed_this_generation} images"
+                if self._last_worker_rss_mb
+                else "its size is not known: no image finished in it"
+            )
             self._state.update_status(
                 victim,
                 JobStatus.FAILED,
-                error="The worker processing this image died, which stopped the "
-                      "pool. Other images were not affected.",
+                error=(
+                    "The worker processing this image died, which stopped the "
+                    f"pool; {footprint}. Other images were not affected."
+                ),
             )
             record = self._state.get(victim)
             if record is not None:
@@ -480,6 +500,7 @@ class BatchRunner:
         else:
             self._fruitless_rebuilds = 0
         self._completed_this_generation = 0
+        self._last_worker_rss_mb = None
 
         if not outstanding or self._fruitless_rebuilds >= self.MAX_FRUITLESS_REBUILDS:
             self._stop_reason = (

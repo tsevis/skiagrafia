@@ -55,6 +55,21 @@ from utils.security import SecurityError
 logger = logging.getLogger(__name__)
 
 
+def peak_resident_mb() -> float:
+    """Peak resident memory of this process, in MB.
+
+    `resource` is stdlib; psutil is not a declared dependency of this
+    project. ru_maxrss is bytes on macOS and kilobytes on Linux, which is
+    a documented difference and not a guess.
+    """
+    import resource
+    import sys as _sys
+
+    peak = resource.getrusage(resource.RUSAGE_SELF).ru_maxrss
+    return peak / (1024 * 1024) if _sys.platform == "darwin" else peak / 1024
+
+
+
 
 MIN_CHILD_COVERAGE_PCT = 0.5
 # Parts are model suggestions, so use a stricter SAM 3 acceptance threshold.
