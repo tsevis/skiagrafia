@@ -214,6 +214,9 @@ class BatchRunner:
         self._image_paths: list[Path] = []
         self._image_ids: dict[str, str] = {}
         self._start_time: float = 0.0
+        # What was already finished when this run began: a resume must not
+        # count a previous attempt's pages as work it did.
+        self._done_before_run = 0
         self._executor: ProcessPoolExecutor | None = None
         self._futures: dict[str, Future] = {}
         self._running = False
@@ -287,6 +290,12 @@ class BatchRunner:
 
         self._running = True
         self._start_time = time.time()
+        counts = self._state.count_by_status()
+        self._done_before_run = (
+            counts.get(JobStatus.COMPLETE, 0)
+            + counts.get(JobStatus.FAILED, 0)
+            + counts.get(JobStatus.SKIPPED, 0)
+        )
         config_dict = self._config.model_dump()
 
         # The model stages share one GPU; parallel model replicas multiply
@@ -491,8 +500,16 @@ class BatchRunner:
         done = completed + failed + counts.get(JobStatus.SKIPPED, 0)
         remaining = total - done
 
+        # Rate this run's own work, not the work it inherited. A resume
+        # counts every page a previous attempt finished as done the moment
+        # it starts; dividing all of them by the seconds since start made
+        # the 178-page resume report 8.9 pages/min and 8 minutes left while
+        # it was really doing 2.15 pages/min with 34 minutes to go.
+        progressed = max(0, done - self._done_before_run)
         elapsed = time.time() - self._start_time
-        rate = done / elapsed * 60 if elapsed > 0 else 0.0
+        rate = progressed / elapsed * 60 if elapsed > 0 else 0.0
+        # No estimate until this run has finished something. A number
+        # derived from no measurement is worse than no number.
         eta = remaining / (rate / 60) if rate > 0 else 0.0
 
         return BatchProgress(
