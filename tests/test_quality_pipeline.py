@@ -226,7 +226,11 @@ def test_existing_transparency_is_preserved_in_export(tmp_path) -> None:
         pixels = np.asarray(rgba)
         assert pixels[20, 20, 3] == 160
         assert pixels[0, 0, 3] == 0
-        assert np.array_equal(pixels[..., :3], rgb[..., :3])
+        # Colour is kept under the object and for a bleed margin around it,
+        # and cleared beyond, so the compression has something to work with.
+        # See processors.output_writer.COLOUR_BLEED_PIXELS.
+        assert np.array_equal(pixels[12:50, 12:50, :3], rgb[12:50, 12:50, :3])
+        assert pixels[0, 0, :3].tolist() == [0, 0, 0]
 
 
 def test_local_backend_routes_primary_and_fallback_independently() -> None:
