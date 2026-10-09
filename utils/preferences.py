@@ -11,16 +11,53 @@ logger = logging.getLogger(__name__)
 
 _CONFIG_DIR = Path.home() / ".config" / "skiagrafia"
 
-# Pre-existing shared model library (development machine). When present it is
-# used as-is so models stay exactly where they are; fresh installs get a
+# Optional pre-existing model libraries. SKIAGRAFIA_EXTRA_MODEL_DIRS holds one
+# or more directories separated by os.pathsep; the first one that exists is
+# used as-is so models stay exactly where they are. Fresh installs get a
 # standard per-user app-data directory instead and can download into it.
-_SHARED_MODELS_DIR = Path.home() / "ai" / "claudecode" / "mozaix" / "models"
+# Entries must be absolute after a leading "~" is expanded; anything else is
+# skipped (see _extra_model_dirs).
+_EXTRA_MODEL_DIRS_ENV = "SKIAGRAFIA_EXTRA_MODEL_DIRS"
+
+
+def _extra_model_dirs() -> list[Path]:
+    """Return the usable directories listed in SKIAGRAFIA_EXTRA_MODEL_DIRS, in order.
+
+    This runs at import time (DEFAULT_MODELS_DIR below), so a bad entry is
+    skipped with a warning instead of raising. Skipped: "~name" for a user that
+    does not exist, and relative paths, which would resolve against whatever
+    directory the app was launched from ("/" for a Dock or Finder launch).
+    """
+    raw = os.environ.get(_EXTRA_MODEL_DIRS_ENV, "")
+    dirs: list[Path] = []
+    for part in raw.split(os.pathsep):
+        entry = part.strip()
+        if not entry:
+            continue
+        try:
+            candidate = Path(entry).expanduser()
+        except RuntimeError:
+            logger.warning(
+                "Ignoring %s entry %r: cannot expand '~'", _EXTRA_MODEL_DIRS_ENV, entry
+            )
+            continue
+        if not candidate.is_absolute():
+            logger.warning(
+                "Ignoring %s entry %r: not an absolute path", _EXTRA_MODEL_DIRS_ENV, entry
+            )
+            continue
+        dirs.append(candidate)
+    return dirs
 
 
 def _default_models_dir() -> Path:
     """Resolve the default model library path for this machine."""
-    if _SHARED_MODELS_DIR.is_dir():
-        return _SHARED_MODELS_DIR
+    for candidate in _extra_model_dirs():
+        try:
+            if candidate.is_dir():
+                return candidate
+        except OSError as exc:  # e.g. PermissionError under an unreadable parent
+            logger.warning("Ignoring %s entry %s: %s", _EXTRA_MODEL_DIRS_ENV, candidate, exc)
     if sys.platform == "darwin":
         return Path.home() / "Library" / "Application Support" / "skiagrafia" / "models"
     return Path.home() / ".local" / "share" / "skiagrafia" / "models"
@@ -43,7 +80,7 @@ DEFAULT_PREFERENCES: dict[str, Any] = {
     # llama.cpp serves whatever model it was launched with; this name is
     # informational (shown in logs / sent in the request "model" field).
     "llamacpp_model": "Qwen3-VL-8B-Instruct",
-    "models_directory": "",  # empty = use default ~/ai/claudecode/mozaix/models
+    "models_directory": "",  # empty = use the default model library (DEFAULT_MODELS_DIR)
     "preferred_fallback_vlm": "gemma4:e4b",
     "preferred_text_reasoner": "gemma4:e4b",
     "local_primary_model": "Qwen3-VL-8B-Instruct",
@@ -167,8 +204,9 @@ def save_preferences(prefs: dict[str, Any]) -> None:
 def get_models_dir(prefs: dict[str, Any] | None = None) -> Path:
     """Resolve the model library directory from preferences.
 
-    Returns the user-configured path if set, otherwise the default
-    ~/ai/claudecode/mozaix/models. Existing setups without the
+    Returns the user-configured path if set, otherwise the default model
+    library (the first existing directory in SKIAGRAFIA_EXTRA_MODEL_DIRS, else
+    the per-user app-data directory). Existing setups without the
     models_directory key behave identically to v4.0.
     """
     if prefs is None:

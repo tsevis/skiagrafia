@@ -45,10 +45,15 @@ skiagrafia PAGES --output OUT --limit 3     # rehearse on three images first
 skiagrafia PAGES --output OUT --detach      # then the whole folder
 ```
 
-On first launch, a **setup wizard** checks for the core fallback weights
-(GroundingDINO, SAM 2.1, VitMatte and Grounded-SAM-2 source) and downloads
-them into the models directory with one click. Machines that already have
-them skip the wizard. MLX SAM 3 is an optional, separately verified local
+When the app starts (`./run.sh` or `main.py`; the `skiagrafia` command has
+no wizard), a **setup wizard** opens if a required component is missing or
+the check cannot complete: the core fallback weights (GroundingDINO, SAM 2.1,
+VitMatte and Grounded-SAM-2 source), the selected VLM backend, or a required
+Ollama model. Its **Download missing** button fetches the missing registry
+weights into the models directory (never the local backend's GGUF files)
+and, on the Ollama backend, also pulls the missing required and
+recommended Ollama models (see [Model licences](#model-licences)). Machines
+that already have every required component skip the wizard. MLX SAM 3 is an optional, separately verified local
 bundle; its exact on-disk layout is described under [Model Weights](#model-weights).
 
 📖 **New here? Read the [User Manual](docs/MANUAL.md).**
@@ -69,13 +74,14 @@ bundle; its exact on-disk layout is described under [Model Weights](#model-weigh
 10. [Output Formats](#output-formats)
 11. [API Reference](#api-reference)
 12. [Troubleshooting](#troubleshooting)
-13. [License](#license)
+13. [Model licences](#model-licences)
+14. [License](#license)
 
 ---
 
 ## Overview
 
-Skiagrafia addresses a common challenge in design and production workflows: converting raster images into clean, layered vector artwork with precise masks. Traditional approaches require manual tracing and masking — time-consuming and error-prone. Skiagrafia automates the process with state-of-the-art machine learning models running entirely on your machine.
+Skiagrafia addresses a common challenge in design and production workflows: converting raster images into clean, layered vector artwork with precise masks. Traditional approaches require manual tracing and masking — time-consuming and error-prone. Skiagrafia automates the process with machine learning models running on your machine.
 
 ### Key Capabilities
 
@@ -215,6 +221,21 @@ If the bundle is absent or fails to initialize, Skiagrafia reports the
 condition and uses GroundingDINO + SAM 2.1 instead. MLX SAM 3 currently
 requires the locked `mlx==0.31.2` runtime contract.
 
+**Default models folder.** Earlier versions used a shared model library from
+a fixed location on the author's machine whenever it existed; that lookup is
+gone. The default is now `~/Library/Application Support/skiagrafia/models/`
+(macOS) or `~/.local/share/skiagrafia/models/` (Linux), unless
+`SKIAGRAFIA_EXTRA_MODEL_DIRS` lists an existing directory: one or more
+absolute paths (a leading `~` is expanded) separated by `:`, the first that
+exists wins, and relative, unresolvable or unreadable entries are
+ignored with a log warning. To keep using an existing library, choose it in Preferences → Models
+(saved in the preferences file, takes precedence over the variable, and works
+for an app started from the Dock or Finder) or export the variable before
+`./run.sh`. A Dock or Finder launch does not read shell profiles such as
+`~/.zshrc`; for that case set the variable for the login session with
+`launchctl setenv SKIAGRAFIA_EXTRA_MODEL_DIRS <directory>` and then start the
+app.
+
 ---
 
 ## Installation
@@ -257,8 +278,9 @@ llama-server -hf Qwen/Qwen3-VL-8B-Instruct-GGUF:Q4_K_M --port 8080 -c 8192
 
 The setup wizard opens automatically **only if something is missing**: it
 lists every required component with its size, downloads the weights, and can
-pull the Ollama models. The models directory defaults to an existing shared
-library when one is present, otherwise
+pull the Ollama models. The models directory defaults to the first existing
+directory in `SKIAGRAFIA_EXTRA_MODEL_DIRS` (see [Model Weights](#model-weights))
+when that variable is set, otherwise
 `~/Library/Application Support/skiagrafia/models/` — configurable in
 Preferences → Models.
 
@@ -627,6 +649,90 @@ export DYLD_FALLBACK_LIBRARY_PATH="/opt/homebrew/lib"
 
 Install `tkinterdnd2` (`pip install tkinterdnd2`); the app falls back to
 click-to-browse when it is unavailable.
+
+---
+
+## Model licences
+
+This repository contains no model weights. Each model below is a separate work
+under its own terms, which are not covered by the MIT licence of this code. The
+table records what each linked source states, read on 2026-10-09. It is
+information, not legal advice: read the full text before commercial use or ask
+the authors.
+
+| Model | What Skiagrafia uses it for | Licence as the source states it | Source |
+|---|---|---|---|
+| Qwen2.5-VL 3B Instruct (`qwen2.5vl:3b`) | Default primary VLM on the Ollama backend; required by the setup wizard (`core/factory.py`, `utils/bootstrap.py`) | Upstream: Qwen Research License Agreement ("Non-Commercial" means "research or evaluation purposes only"). Ollama licence file: Apache License 2.0. Not settled, see notes | [Hugging Face LICENSE](https://huggingface.co/Qwen/Qwen2.5-VL-3B-Instruct/blob/main/LICENSE), [Ollama](https://ollama.com/library/qwen2.5vl:3b) |
+| Gemma 4 E4B (`gemma4:e4b`) | Default fallback VLM and text reasoner on the Ollama backend; recommended by the wizard (`core/factory.py`, `utils/bootstrap.py`) | Apache-2.0 | [Hugging Face card](https://huggingface.co/google/gemma-4-E4B-it), [Gemma 4 licence](https://ai.google.dev/gemma/docs/gemma_4_license), [Ollama](https://ollama.com/library/gemma4:e4b) |
+| Gemma 4 12B (`gemma4:12b`) | Ollama tag that `core/factory.py` maps to `gemma-4-12B-it` on the local backend; on Ollama only if typed in Preferences | Apache License 2.0 (Ollama licence file) | [Ollama](https://ollama.com/library/gemma4:12b), [Hugging Face card](https://huggingface.co/google/gemma-4-12B-it) |
+| MiniCPM-V 2.6 (`minicpm-v`) | Second fallback VLM on the Ollama backend, always in the fallback pool; recommended by the wizard; offered in the model lists, but a saved `minicpm-v` Ollama fallback VLM is replaced by `gemma4:e4b` whenever preferences load (`core/factory.py`, `utils/bootstrap.py`, `utils/preferences.py`) | Ollama licence file: MiniCPM Model Community License, which says community use "must comply with Apache 2.0 and the 'MiniCPM Model Community License Agreement'". Hugging Face card: code Apache-2.0, weights under the MiniCPM Model License; the Hugging Face repository is gated (automatic approval) | [Ollama](https://ollama.com/library/minicpm-v), [Hugging Face card](https://huggingface.co/openbmb/MiniCPM-V-2_6) |
+| Moondream (`moondream`) | Selectable in the Ollama model name, fallback VLM and batch text reasoner lists (`ui/preferences/preferences_window.py`, `ui/preferences/guide_editor.py`, `ui/batch/steps/step_configure.py`); a saved `moondream` Ollama model name is replaced by `qwen2.5vl:3b` whenever preferences load (`utils/preferences.py`) | apache-2.0 (Hugging Face); Apache License 2.0 (Ollama licence file) | [Hugging Face card](https://huggingface.co/vikhyatk/moondream2), [Ollama](https://ollama.com/library/moondream) |
+| LLaVA 1.6 7B, Mistral base (`llava:7b`) | Offered in `ui/batch/steps/step_configure.py`, `ui/preferences/guide_editor.py` and `ui/preferences/preferences_window.py` | Apache License 2.0 (Ollama licence file); apache-2.0 (Hugging Face card of the Mistral variant) | [Ollama tags](https://ollama.com/library/llava/tags), [Hugging Face card](https://huggingface.co/liuhaotian/llava-v1.6-mistral-7b), [LLaVA README](https://github.com/haotian-liu/LLaVA/blob/main/README.md) |
+| Llama-Krikri 8B Instruct (`ilsp/llama-krikri-8b-instruct`) | Offered in the Ollama text reasoner list (`ui/preferences/preferences_window.py`) | llama3.1 (Hugging Face card); the Ollama tag has no licence file | [Hugging Face card](https://huggingface.co/ilsp/Llama-Krikri-8B-Instruct), [Ollama](https://ollama.com/ilsp/llama-krikri-8b-instruct) |
+| Qwen3-VL 8B Instruct GGUF | Primary VLM on the app-managed local backend (`models/local_vlm.py`); the model of the `llama-server -hf` example above | Apache-2.0 | [Hugging Face card](https://huggingface.co/Qwen/Qwen3-VL-8B-Instruct-GGUF) |
+| gemma-4-12B-it GGUF (`ggml-org/gemma-4-12B-it-GGUF`) | Fallback VLM and text reasoner on the app-managed local backend (`models/local_vlm.py`) | Apache-2.0 | [Hugging Face card](https://huggingface.co/ggml-org/gemma-4-12B-it-GGUF) |
+| SAM 2.1 Hiera Large | Fallback segmentation (`models/grounded_sam.py`); wizard download (`utils/model_manager.py`) | Apache-2.0 | [SAM 2 README](https://github.com/facebookresearch/sam2/blob/main/README.md), [Hugging Face card](https://huggingface.co/facebook/sam2.1-hiera-large) |
+| SAM 3, local MLX bundle | Primary segmentation when Segmentation is `mlx-sam3`, or `auto` and `mlx_sam3/sam3-mod-weights/model.safetensors` exists in the models directory (`core/factory.py`, `models/mlx_sam3.py`); never downloaded | SAM License (Meta); the Hugging Face repository is gated | [SAM 3 LICENSE](https://github.com/facebookresearch/sam3/blob/main/LICENSE), [Hugging Face](https://huggingface.co/facebook/sam3) |
+| GroundingDINO SwinT-OGC | Fallback detection (`models/grounded_sam.py`); wizard download (`utils/model_manager.py`) | apache-2.0; the card lists the datasets COCO and Conceptual Captions | [Hugging Face checkpoint repo](https://huggingface.co/ShilongLiu/GroundingDINO), [GitHub](https://github.com/IDEA-Research/GroundingDINO) |
+| Grounded-SAM-2 (code and configs) | Source archive the wizard unpacks; `models/grounded_sam.py` imports its `grounding_dino` and `sam2` code | Apache-2.0 | [GitHub LICENSE](https://github.com/IDEA-Research/Grounded-SAM-2/blob/main/LICENSE) |
+| ViTMatte base, Composition-1k | Alpha matting (`models/vitmatte_refiner.py`); wizard download (`utils/model_manager.py`) | apache-2.0 (Hugging Face card) | [Hugging Face card](https://huggingface.co/hustvl/vitmatte-base-composition-1k) |
+| bert-base-uncased | Text encoder of GroundingDINO, named by the Grounded-SAM-2 config and loaded through `transformers` from the Hugging Face cache | apache-2.0 | [Hugging Face card](https://huggingface.co/google-bert/bert-base-uncased) |
+
+Notes:
+
+- **How models arrive.** The setup wizard downloads the four registry weights
+  (`utils/model_manager.py`: SAM 2.1, GroundingDINO, Grounded-SAM-2,
+  ViTMatte) and, on the Ollama backend only, pulls the missing models in
+  `REQUIRED_OLLAMA_MODELS` and `RECOMMENDED_OLLAMA_MODELS`
+  (`utils/bootstrap.py`) plus the Ollama models set in Preferences.
+  Preferences > Models > Download missing is a second route for the registry
+  weights only. On the local backend the app never downloads the GGUF and
+  mmproj files (mmproj is the vision projector); it reads them from
+  `~/.cache/huggingface/hub` (`HF_HOME` and `HF_HUB_CACHE` are not
+  consulted).
+- **gemma-4-12B-it file.** The code accepts `gemma-4-12B-it-Q4_K_M.gguf` or
+  `gemma-4-12B-it-Q4_0.gguf`. ggml-org deleted the Q4_K_M file from its
+  repository on 2026-07-16; a fresh download has Q4_0.
+- **Qwen2.5-VL 3B.** The upstream text is non-commercial and asks commercial
+  users to request a licence from Alibaba Cloud; the Ollama build ships an
+  Apache 2.0 file. Which one governs the Ollama build is not settled.
+- **MiniCPM-V.** Clause 3 of the Ollama licence file: deployments on no more
+  than 5,000 edge devices, or applications with fewer than 1 million daily
+  active users, "can apply to OpenBMB for permission and, after filling out
+  the registration questionnaire, may be allowed to use it commercially for
+  free"; otherwise authorisation is requested by email and granted at
+  OpenBMB's discretion. Clause 2 requires a copy of the agreement, a
+  prominent "Built with MiniCPM" display (the text writes the name with
+  Chinese characters before it), the name "MiniCPM" in any model created,
+  trained, fine-tuned or improved with these models, the attribution
+  "MiniCPM is licensed under the MiniCPM Model Community License, (c) OpenBMB
+  Platforms, Inc. All rights reserved." (the source uses the copyright sign),
+  and forbids using the models or their outputs to improve other
+  large language models.
+- **LLaVA 7B.** Settled: on the Ollama tags page `llava:7b` has the same
+  digest as `llava:7b-v1.6-mistral-q4_0` (8dd30f6b0cb1), so it is the
+  Mistral-based 1.6 model. Not settled: the LLaVA README says checkpoints
+  remain subject to the licences of their base models and training data,
+  which this table does not review.
+- **SAM 3.** The code only shows a directory called `sam3-mod-weights`; this
+  repository does not record where a bundle came from, so its terms are those
+  of the files actually placed there.
+- **GroundingDINO.** The wizard fetches the checkpoint from the IDEA-Research
+  GitHub release; the file of the same name and byte size in
+  `ShilongLiu/GroundingDINO` is the one whose card is cited.
+- **ViTMatte.** The authors' code repository
+  [hustvl/ViTMatte](https://github.com/hustvl/ViTMatte) is under MIT.
+- **bert-base-uncased offline settings.** `run.sh` sets `HF_HUB_OFFLINE`
+  and `TRANSFORMERS_OFFLINE`, and `main.py` sets them unless they are already
+  defined, so a GUI run does not fetch it: it must already be in the Hugging
+  Face cache, and nothing in the app downloads it.
+  The `skiagrafia` command line (`cli.py`) does not set them, so
+  `transformers` may contact Hugging Face for it there.
+- **Not covered:** models a user types into the editable Ollama fields or
+  starts in their own `llama-server`; names that appear only in tests or in
+  `docs/audits/` (such as SAM 2.1 Tiny, Small and Base+ or MiniCPM-V 4.6);
+  training-data terms; and weights that other Python dependencies may fetch
+  by themselves.
 
 ---
 

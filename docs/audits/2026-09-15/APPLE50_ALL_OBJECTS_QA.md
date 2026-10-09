@@ -4,7 +4,7 @@
 
 This was a read-only review of the 25 Apple50 source images and the two
 existing Batch output folders in
-`/Users/tsevis/01CLIENTI/01 EXPERIMENTS/APPLE50 2/for test/`
+`<client-folder>/APPLE50 2/for test/`
 (`batch_without_guide` and `batch_with_guide`).  No input image or existing
 verification output was modified.
 

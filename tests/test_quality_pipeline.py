@@ -185,6 +185,16 @@ def test_managed_model_lookup_rejects_missing_files(tmp_path) -> None:
         resolve_local_model(LOCAL_PRIMARY, cache=tmp_path)
 
 
+def test_managed_gemma_accepts_the_quant_ggml_org_still_publishes(tmp_path) -> None:
+    # ggml-org deleted gemma-4-12B-it-Q4_K_M.gguf on 2026-07-16; a fresh download has Q4_0.
+    snapshot = tmp_path / "models--ggml-org--gemma-4-12B-it-GGUF" / "snapshots" / "abc"
+    snapshot.mkdir(parents=True)
+    for name in ("gemma-4-12B-it-Q4_0.gguf", "mmproj-gemma-4-12B-it-Q8_0.gguf"):
+        (snapshot / name).write_bytes(b"\0" * 1_000_001)
+    weights, projector = resolve_local_model(LOCAL_FALLBACK, cache=tmp_path)
+    assert (weights.name, projector.name) == ("gemma-4-12B-it-Q4_0.gguf", "mmproj-gemma-4-12B-it-Q8_0.gguf")
+
+
 def test_body_and_parts_recompose_without_transparent_seams() -> None:
     from core.layer_editing import body_alpha
     parent = np.array([[255, 200, 120, 0]], np.uint8)

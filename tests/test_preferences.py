@@ -6,6 +6,7 @@ the user's real ~/.config/skiagrafia is never touched.
 from __future__ import annotations
 
 import json
+import os
 import sys
 from pathlib import Path
 from typing import Any
@@ -246,14 +247,75 @@ class TestDefaultModelsDir:
     ) -> None:
         shared = tmp_path / "shared-models"
         shared.mkdir()
-        monkeypatch.setattr(preferences, "_SHARED_MODELS_DIR", shared)
+        monkeypatch.setenv("SKIAGRAFIA_EXTRA_MODEL_DIRS", str(shared))
 
         assert preferences._default_models_dir() == shared
+
+    def test_first_existing_extra_dir_wins(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
+        later = tmp_path / "later"
+        later.mkdir()
+        monkeypatch.setenv(
+            "SKIAGRAFIA_EXTRA_MODEL_DIRS",
+            os.pathsep.join([str(tmp_path / "missing"), str(later)]),
+        )
+
+        assert preferences._default_models_dir() == later
+
+    def test_unresolvable_user_entry_is_skipped(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
+        # DEFAULT_MODELS_DIR is computed at import, so a bad entry must never raise.
+        good = tmp_path / "good"
+        good.mkdir()
+        monkeypatch.setenv(
+            "SKIAGRAFIA_EXTRA_MODEL_DIRS",
+            os.pathsep.join(["~no-such-user-skiagrafia/models", str(good)]),
+        )
+
+        assert preferences._default_models_dir() == good
+
+    def test_unreadable_entry_is_skipped(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
+        # Path.is_dir() raises PermissionError (not False) when a parent is unreadable.
+        blocked = tmp_path / "blocked"
+        good = tmp_path / "good"
+        good.mkdir()
+        real_is_dir = Path.is_dir
+
+        def is_dir(self: Path, *args: Any, **kwargs: Any) -> bool:
+            if self == blocked:
+                raise PermissionError(13, "Permission denied", str(self))
+            return real_is_dir(self, *args, **kwargs)
+
+        monkeypatch.setattr(Path, "is_dir", is_dir)
+        monkeypatch.setenv(
+            "SKIAGRAFIA_EXTRA_MODEL_DIRS", os.pathsep.join([str(blocked), str(good)])
+        )
+
+        assert preferences._default_models_dir() == good
+
+    def test_relative_entry_is_ignored(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
+        # A relative entry would depend on the launch directory (/ for Dock or Finder).
+        (tmp_path / "models").mkdir()
+        monkeypatch.chdir(tmp_path)
+        monkeypatch.setenv("SKIAGRAFIA_EXTRA_MODEL_DIRS", "models")
+        monkeypatch.setattr(preferences.sys, "platform", "linux")
+        fake_home = tmp_path / "home"
+        monkeypatch.setattr(preferences.Path, "home", classmethod(lambda cls: fake_home))
+
+        result = preferences._default_models_dir()
+
+        assert result == fake_home / ".local" / "share" / "skiagrafia" / "models"
 
     def test_darwin_fallback_when_shared_dir_missing(
         self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
     ) -> None:
-        monkeypatch.setattr(preferences, "_SHARED_MODELS_DIR", tmp_path / "nope")
+        monkeypatch.setenv("SKIAGRAFIA_EXTRA_MODEL_DIRS", str(tmp_path / "nope"))
         monkeypatch.setattr(preferences.sys, "platform", "darwin")
         fake_home = tmp_path / "home"
         monkeypatch.setattr(preferences.Path, "home", classmethod(lambda cls: fake_home))
@@ -265,7 +327,7 @@ class TestDefaultModelsDir:
     def test_linux_fallback_when_shared_dir_missing(
         self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
     ) -> None:
-        monkeypatch.setattr(preferences, "_SHARED_MODELS_DIR", tmp_path / "nope")
+        monkeypatch.setenv("SKIAGRAFIA_EXTRA_MODEL_DIRS", str(tmp_path / "nope"))
         monkeypatch.setattr(preferences.sys, "platform", "linux")
         fake_home = tmp_path / "home"
         monkeypatch.setattr(preferences.Path, "home", classmethod(lambda cls: fake_home))

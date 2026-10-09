@@ -77,8 +77,8 @@ Local verification artifacts:
 - `/tmp/skiagrafia-quality-20260907/gemma-route.json`
 - Per-layer SVG/TIFF outputs in that directory's `bags` and `mac` folders.
 
-The verified selections were saved to `/Users/tsevis/.config/skiagrafia/preferences.json` and the local setup check passed. Previous preferences are backed up at `/Users/tsevis/.config/skiagrafia/preferences.before-quality-20260907.json`.
+The verified selections were saved to `~/.config/skiagrafia/preferences.json` and the local setup check passed. Previous preferences are backed up at `~/.config/skiagrafia/preferences.before-quality-20260907.json`.
 
-A persistent preview is saved at `/Users/tsevis/.codex/visualizations/2026/09/06/01a07873-2284-7e63-b969-d68a702b09cc/skiagrafia-quality-preview.png`.
+A persistent preview is saved at `<local path>/skiagrafia-quality-preview.png`.
 
 Restart Skiagrafia to load the changed Python modules and saved model preferences.
