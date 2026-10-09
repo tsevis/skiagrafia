@@ -20,15 +20,18 @@ from models.vlm_client import LlamaCppVLMClient
 logger = logging.getLogger(__name__)
 LOCAL_PRIMARY = "Qwen3-VL-8B-Instruct"
 LOCAL_FALLBACK = "gemma-4-12B-it"
-MODEL_FILES = {
+# repo, accepted weight files in order of preference, vision projector.
+# ggml-org removed gemma-4-12B-it-Q4_K_M.gguf from its repo on 2026-07-16, so a
+# fresh download has only Q4_0; caches made before that keep using Q4_K_M.
+MODEL_FILES: dict[str, tuple[str, tuple[str, ...], str]] = {
     LOCAL_PRIMARY: (
         "Qwen--Qwen3-VL-8B-Instruct-GGUF",
-        "Qwen3VL-8B-Instruct-Q4_K_M.gguf",
+        ("Qwen3VL-8B-Instruct-Q4_K_M.gguf",),
         "mmproj-Qwen3VL-8B-Instruct-Q8_0.gguf",
     ),
     LOCAL_FALLBACK: (
         "ggml-org--gemma-4-12B-it-GGUF",
-        "gemma-4-12B-it-Q4_K_M.gguf",
+        ("gemma-4-12B-it-Q4_K_M.gguf", "gemma-4-12B-it-Q4_0.gguf"),
         "mmproj-gemma-4-12B-it-Q8_0.gguf",
     ),
 }
@@ -37,13 +40,17 @@ MODEL_FILES = {
 def resolve_local_model(model: str, cache: Path | None = None) -> tuple[Path, Path]:
     if model not in MODEL_FILES:
         raise ValueError(f"Unsupported managed model: {model}. Choose {', '.join(MODEL_FILES)}.")
-    repo, weights, projector = MODEL_FILES[model]
+    repo, accepted_weights, projector = MODEL_FILES[model]
     cache = cache or Path.home() / ".cache/huggingface/hub"
     for snapshot in sorted((cache / f"models--{repo}" / "snapshots").glob("*"), reverse=True):
-        pair = snapshot / weights, snapshot / projector
-        if all(path.is_file() and path.stat().st_size > 1_000_000 for path in pair):
-            return pair
-    raise FileNotFoundError(f"Local weights/projector missing for {model} in {cache}. No files were downloaded.")
+        for weights in accepted_weights:
+            pair = snapshot / weights, snapshot / projector
+            if all(path.is_file() and path.stat().st_size > 1_000_000 for path in pair):
+                return pair
+    raise FileNotFoundError(
+        f"Local weights/projector missing for {model} in {cache} "
+        f"(expected {' or '.join(accepted_weights)} with {projector}). No files were downloaded."
+    )
 
 
 def server_binary() -> str:
