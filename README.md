@@ -215,6 +215,12 @@ If the bundle is absent or fails to initialize, Skiagrafia reports the
 condition and uses GroundingDINO + SAM 2.1 instead. MLX SAM 3 currently
 requires the locked `mlx==0.31.2` runtime contract.
 
+**Existing model libraries.** To reuse a model library that already exists on
+your machine, list its directory in `SKIAGRAFIA_EXTRA_MODEL_DIRS`
+(`os.pathsep`-separated: `:` on macOS and Linux). The first listed directory
+that exists becomes the default models directory; an explicit path chosen in
+Preferences → Models still takes precedence.
+
 ---
 
 ## Installation
@@ -257,8 +263,9 @@ llama-server -hf Qwen/Qwen3-VL-8B-Instruct-GGUF:Q4_K_M --port 8080 -c 8192
 
 The setup wizard opens automatically **only if something is missing**: it
 lists every required component with its size, downloads the weights, and can
-pull the Ollama models. The models directory defaults to an existing shared
-library when one is present, otherwise
+pull the Ollama models. The models directory defaults to the first existing
+directory in `SKIAGRAFIA_EXTRA_MODEL_DIRS` (see [Model Weights](#model-weights))
+when that variable is set, otherwise
 `~/Library/Application Support/skiagrafia/models/` — configurable in
 Preferences → Models.
 

@@ -11,16 +11,24 @@ logger = logging.getLogger(__name__)
 
 _CONFIG_DIR = Path.home() / ".config" / "skiagrafia"
 
-# Pre-existing shared model library (development machine). When present it is
-# used as-is so models stay exactly where they are; fresh installs get a
+# Optional pre-existing model libraries. SKIAGRAFIA_EXTRA_MODEL_DIRS holds one
+# or more directories separated by os.pathsep; the first one that exists is
+# used as-is so models stay exactly where they are. Fresh installs get a
 # standard per-user app-data directory instead and can download into it.
-_SHARED_MODELS_DIR = Path.home() / "ai" / "claudecode" / "mozaix" / "models"
+_EXTRA_MODEL_DIRS_ENV = "SKIAGRAFIA_EXTRA_MODEL_DIRS"
+
+
+def _extra_model_dirs() -> list[Path]:
+    """Return the directories listed in SKIAGRAFIA_EXTRA_MODEL_DIRS, in order."""
+    raw = os.environ.get(_EXTRA_MODEL_DIRS_ENV, "")
+    return [Path(part.strip()).expanduser() for part in raw.split(os.pathsep) if part.strip()]
 
 
 def _default_models_dir() -> Path:
     """Resolve the default model library path for this machine."""
-    if _SHARED_MODELS_DIR.is_dir():
-        return _SHARED_MODELS_DIR
+    for candidate in _extra_model_dirs():
+        if candidate.is_dir():
+            return candidate
     if sys.platform == "darwin":
         return Path.home() / "Library" / "Application Support" / "skiagrafia" / "models"
     return Path.home() / ".local" / "share" / "skiagrafia" / "models"
@@ -43,7 +51,7 @@ DEFAULT_PREFERENCES: dict[str, Any] = {
     # llama.cpp serves whatever model it was launched with; this name is
     # informational (shown in logs / sent in the request "model" field).
     "llamacpp_model": "Qwen3-VL-8B-Instruct",
-    "models_directory": "",  # empty = use default ~/ai/claudecode/mozaix/models
+    "models_directory": "",  # empty = use the default model library (DEFAULT_MODELS_DIR)
     "preferred_fallback_vlm": "gemma4:e4b",
     "preferred_text_reasoner": "gemma4:e4b",
     "local_primary_model": "Qwen3-VL-8B-Instruct",
@@ -167,8 +175,9 @@ def save_preferences(prefs: dict[str, Any]) -> None:
 def get_models_dir(prefs: dict[str, Any] | None = None) -> Path:
     """Resolve the model library directory from preferences.
 
-    Returns the user-configured path if set, otherwise the default
-    ~/ai/claudecode/mozaix/models. Existing setups without the
+    Returns the user-configured path if set, otherwise the default model
+    library (the first existing directory in SKIAGRAFIA_EXTRA_MODEL_DIRS, else
+    the per-user app-data directory). Existing setups without the
     models_directory key behave identically to v4.0.
     """
     if prefs is None:

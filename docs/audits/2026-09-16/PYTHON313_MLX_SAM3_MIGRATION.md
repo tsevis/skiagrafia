@@ -26,7 +26,7 @@ parallel Python 3.13 environment was built and verified.
 
 ## Real local verification
 
-Input: `/Users/tsevis/01CLIENTI/01 EXPERIMENTS/TYPO/MATERIALE/PETE.jpg`
+Input: `<client-folder>/TYPO/MATERIALE/PETE.jpg`
 
 - Python 3.13.14 / MLX 0.31.2 loaded the local SAM 3 checkpoint successfully.
 - With `letter` at confidence `0.2`, SAM 3 returned four native MLX masks:
