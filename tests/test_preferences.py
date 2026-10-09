@@ -6,6 +6,7 @@ the user's real ~/.config/skiagrafia is never touched.
 from __future__ import annotations
 
 import json
+import os
 import sys
 from pathlib import Path
 from typing import Any
@@ -246,14 +247,26 @@ class TestDefaultModelsDir:
     ) -> None:
         shared = tmp_path / "shared-models"
         shared.mkdir()
-        monkeypatch.setattr(preferences, "_SHARED_MODELS_DIR", shared)
+        monkeypatch.setenv("SKIAGRAFIA_EXTRA_MODEL_DIRS", str(shared))
 
         assert preferences._default_models_dir() == shared
+
+    def test_first_existing_extra_dir_wins(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
+        later = tmp_path / "later"
+        later.mkdir()
+        monkeypatch.setenv(
+            "SKIAGRAFIA_EXTRA_MODEL_DIRS",
+            os.pathsep.join([str(tmp_path / "missing"), str(later)]),
+        )
+
+        assert preferences._default_models_dir() == later
 
     def test_darwin_fallback_when_shared_dir_missing(
         self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
     ) -> None:
-        monkeypatch.setattr(preferences, "_SHARED_MODELS_DIR", tmp_path / "nope")
+        monkeypatch.setenv("SKIAGRAFIA_EXTRA_MODEL_DIRS", str(tmp_path / "nope"))
         monkeypatch.setattr(preferences.sys, "platform", "darwin")
         fake_home = tmp_path / "home"
         monkeypatch.setattr(preferences.Path, "home", classmethod(lambda cls: fake_home))
@@ -265,7 +278,7 @@ class TestDefaultModelsDir:
     def test_linux_fallback_when_shared_dir_missing(
         self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
     ) -> None:
-        monkeypatch.setattr(preferences, "_SHARED_MODELS_DIR", tmp_path / "nope")
+        monkeypatch.setenv("SKIAGRAFIA_EXTRA_MODEL_DIRS", str(tmp_path / "nope"))
         monkeypatch.setattr(preferences.sys, "platform", "linux")
         fake_home = tmp_path / "home"
         monkeypatch.setattr(preferences.Path, "home", classmethod(lambda cls: fake_home))
