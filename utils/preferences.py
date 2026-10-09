@@ -108,6 +108,8 @@ DEFAULT_PREFERENCES: dict[str, Any] = {
     "vtracer_length_threshold": 4.0,
     "bilateral_filter_d": 9,
     "max_cpu_workers": os.cpu_count() or 4,
+    # Set once _LEGACY_DEFAULT_UPGRADES has run on this file (see load_preferences).
+    "legacy_defaults_migrated": True,
     "interrogation_profile": "balanced",
     "interrogation_fallback_mode": "adaptive_auto",
     "enable_tiled_fallback": True,
@@ -127,7 +129,9 @@ DEFAULT_PREFERENCES: dict[str, Any] = {
 
 # Saved values that were shipped as defaults in older versions and have a
 # strictly better local replacement now. Only exact old-default values are
-# migrated -- a user's deliberate custom choice is never touched.
+# migrated, and only once per preferences file: several old defaults are still
+# offered in the model lists, so a later deliberate choice must stick. A new
+# entry here will not reach files already marked; give it its own marker.
 _LEGACY_DEFAULT_UPGRADES: dict[str, dict[Any, Any]] = {
     "ollama_model": {"moondream": "qwen2.5vl:3b"},
     "preferred_fallback_vlm": {"minicpm-v": "gemma4:e4b"},
@@ -140,6 +144,9 @@ _LEGACY_DEFAULT_UPGRADES: dict[str, dict[Any, Any]] = {
     # instances; migrate only the former shipped default, not custom values.
     "sam3_confidence": {0.5: 0.2},
 }
+
+
+_MIGRATED_KEY = "legacy_defaults_migrated"
 
 
 def _migrate_legacy_defaults(saved: dict[str, Any]) -> dict[str, Any]:
@@ -173,7 +180,11 @@ def load_preferences() -> dict[str, Any]:
     if path.is_file():
         try:
             saved = json.loads(path.read_text())
-            migrated = _migrate_legacy_defaults(saved)
+            migrated = (
+                saved
+                if saved.get(_MIGRATED_KEY)
+                else {**_migrate_legacy_defaults(saved), _MIGRATED_KEY: True}
+            )
             prefs.update(migrated)
             if migrated != saved:
                 # Persist once so the migration doesn't re-run on every load

@@ -256,10 +256,8 @@ Images are not sent anywhere: inference runs on local models, unless an
 Ollama cloud model tag (such as one ending in `-cloud`) is typed into an
 editable model field; Ollama forwards those requests to its servers.
 `run.sh` sets `HF_HUB_OFFLINE` and `TRANSFORMERS_OFFLINE`, and the app
-(`main.py`) sets them unless they are already defined, so `transformers` does
-not contact Hugging Face. The `skiagrafia` command line does not set
-them: when it loads GroundingDINO, `transformers` may contact Hugging Face
-about `bert-base-uncased`; export both variables first to prevent that.
+(`main.py`) and the `skiagrafia` command line set them unless they are
+already defined, so `transformers` does not contact Hugging Face.
 Otherwise network use is the model downloads and pulls of the setup wizard
 and Preferences → Models → Download missing.
 
@@ -271,16 +269,16 @@ Single mode: the output directory set in Preferences → General
 Yes, for two fields: *Ollama model name* and *Ollama text reasoner* in the
 Models tab accept any typed Ollama model tag. *Ollama fallback VLM* and the
 *Local primary* / *Local fallback / reasoner* pickers are fixed lists.
-Typed names are kept across upgrades, except three old defaults that are
-replaced on every load: `moondream` as the Ollama model name (becomes
+Your choices are kept across upgrades. Three old defaults are replaced once,
+the first time a preferences file from an earlier version loads: `moondream` as the Ollama model name (becomes
 `qwen2.5vl:3b`), `minicpm-v` as the Ollama fallback VLM and `qwen3.5` as the
 text reasoner (both become `gemma4:e4b`).
 
 **What happened to Moondream?**
 It was the old default and is still in the model lists. It works as a
-fallback VLM or a batch choice, but a saved `moondream` Ollama model name is
-replaced by `qwen2.5vl:3b` whenever preferences load (the default since
-0.3.x).
+fallback VLM, a batch choice or the Ollama model name. An old saved
+`moondream` model name is replaced by `qwen2.5vl:3b` (the default since
+0.3.x) once, when a preferences file from an earlier version first loads.
 
 **The setup wizard opened but I already have the models.**
 Point *Model library directory* (Preferences → Models) at your existing
