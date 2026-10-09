@@ -52,12 +52,15 @@ after launch. It shows a checklist:
 | Status | ✓ ready · ✕ missing |
 
 - **Download missing** — fetches all missing weights (GroundingDINO, SAM 2.1,
-  VitMatte, Grounded-SAM-2 source) and pulls the required Ollama models.
+  VitMatte, Grounded-SAM-2 source) and, on the Ollama backend, pulls the
+  missing required and recommended Ollama models (`qwen2.5vl:3b`,
+  `gemma4:e4b`, `minicpm-v`, plus the models set in Preferences).
   A progress bar tracks each file.
 - **Get Ollama…** — opens the Ollama download page if the server itself is
   not installed. Start it with `ollama serve`, then press **Recheck**.
 - **Continue anyway** — closes the wizard; you can finish later from
-  Preferences → Models → Download missing.
+  Preferences → Models → Download missing (weights only; it does not pull
+  Ollama models).
 
 Items marked *(optional)* (the fallback VLMs) improve quality but are not
 required to run.
@@ -212,7 +215,7 @@ child parts skip redundant VLM queries.
 | Tab | Key settings |
 |-----|--------------|
 | **General** | Output directory, startup mode, session save, notifications |
-| **Models** | VLM backend (ollama / llamacpp), server URLs, primary/fallback/reasoner models, connection test, model library directory, installed-model list, Download missing |
+| **Models** | VLM backend (local / ollama / llamacpp), server URLs, primary/fallback/reasoner models, connection test, model library directory, installed-model list, Download missing |
 | **Pipeline** | SAM box/text thresholds, VTracer corner/speckle/length, bilateral filter, CPU workers, interrogation profile (`fast` / `balanced` / `deep`), fallback mode, tiled fallback |
 | **Appearance** | Theme, scan preview boxes/labels/heatmap and opacities, canvas background, mask overlay opacity, vector overlay colour |
 | **Templates** | Saved batch templates |
@@ -249,21 +252,35 @@ Interrogation profiles:
 ## 9. FAQ
 
 **Does anything leave my machine?**
-No. Inference is 100% local; `run.sh` even blocks HuggingFace network access.
-The only network use is downloading models on first setup.
+Images are not sent anywhere: inference runs on local models, unless an
+Ollama cloud model tag (such as one ending in `-cloud`) is typed into an
+editable model field; Ollama forwards those requests to its servers.
+`run.sh` sets `HF_HUB_OFFLINE` and `TRANSFORMERS_OFFLINE`, and the app
+(`main.py`) sets them unless they are already defined, so `transformers` does
+not contact Hugging Face. The `skiagrafia` command line does not set
+them: when it loads GroundingDINO, `transformers` may contact Hugging Face
+about `bert-base-uncased`; export both variables first to prevent that.
+Otherwise network use is the model downloads and pulls of the setup wizard
+and Preferences → Models → Download missing.
 
 **Where do outputs go?**
 Single mode: the output directory set in Preferences → General
 (default `~/Desktop/skiagrafia_out`). Batch mode: `<output>/<batch_id>/`.
 
 **Can I use my own model names?**
-Yes — the Models tab comboboxes are editable; type any Ollama model tag.
-Custom choices are never overwritten by upgrades.
+Yes, for two fields: *Ollama model name* and *Ollama text reasoner* in the
+Models tab accept any typed Ollama model tag. *Ollama fallback VLM* and the
+*Local primary* / *Local fallback / reasoner* pickers are fixed lists.
+Typed names are kept across upgrades, except three old defaults that are
+replaced on every load: `moondream` as the Ollama model name (becomes
+`qwen2.5vl:3b`), `minicpm-v` as the Ollama fallback VLM and `qwen3.5` as the
+text reasoner (both become `gemma4:e4b`).
 
 **What happened to Moondream?**
-It was the old default and still works (`moondream` in the model list), but
-`qwen2.5vl:3b` is substantially better and became the default in 0.3.x.
-Old preferences are migrated automatically.
+It was the old default and is still in the model lists. It works as a
+fallback VLM or a batch choice, but a saved `moondream` Ollama model name is
+replaced by `qwen2.5vl:3b` whenever preferences load (the default since
+0.3.x).
 
 **The setup wizard opened but I already have the models.**
 Point *Model library directory* (Preferences → Models) at your existing
