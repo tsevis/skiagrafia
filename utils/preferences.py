@@ -15,20 +15,49 @@ _CONFIG_DIR = Path.home() / ".config" / "skiagrafia"
 # or more directories separated by os.pathsep; the first one that exists is
 # used as-is so models stay exactly where they are. Fresh installs get a
 # standard per-user app-data directory instead and can download into it.
+# Entries must be absolute after a leading "~" is expanded; anything else is
+# skipped (see _extra_model_dirs).
 _EXTRA_MODEL_DIRS_ENV = "SKIAGRAFIA_EXTRA_MODEL_DIRS"
 
 
 def _extra_model_dirs() -> list[Path]:
-    """Return the directories listed in SKIAGRAFIA_EXTRA_MODEL_DIRS, in order."""
+    """Return the usable directories listed in SKIAGRAFIA_EXTRA_MODEL_DIRS, in order.
+
+    This runs at import time (DEFAULT_MODELS_DIR below), so a bad entry is
+    skipped with a warning instead of raising. Skipped: "~name" for a user that
+    does not exist, and relative paths, which would resolve against whatever
+    directory the app was launched from ("/" for a Dock or Finder launch).
+    """
     raw = os.environ.get(_EXTRA_MODEL_DIRS_ENV, "")
-    return [Path(part.strip()).expanduser() for part in raw.split(os.pathsep) if part.strip()]
+    dirs: list[Path] = []
+    for part in raw.split(os.pathsep):
+        entry = part.strip()
+        if not entry:
+            continue
+        try:
+            candidate = Path(entry).expanduser()
+        except RuntimeError:
+            logger.warning(
+                "Ignoring %s entry %r: cannot expand '~'", _EXTRA_MODEL_DIRS_ENV, entry
+            )
+            continue
+        if not candidate.is_absolute():
+            logger.warning(
+                "Ignoring %s entry %r: not an absolute path", _EXTRA_MODEL_DIRS_ENV, entry
+            )
+            continue
+        dirs.append(candidate)
+    return dirs
 
 
 def _default_models_dir() -> Path:
     """Resolve the default model library path for this machine."""
     for candidate in _extra_model_dirs():
-        if candidate.is_dir():
-            return candidate
+        try:
+            if candidate.is_dir():
+                return candidate
+        except OSError as exc:  # e.g. PermissionError under an unreadable parent
+            logger.warning("Ignoring %s entry %s: %s", _EXTRA_MODEL_DIRS_ENV, candidate, exc)
     if sys.platform == "darwin":
         return Path.home() / "Library" / "Application Support" / "skiagrafia" / "models"
     return Path.home() / ".local" / "share" / "skiagrafia" / "models"

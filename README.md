@@ -215,11 +215,20 @@ If the bundle is absent or fails to initialize, Skiagrafia reports the
 condition and uses GroundingDINO + SAM 2.1 instead. MLX SAM 3 currently
 requires the locked `mlx==0.31.2` runtime contract.
 
-**Existing model libraries.** To reuse a model library that already exists on
-your machine, list its directory in `SKIAGRAFIA_EXTRA_MODEL_DIRS`
-(`os.pathsep`-separated: `:` on macOS and Linux). The first listed directory
-that exists becomes the default models directory; an explicit path chosen in
-Preferences → Models still takes precedence.
+**Default models folder.** Earlier versions used a shared model library from
+a fixed location on the author's machine whenever it existed; that lookup is
+gone. The default is now `~/Library/Application Support/skiagrafia/models/`
+(macOS) or `~/.local/share/skiagrafia/models/` (Linux), unless
+`SKIAGRAFIA_EXTRA_MODEL_DIRS` lists an existing directory: one or more
+absolute paths (a leading `~` is expanded) separated by `:`, the first that
+exists wins, and relative, unresolvable or unreadable entries are
+ignored with a log warning. To keep using an existing library, choose it in Preferences → Models
+(saved in the preferences file, takes precedence over the variable, and works
+for an app started from the Dock or Finder) or export the variable before
+`./run.sh`. A Dock or Finder launch does not read shell profiles such as
+`~/.zshrc`; for that case set the variable for the login session with
+`launchctl setenv SKIAGRAFIA_EXTRA_MODEL_DIRS <directory>` and then start the
+app.
 
 ---
 
