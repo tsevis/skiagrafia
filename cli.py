@@ -31,6 +31,13 @@ from typing import TYPE_CHECKING, Any
 if TYPE_CHECKING:
     from core.batch_runner import BatchConfig, BatchRunSummary
 
+# Same offline defaults as main.py and run.sh: GroundingDINO loads
+# bert-base-uncased through transformers, which otherwise contacts Hugging Face.
+# Set before any transformers/huggingface import; an exported value wins.
+os.environ.setdefault("TRANSFORMERS_OFFLINE", "1")
+os.environ.setdefault("HF_HUB_OFFLINE", "1")
+os.environ.setdefault("HF_DATASETS_OFFLINE", "1")
+
 logger = logging.getLogger("skiagrafia")
 
 IMAGE_SUFFIXES = {".png", ".jpg", ".jpeg", ".tiff", ".tif", ".bmp", ".webp"}

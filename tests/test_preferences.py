@@ -134,6 +134,25 @@ class TestLegacyMigration:
         # Migration is persisted so it doesn't re-run on the next load.
         assert json.loads(prefs_path.read_text())["ollama_model"] == "qwen2.5vl:3b"
 
+    def test_a_listed_old_default_chosen_after_the_upgrade_is_kept(
+        self, _isolated_config_dir: Path
+    ) -> None:
+        # moondream and minicpm-v are still offered in the Models tab lists.
+        _isolated_config_dir.mkdir(parents=True)
+        prefs_path = _isolated_config_dir / "preferences.json"
+        prefs_path.write_text(json.dumps({"ollama_model": "moondream"}))
+        prefs = preferences.load_preferences()
+
+        preferences.save_preferences(
+            {**prefs, "ollama_model": "moondream", "preferred_fallback_vlm": "minicpm-v"}
+        )
+        reloaded = preferences.load_preferences()
+
+        assert (reloaded["ollama_model"], reloaded["preferred_fallback_vlm"]) == (
+            "moondream",
+            "minicpm-v",
+        )
+
     def test_deliberate_custom_value_is_not_touched(self) -> None:
         saved = {"ollama_model": "my-custom-model"}
 

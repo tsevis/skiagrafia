@@ -16,6 +16,7 @@ No models are loaded here: the interrogation and the run are injected.
 """
 from __future__ import annotations
 
+import os
 import sys
 from pathlib import Path
 
@@ -219,3 +220,14 @@ def test_the_interrogator_is_asked_to_look_not_told_there_is_nothing(
     cli.interrogate([_folder(tmp_path, 1) / "page0.png"], {}, None)
 
     assert passed == [None], "an empty list is not the same as asking"
+
+
+def test_the_command_line_keeps_hugging_face_offline(monkeypatch: pytest.MonkeyPatch) -> None:
+    # run.sh and main.py set these; the console script runs neither.
+    import importlib
+
+    for name in ("HF_HUB_OFFLINE", "TRANSFORMERS_OFFLINE"):
+        monkeypatch.delenv(name, raising=False)
+    importlib.reload(cli)
+
+    assert (os.environ.get("HF_HUB_OFFLINE"), os.environ.get("TRANSFORMERS_OFFLINE")) == ("1", "1")
