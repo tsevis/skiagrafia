@@ -574,3 +574,30 @@ class TestSolidMasks:
 
     def test_topology_is_kept_unless_asked(self, tmp_path: Path) -> None:
         assert self._run(tmp_path)[30, 30] == 0
+
+
+class TestNestedSameLabelInstances:
+    """The iPhone photo's fourth "phone" was the Phone app icon on the screen."""
+
+    def _layers(self, tmp_path: Path, boxes: list[tuple[int, int, int, int]]) -> list:
+        instances = [DetectionResult(label="phone", bbox=box, confidence=0.9) for box in boxes]
+        caps = _make_caps(
+            FakeInterrogator([_candidate("phone")]),
+            MultiInstanceDetector(instances),
+            FakeSegmenter(),
+        )
+        result = Orchestrator(caps, output_dir=tmp_path / "out").process(
+            _write_image(tmp_path / "in.png")
+        )
+        assert result.error is None
+        return [layer for layer in result.layers if layer.role == "parent"]
+
+    def test_a_small_instance_inside_a_larger_one_is_dropped(self, tmp_path: Path) -> None:
+        layers = self._layers(tmp_path, [(4, 4, 60, 60), (20, 20, 28, 28)])
+
+        assert [layer.bbox for layer in layers] == [(4, 4, 60, 60)]
+
+    def test_separate_instances_of_different_sizes_are_kept(self, tmp_path: Path) -> None:
+        layers = self._layers(tmp_path, [(0, 0, 40, 40), (48, 48, 60, 60)])
+
+        assert len(layers) == 2
