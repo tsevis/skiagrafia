@@ -274,3 +274,19 @@ class TestSolidifyMask:
         still_open = int((solidify_mask(mask)[300:308, 150:160] == 0).sum())
 
         assert still_open <= 16  # of 80
+
+    def test_fills_a_deep_bite_that_closing_cannot_reach(self) -> None:
+        # The iPhone front: a bite 13.9 px deep on an object 319 px wide.
+        mask = np.zeros((700, 700), dtype=np.uint8)
+        mask[50:650, 150:470] = 255
+        mask[300:312, 150:164] = 0
+
+        assert int((solidify_mask(mask)[300:312, 150:164] == 0).sum()) == 0
+
+    def test_keeps_a_genuinely_concave_shape(self) -> None:
+        # A U: its opening is 40% of the object's width deep.
+        mask = np.zeros((400, 400), dtype=np.uint8)
+        mask[50:350, 50:350] = 255
+        mask[50:170, 150:250] = 0
+
+        assert solidify_mask(mask)[100, 200] == 0

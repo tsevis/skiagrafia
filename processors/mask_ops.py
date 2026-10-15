@@ -60,6 +60,9 @@ def refine_mask(
 SOLID_HOLE_FRACTION = 0.01
 #: Diameter of the closing kernel, as a share of the image's shorter side.
 SOLID_NOTCH_FRACTION = 0.018
+#: Pockets no deeper than this share of the object's shorter side are filled
+#: to their chord. The iPhone front's bite was 4.4%; a U or C is far deeper.
+SOLID_POCKET_FRACTION = 0.06
 
 
 def _fill_small_holes(binary: NDArray[np.uint8], max_area: float) -> NDArray[np.uint8]:
@@ -74,8 +77,31 @@ def _fill_small_holes(binary: NDArray[np.uint8], max_area: float) -> NDArray[np.
     return np.where(small[as_intp(labels)], 1, binary).astype(np.uint8)
 
 
+def _fill_shallow_pockets(binary: NDArray[np.uint8]) -> NDArray[np.uint8]:
+    """Fill each outline pocket shallow relative to its object, up to its chord."""
+    filled = binary.copy()
+    contours, _ = cv2.findContours(binary, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_NONE)
+    for contour in contours:
+        if len(contour) < 4:
+            continue
+        defects = cv2.convexityDefects(contour, cv2.convexHull(contour, returnPoints=False))
+        if defects is None:
+            continue
+        max_depth = min(cv2.boundingRect(contour)[2:]) * SOLID_POCKET_FRACTION
+        for start, end, _, fixed_depth in defects.reshape(-1, 4):
+            if fixed_depth / 256.0 > max_depth:
+                continue
+            pocket = (
+                contour[start : end + 1]
+                if start <= end
+                else np.concatenate([contour[start:], contour[: end + 1]])
+            )
+            cv2.fillPoly(filled, [pocket], 1)
+    return filled
+
+
 def solidify_mask(mask: NDArray[np.uint8]) -> NDArray[np.uint8]:
-    """Close narrow edge notches and fill small enclosed holes.
+    """Close edge notches, fill shallow pockets and small enclosed holes.
 
     Opt-in only: ``refine_mask`` preserves topology on purpose, because real
     holes and thin wires matter. This is for solid objects whose mask has
@@ -90,7 +116,8 @@ def solidify_mask(mask: NDArray[np.uint8]) -> NDArray[np.uint8]:
     diameter = max(3, round(min(mask.shape) * SOLID_NOTCH_FRACTION) | 1)
     kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (diameter, diameter))
     closed = as_uint8(cv2.morphologyEx(binary, cv2.MORPH_CLOSE, kernel))
-    return _fill_small_holes(closed, area * SOLID_HOLE_FRACTION) * 255
+    pocketless = _fill_shallow_pockets(closed)
+    return _fill_small_holes(pocketless, area * SOLID_HOLE_FRACTION) * 255
 
 
 def edge_refine(
