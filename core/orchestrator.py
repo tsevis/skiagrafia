@@ -44,7 +44,7 @@ from core.pipeline_results import (
 )
 from core.typography_matching import resolve_glyph_detections
 from models.grounded_sam import DetectionResult
-from processors.mask_ops import refine_mask
+from processors.mask_ops import refine_mask, solidify_mask
 from processors.output_writer import write_svg, write_tiff
 from processors.source_image import detection_image, load_source_image
 from processors.vectorizer import assemble_svg
@@ -157,6 +157,7 @@ class Orchestrator(DetectionPolicyMixin):
         progress_callback: Callable[[int, str], None] | None = None,
         knowledge_pack: KnowledgePack | None = None,
         quality: str = "balanced",
+        solid_masks: bool = False,
     ) -> None:
         # Capability injection
         self._interrogator = capabilities.interrogator
@@ -176,6 +177,8 @@ class Orchestrator(DetectionPolicyMixin):
         #: Parents the part-discovery budget skipped during the current run.
         self._budgeted_part_parents: list[str] = []
         self._quality = quality
+        #: Opt-in: close edge notches and fill small holes in every mask.
+        self._solid_masks = solid_masks
 
     def _report(self, step: int, msg: str | None = None) -> None:
         text = msg or PIPELINE_STEPS[step]
@@ -344,6 +347,11 @@ class Orchestrator(DetectionPolicyMixin):
         )
         return True
 
+    def _final_mask(self, mask: NDArray[np.uint8]) -> NDArray[np.uint8]:
+        """The refined mask, made solid when this run asked for it."""
+        refined = refine_mask(mask, min_contour_area=0)
+        return solidify_mask(refined) if self._solid_masks else refined
+
     def _accept_parent(
         self,
         mask: NDArray[np.uint8],
@@ -360,7 +368,7 @@ class Orchestrator(DetectionPolicyMixin):
         rejected candidate leaves no gap in the sequence.
         """
         layer_id = self._layer_id(len(accepted) + 1, layer_label)
-        masks[layer_id] = refine_mask(mask, min_contour_area=0)
+        masks[layer_id] = self._final_mask(mask)
         accepted.append((
             LayerResult(
                 layer_id=layer_id, label=layer_label, role="parent", bbox=detection.bbox,
@@ -516,7 +524,7 @@ class Orchestrator(DetectionPolicyMixin):
                 child_masks.append(mask)
                 child_id = f"{layer.layer_id}-part-{len(child_masks):03d}"
                 bx0, by0, bx1, by1 = detection.bbox
-                masks[child_id] = refine_mask(mask, min_contour_area=0)
+                masks[child_id] = self._final_mask(mask)
                 result.layers.append(LayerResult(
                     layer_id=child_id, label=part, role="child", parent_label=layer.label,
                     parent_id=layer.layer_id, bbox=(bx0 + dx, by0 + dy, bx1 + dx, by1 + dy),

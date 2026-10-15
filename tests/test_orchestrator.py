@@ -538,3 +538,39 @@ class TestInstanceSizeComparison:
         size = instance_size([wide_box_thin_object, small_box_solid])
 
         assert size(small_box_solid) > size(wide_box_thin_object)
+
+
+class _RecordingRefiner:
+    """Keeps the masks the pipeline hands to alpha refinement."""
+
+    def __init__(self) -> None:
+        self.masks: list[np.ndarray] = []
+
+    def predict(self, image: np.ndarray, mask: np.ndarray) -> np.ndarray:
+        self.masks.append(mask.copy())
+        return mask.copy()
+
+
+class TestSolidMasks:
+    def _run(self, tmp_path: Path, **orchestrator_kwargs) -> np.ndarray:
+        image_path = _write_image(tmp_path / "img.png")
+        speckled = np.zeros((IMG_SIZE, IMG_SIZE), dtype=np.uint8)
+        speckled[8:56, 8:56] = 255
+        speckled[30, 30] = 0  # a reflection speck inside a solid object
+        refiner = _RecordingRefiner()
+        caps = _make_caps(
+            FakeInterrogator([_candidate("phone")]),
+            FakeDetector(default=(8, 8, 56, 56)),
+            FakeSegmenter(mask_by_label={"phone": speckled}),
+            alpha_refiner=refiner,
+        )
+        orch = Orchestrator(capabilities=caps, output_dir=tmp_path / "out", **orchestrator_kwargs)
+
+        assert orch.process(image_path).error is None
+        return refiner.masks[0]
+
+    def test_solid_masks_fill_the_speck(self, tmp_path: Path) -> None:
+        assert self._run(tmp_path, solid_masks=True)[30, 30] == 255
+
+    def test_topology_is_kept_unless_asked(self, tmp_path: Path) -> None:
+        assert self._run(tmp_path)[30, 30] == 0

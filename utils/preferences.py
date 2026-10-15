@@ -100,6 +100,8 @@ DEFAULT_PREFERENCES: dict[str, Any] = {
     "preserve_path_detail": True,
     "object_prompt": "",
     "discover_parts": True,
+    # Fill small holes and close edge notches in every mask (opt-in).
+    "solid_masks": False,
     # Pipeline
     "sam_box_threshold": 0.35,
     "sam_text_threshold": 0.25,
