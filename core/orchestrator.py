@@ -33,6 +33,7 @@ from core.layer_editing import all_objects_alpha, body_alpha
 from core.output_layout import output_path
 from core.pipeline_geometry import (
     crop_to_bbox,
+    mask_containment,
     mask_iou,
     safe_filename_label,
 )
@@ -85,6 +86,10 @@ MAX_OBJECT_INSTANCES = 64
 MIN_MASK_PIXELS = 8
 # Two masks overlapping this much are the same object detected twice.
 DUPLICATE_MASK_IOU = 0.90
+#: A same-label instance this much inside one at least NESTED_AREA_RATIO times
+#: its area is a picture of the object on the object, not another object.
+NESTED_CONTAINMENT = 0.90
+NESTED_AREA_RATIO = 4.0
 # A part must fall at least this far inside its parent to belong to it.
 MIN_PART_CONTAINMENT = 0.90
 # Context kept around a parent's box when cropping for part detection.
@@ -132,6 +137,31 @@ PIPELINE_STEPS = STRUCTURAL_STEPS
 
 
 
+
+
+def _drop_nested_instances(proposals: list, result: PipelineResult) -> list:
+    """Drop an instance lying inside a much larger instance of the same label.
+
+    A text grounder answers "phone" for a phone's own Phone icon too. A box
+    the person drew is never dropped: they asked for exactly that region.
+    """
+    areas = [int(np.count_nonzero(mask > 127)) for mask, *_ in proposals]
+    kept = []
+    for index, (mask, detection, layer_label, is_manual) in enumerate(proposals):
+        nested = not is_manual and any(
+            other != index
+            and proposals[other][2] == layer_label
+            and areas[other] >= NESTED_AREA_RATIO * areas[index]
+            and mask_containment(mask, proposals[other][0]) >= NESTED_CONTAINMENT
+            for other in range(len(proposals))
+        )
+        if nested:
+            result.warnings.append(
+                f"Excluded a '{layer_label}' lying inside a larger '{layer_label}'."
+            )
+            continue
+        kept.append((mask, detection, layer_label, is_manual))
+    return kept
 
 
 class Orchestrator(DetectionPolicyMixin):
@@ -425,14 +455,18 @@ class Orchestrator(DetectionPolicyMixin):
             )
             if not detections:
                 continue
+            proposals = []
             for (detection, is_manual), layer_label in zip(detections, layer_labels, strict=True):
-                if len(accepted) >= MAX_OBJECT_INSTANCES:
+                if len(accepted) + len(proposals) >= MAX_OBJECT_INSTANCES:
                     stopped_at_ceiling = True
                     break
                 mask = self._parent_mask(source, detection, layer_label, is_manual, parent, result)
-                if mask is None or self._fold_into_duplicate(
-                    mask, parent, accepted, masks, children_by_parent
-                ):
+                if mask is not None:
+                    proposals.append((mask, detection, layer_label, is_manual))
+            for mask, detection, layer_label, is_manual in _drop_nested_instances(
+                proposals, result
+            ):
+                if self._fold_into_duplicate(mask, parent, accepted, masks, children_by_parent):
                     continue
                 self._accept_parent(
                     mask, detection, layer_label, is_manual, parent, accepted, masks
