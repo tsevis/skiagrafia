@@ -47,6 +47,8 @@ MIN_TILE_EDGE_PX = 256
 # out-of-range coordinates and never closes the JSON, at any budget tried up
 # to 4000 tokens.
 GLYPH_READING_MAX_TOKENS = 800
+#: A one-word yes/no answer.
+OBJECT_CHECK_MAX_TOKENS = 8
 
 _PART_BLACKLIST = {
     "coffee",
@@ -622,6 +624,32 @@ class GuidedInterrogator(ReasonerStageMixin):
         if is_typography_label(candidate.display_label):
             return []
         return self._children_map([candidate], knowledge_pack, self._prepare_image(image)).get(candidate.display_label, [])
+
+    def confirms_object(self, image: NDArray[np.uint8], label: str) -> bool | None:
+        """Whether a detected crop is the object itself, not an icon or picture of it.
+
+        None when the model could not be asked or answered neither yes nor no;
+        the caller keeps the instance then. The wording was chosen on the
+        iPhone product photo, where it accepted the front, side and back and
+        rejected the Phone app icon; a plainer "is this a complete phone?"
+        rejected the side view.
+        """
+        prompt = (
+            f'The highlighted region was detected as "{label}". Is it the physical {label} '
+            "itself, seen from any angle (front, back or side), as opposed to a small icon, "
+            f"symbol or picture of a {label} shown on something else? "
+            "Answer with only yes or no."
+        )
+        try:
+            client = self._get_client(self._settings.primary_vlm)
+            answer = client.query_vision(
+                self._prepare_image(image), prompt, num_predict=OBJECT_CHECK_MAX_TOKENS
+            )
+        except (OSError, TimeoutError, ConnectionError, RuntimeError, VLMResponseError):
+            logger.info("Object check unavailable for '%s'", label, exc_info=True)
+            return None
+        word = answer.strip().lower().rstrip(".!")
+        return {"yes": True, "no": False}.get(word)
 
     def inspect_individual_glyphs(
         self,

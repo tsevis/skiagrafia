@@ -840,3 +840,19 @@ def test_an_object_name_is_not_a_sentence() -> None:
     answer = "monitor, a rectangular beige box sitting on the desk beside the keyboard"
 
     assert parse_label_candidates(answer) == ["monitor"]
+
+
+class TestConfirmsObject:
+    """A yes/no check on one crop: is it the object, or an icon or picture of it."""
+
+    def _answer(self, response: str) -> bool | None:
+        interrogator = _make_interrogator()
+        interrogator._clients["moondream"] = FakeVLMClient(vision_responses={"default": response})
+        return interrogator.confirms_object(_tiny_image(), "phone")
+
+    def test_reads_yes_and_no_however_the_model_dresses_them(self) -> None:
+        assert self._answer("Yes.") is True
+        assert self._answer(" no") is False
+
+    def test_an_answer_that_is_neither_is_not_read_as_either(self) -> None:
+        assert self._answer("It looks like a smartphone.") is None
