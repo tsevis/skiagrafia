@@ -601,3 +601,37 @@ class TestNestedSameLabelInstances:
         layers = self._layers(tmp_path, [(0, 0, 40, 40), (48, 48, 60, 60)])
 
         assert len(layers) == 2
+
+
+class _JudgingInterrogator(FakeInterrogator):
+    """Rejects any crop narrower than `min_width` as an icon of the object."""
+
+    def __init__(self, candidates, min_width: int) -> None:
+        super().__init__(candidates)
+        self._min_width = min_width
+
+    def confirms_object(self, image: np.ndarray, label: str) -> bool | None:
+        return image.shape[1] >= self._min_width
+
+
+class TestVerifyObjects:
+    def _parents(self, tmp_path: Path, **orchestrator_kwargs) -> list:
+        instances = [
+            DetectionResult(label="phone", bbox=(0, 0, 30, 60), confidence=0.9),
+            DetectionResult(label="phone", bbox=(40, 4, 48, 12), confidence=0.9),
+        ]
+        caps = _make_caps(
+            _JudgingInterrogator([_candidate("phone")], min_width=20),
+            MultiInstanceDetector(instances),
+            FakeSegmenter(),
+        )
+        result = Orchestrator(caps, output_dir=tmp_path / "out", **orchestrator_kwargs).process(
+            _write_image(tmp_path / "in.png")
+        )
+        assert result.error is None
+        return [layer for layer in result.layers if layer.role == "parent"]
+
+    def test_an_instance_the_vision_model_rejects_is_dropped(self, tmp_path: Path) -> None:
+        layers = self._parents(tmp_path, verify_objects=True)
+
+        assert [layer.bbox for layer in layers] == [(0, 0, 30, 60)]

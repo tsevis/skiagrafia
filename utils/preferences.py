@@ -102,6 +102,9 @@ DEFAULT_PREFERENCES: dict[str, Any] = {
     "discover_parts": True,
     # Fill small holes and close edge notches in every mask (opt-in).
     "solid_masks": False,
+    # Ask the vision model whether each detected crop is the object itself,
+    # not an icon or picture of it (opt-in; one model call per instance).
+    "verify_objects": False,
     # Pipeline
     "sam_box_threshold": 0.35,
     "sam_text_threshold": 0.25,

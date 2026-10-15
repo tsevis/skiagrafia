@@ -24,6 +24,7 @@ from numpy.typing import NDArray
 
 from core.contracts import CapabilitySet
 from core.detection_policy import DetectionPolicyMixin
+from core.instance_filters import drop_nested_instances, verified_proposals
 from core.interrogation import (
     InterrogationCandidate,
     is_individual_glyph_label,
@@ -33,7 +34,6 @@ from core.layer_editing import all_objects_alpha, body_alpha
 from core.output_layout import output_path
 from core.pipeline_geometry import (
     crop_to_bbox,
-    mask_containment,
     mask_iou,
     safe_filename_label,
 )
@@ -86,10 +86,6 @@ MAX_OBJECT_INSTANCES = 64
 MIN_MASK_PIXELS = 8
 # Two masks overlapping this much are the same object detected twice.
 DUPLICATE_MASK_IOU = 0.90
-#: A same-label instance this much inside one at least NESTED_AREA_RATIO times
-#: its area is a picture of the object on the object, not another object.
-NESTED_CONTAINMENT = 0.90
-NESTED_AREA_RATIO = 4.0
 # A part must fall at least this far inside its parent to belong to it.
 MIN_PART_CONTAINMENT = 0.90
 # Context kept around a parent's box when cropping for part detection.
@@ -139,31 +135,6 @@ PIPELINE_STEPS = STRUCTURAL_STEPS
 
 
 
-def _drop_nested_instances(proposals: list, result: PipelineResult) -> list:
-    """Drop an instance lying inside a much larger instance of the same label.
-
-    A text grounder answers "phone" for a phone's own Phone icon too. A box
-    the person drew is never dropped: they asked for exactly that region.
-    """
-    areas = [int(np.count_nonzero(mask > 127)) for mask, *_ in proposals]
-    kept = []
-    for index, (mask, detection, layer_label, is_manual) in enumerate(proposals):
-        nested = not is_manual and any(
-            other != index
-            and proposals[other][2] == layer_label
-            and areas[other] >= NESTED_AREA_RATIO * areas[index]
-            and mask_containment(mask, proposals[other][0]) >= NESTED_CONTAINMENT
-            for other in range(len(proposals))
-        )
-        if nested:
-            result.warnings.append(
-                f"Excluded a '{layer_label}' lying inside a larger '{layer_label}'."
-            )
-            continue
-        kept.append((mask, detection, layer_label, is_manual))
-    return kept
-
-
 class Orchestrator(DetectionPolicyMixin):
     """Single-image pipeline -- 10 structural steps.
 
@@ -188,6 +159,7 @@ class Orchestrator(DetectionPolicyMixin):
         knowledge_pack: KnowledgePack | None = None,
         quality: str = "balanced",
         solid_masks: bool = False,
+        verify_objects: bool = False,
     ) -> None:
         # Capability injection
         self._interrogator = capabilities.interrogator
@@ -209,6 +181,9 @@ class Orchestrator(DetectionPolicyMixin):
         self._quality = quality
         #: Opt-in: close edge notches and fill small holes in every mask.
         self._solid_masks = solid_masks
+        #: Opt-in: ask the vision model whether each detected crop is the
+        #: object itself rather than an icon or picture of it.
+        self._verify_objects = verify_objects
 
     def _report(self, step: int, msg: str | None = None) -> None:
         text = msg or PIPELINE_STEPS[step]
@@ -463,9 +438,10 @@ class Orchestrator(DetectionPolicyMixin):
                 mask = self._parent_mask(source, detection, layer_label, is_manual, parent, result)
                 if mask is not None:
                     proposals.append((mask, detection, layer_label, is_manual))
-            for mask, detection, layer_label, is_manual in _drop_nested_instances(
-                proposals, result
-            ):
+            proposals = drop_nested_instances(proposals, result)
+            if self._verify_objects:
+                proposals = verified_proposals(self._interrogator, image, proposals, result)
+            for mask, detection, layer_label, is_manual in proposals:
                 if self._fold_into_duplicate(mask, parent, accepted, masks, children_by_parent):
                     continue
                 self._accept_parent(
