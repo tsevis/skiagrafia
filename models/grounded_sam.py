@@ -187,6 +187,16 @@ def _ensure_gsam_on_path(gsam_root: Path) -> None:
         sys.path.insert(0, str(gsam_root))
 
 
+def _require_gsam_root(gsam_root: Path) -> Path:
+    """Fail with the folder that was searched, not a bare import error."""
+    if not gsam_root.is_dir():
+        raise FileNotFoundError(
+            f"Grounded-SAM-2 was not found at {gsam_root}. Choose the folder that "
+            "holds your models in Preferences -> Models, or download them there."
+        )
+    return gsam_root
+
+
 class DetectionResult(BaseModel):
     """Bounding box detection from GroundingDINO."""
 
@@ -242,7 +252,9 @@ class GroundedSAM:
             return
         try:
             # Resolve paths from constructor params or backward-compat shim
-            gsam_root = self._gsam_root or model_path("groundingdino_swint_ogc.pth").parent.parent
+            gsam_root = _require_gsam_root(
+                self._gsam_root or model_path("groundingdino_swint_ogc.pth").parent.parent
+            )
             _ensure_gsam_on_path(gsam_root)
 
             from grounding_dino.groundingdino.util.inference import (  # type: ignore[import-not-found]  # vendored; resolved at runtime from the model directory
@@ -275,7 +287,11 @@ class GroundedSAM:
         if self._sam_predictor is not None:
             return self._sam_predictor
         try:
-            _ensure_gsam_on_path(self._gsam_root or model_path("groundingdino_swint_ogc.pth").parent.parent)
+            _ensure_gsam_on_path(
+                _require_gsam_root(
+                    self._gsam_root or model_path("groundingdino_swint_ogc.pth").parent.parent
+                )
+            )
             from sam2.build_sam import (  # type: ignore[import-not-found]  # vendored; resolved at runtime from the model directory
                 build_sam2,
             )

@@ -525,3 +525,14 @@ class TestDetectAndSegment:
         detection, mask = result
         assert isinstance(detection, DetectionResult)
         assert mask.shape == (64, 64)
+
+
+def test_a_missing_model_library_names_the_folder_it_looked_in(tmp_path: Path) -> None:
+    """An empty or wrong model library used to surface as "No module named
+    'grounding_dino'", which says nothing about models or where to put them."""
+    missing = tmp_path / "models" / "Grounded-SAM-2"
+    client = GroundedSAM(gsam_root=missing)
+    with pytest.raises(FileNotFoundError, match="Grounded-SAM-2") as caught:
+        client._load_dino()
+    assert str(missing) in str(caught.value)
+    assert "Preferences" in str(caught.value)
