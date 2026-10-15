@@ -55,6 +55,44 @@ def refine_mask(
     return keep[as_intp(labels)]
 
 
+#: Enclosed holes smaller than this share of the object's area are filled by
+#: ``solidify_mask``. A counter in a letter is far larger relative to its glyph.
+SOLID_HOLE_FRACTION = 0.01
+#: Diameter of the closing kernel, as a share of the image's shorter side.
+SOLID_NOTCH_FRACTION = 0.018
+
+
+def _fill_small_holes(binary: NDArray[np.uint8], max_area: float) -> NDArray[np.uint8]:
+    """Fill background regions enclosed by the object and smaller than max_area."""
+    padded = np.pad(binary, 1)
+    outside = padded.copy()
+    cv2.floodFill(outside, None, (0, 0), 1)
+    holes = (1 - outside[1:-1, 1:-1]).astype(np.uint8)
+    count, labels, stats, _ = cv2.connectedComponentsWithStats(holes, connectivity=4)
+    small = np.zeros(count, dtype=bool)
+    small[1:] = stats[1:, cv2.CC_STAT_AREA] < max_area
+    return np.where(small[as_intp(labels)], 1, binary).astype(np.uint8)
+
+
+def solidify_mask(mask: NDArray[np.uint8]) -> NDArray[np.uint8]:
+    """Close narrow edge notches and fill small enclosed holes.
+
+    Opt-in only: ``refine_mask`` preserves topology on purpose, because real
+    holes and thin wires matter. This is for solid objects whose mask has
+    specks and bites where the surface reflected light.
+    """
+    if mask.ndim != 2:
+        raise ValueError("Expected a two-dimensional mask")
+    binary = (mask > 127).astype(np.uint8)
+    area = int(binary.sum())
+    if area == 0:
+        return binary * 255
+    diameter = max(3, round(min(mask.shape) * SOLID_NOTCH_FRACTION) | 1)
+    kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (diameter, diameter))
+    closed = as_uint8(cv2.morphologyEx(binary, cv2.MORPH_CLOSE, kernel))
+    return _fill_small_holes(closed, area * SOLID_HOLE_FRACTION) * 255
+
+
 def edge_refine(
     mask: NDArray[np.uint8],
     iterations: int = 1,

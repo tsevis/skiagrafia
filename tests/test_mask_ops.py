@@ -20,6 +20,7 @@ from processors.mask_ops import (
     mask_bbox,
     mask_coverage,
     refine_mask,
+    solidify_mask,
 )
 
 # ── Boolean mask algebra ─────────────────────────────────────────────────────
@@ -238,3 +239,38 @@ class TestMaskCoverage:
         mask = np.zeros((10, 10), dtype=np.uint8)
         mask[0, 0] = 255
         assert mask_coverage(mask) == pytest.approx(1.0)
+
+
+# ── Solid masks (opt-in) ─────────────────────────────────────────────────────
+
+
+def _phone_like(size: int = 200) -> np.ndarray:
+    mask = np.zeros((size, size), dtype=np.uint8)
+    mask[20:180, 40:160] = 255
+    return mask
+
+
+class TestSolidifyMask:
+    def test_fills_a_reflection_speck_inside_the_object(self) -> None:
+        mask = _phone_like()
+        mask[60:66, 80:86] = 0  # 36 px against 19,200: a reflection, not a hole
+
+        assert solidify_mask(mask)[63, 83] == 255
+
+    def test_keeps_a_hole_too_large_to_be_a_speck(self) -> None:
+        # A letter's counter is a real hole: here 40x40 = 8% of the object.
+        mask = _phone_like()
+        mask[80:120, 80:120] = 0
+
+        assert solidify_mask(mask)[100, 100] == 0
+
+    def test_closes_most_of_a_narrow_bite_out_of_the_edge(self) -> None:
+        # Open to the background, so no hole fill reaches it. Closing leaves a
+        # sliver at the bite's mouth; at this size about one pixel deep.
+        mask = np.zeros((700, 700), dtype=np.uint8)
+        mask[50:650, 150:550] = 255
+        mask[300:308, 150:160] = 0
+
+        still_open = int((solidify_mask(mask)[300:308, 150:160] == 0).sum())
+
+        assert still_open <= 16  # of 80
