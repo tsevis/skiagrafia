@@ -105,6 +105,9 @@ DEFAULT_PREFERENCES: dict[str, Any] = {
     # Ask the vision model whether each detected crop is the object itself,
     # not an icon or picture of it (opt-in; one model call per instance).
     "verify_objects": False,
+    # Redraw each whole object's edge with BiRefNet (opt-in; needs the
+    # BiRefNet folder in the model library).
+    "refine_edges": False,
     # Pipeline
     "sam_box_threshold": 0.35,
     "sam_text_threshold": 0.25,

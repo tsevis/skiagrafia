@@ -39,6 +39,8 @@ dependencies = [
     "pycocotools",
     "hydra-core",
     "iopath",
+    "einops>=0.8.2",
+    "kornia>=0.8.3",
 ]
 
 [build-system]

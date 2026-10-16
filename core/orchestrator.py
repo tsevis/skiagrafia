@@ -24,7 +24,12 @@ from numpy.typing import NDArray
 
 from core.contracts import CapabilitySet
 from core.detection_policy import DetectionPolicyMixin
-from core.instance_filters import drop_nested_instances, verified_proposals
+from core.instance_filters import (
+    EdgeRefiner,
+    drop_nested_instances,
+    refined_edges,
+    verified_proposals,
+)
 from core.interrogation import (
     InterrogationCandidate,
     is_individual_glyph_label,
@@ -160,6 +165,7 @@ class Orchestrator(DetectionPolicyMixin):
         quality: str = "balanced",
         solid_masks: bool = False,
         verify_objects: bool = False,
+        edge_refiner: EdgeRefiner | None = None,
     ) -> None:
         # Capability injection
         self._interrogator = capabilities.interrogator
@@ -184,6 +190,8 @@ class Orchestrator(DetectionPolicyMixin):
         #: Opt-in: ask the vision model whether each detected crop is the
         #: object itself rather than an icon or picture of it.
         self._verify_objects = verify_objects
+        #: Opt-in: redraws each whole object's edge (BiRefNet), parts untouched.
+        self._edge_refiner = edge_refiner
 
     def _report(self, step: int, msg: str | None = None) -> None:
         text = msg or PIPELINE_STEPS[step]
@@ -441,6 +449,8 @@ class Orchestrator(DetectionPolicyMixin):
             proposals = drop_nested_instances(proposals, result)
             if self._verify_objects:
                 proposals = verified_proposals(self._interrogator, image, proposals, result)
+            if self._edge_refiner is not None:
+                proposals = refined_edges(self._edge_refiner, image, proposals, result)
             for mask, detection, layer_label, is_manual in proposals:
                 if self._fold_into_duplicate(mask, parent, accepted, masks, children_by_parent):
                     continue
