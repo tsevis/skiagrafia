@@ -11,7 +11,8 @@ Benchmark.md in SkiagrafiaMac).
 
 BiRefNet's code uses torchvision's deform_conv2d, which has no MPS kernel.
 The GPU is used only when PYTORCH_ENABLE_MPS_FALLBACK=1 lets that one op fall
-back to the CPU; otherwise the whole model runs on the CPU.
+back to the CPU; utils/mps_utils sets it on import, so inside the pipeline
+BiRefNet runs on MPS (measured: about 7 s to load, then 0.8 s per object).
 """
 from __future__ import annotations
 
