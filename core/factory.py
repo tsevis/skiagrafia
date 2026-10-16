@@ -10,6 +10,7 @@ no singletons, no tkinter references.
 """
 from __future__ import annotations
 
+import logging
 from typing import TYPE_CHECKING, Any
 
 from core.contracts import CapabilitySet
@@ -34,6 +35,7 @@ if TYPE_CHECKING:
     # runtime inside build_detector() so this module loads without it.
     from models.mlx_sam3 import MLXSAM3
 
+logger = logging.getLogger(__name__)
 
 def build_interrogation_settings(
     prefs: dict[str, Any],
@@ -229,4 +231,10 @@ def build_edge_refiner(prefs: dict[str, Any]) -> BiRefNetEdgeRefiner | None:
     """The BiRefNet edge refiner when ``refine_edges`` is on, else None."""
     if not prefs.get("refine_edges", False):
         return None
-    return BiRefNetEdgeRefiner(ModelManager(get_models_dir(prefs)).resolve("BiRefNet"))
+    model_dir = ModelManager(get_models_dir(prefs)).resolve("BiRefNet")
+    if not model_dir.is_dir():
+        # On by default, so a library without BiRefNet just keeps SAM's edges
+        # rather than warning once per object.
+        logger.info("Edge refinement skipped: no BiRefNet folder at %s", model_dir)
+        return None
+    return BiRefNetEdgeRefiner(model_dir)

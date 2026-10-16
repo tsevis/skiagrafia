@@ -303,3 +303,11 @@ class TestFactoryBuildKnowledgePack:
 
         assert isinstance(pack, KnowledgePack)
         assert pack.domain.name == "Test Domain"
+
+
+class TestBuildEdgeRefiner:
+    def test_no_refiner_without_birefnet_in_the_model_library(self, tmp_path) -> None:
+        # On by default: a library without BiRefNet must not warn on every object.
+        from core.factory import build_edge_refiner
+
+        assert build_edge_refiner({"refine_edges": True, "models_directory": str(tmp_path)}) is None
