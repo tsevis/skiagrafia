@@ -1,10 +1,14 @@
 from __future__ import annotations
 
+import logging
+
 import cv2
 import numpy as np
 from numpy.typing import NDArray
 
 from utils.array_types import as_intp, as_uint8
+
+logger = logging.getLogger(__name__)
 
 
 def boolean_subtract(
@@ -84,7 +88,12 @@ def _fill_shallow_pockets(binary: NDArray[np.uint8]) -> NDArray[np.uint8]:
     for contour in contours:
         if len(contour) < 4:
             continue
-        defects = cv2.convexityDefects(contour, cv2.convexHull(contour, returnPoints=False))
+        try:
+            defects = cv2.convexityDefects(contour, cv2.convexHull(contour, returnPoints=False))
+        except cv2.error:
+            # A self-intersecting outline; its pockets stay as they are.
+            logger.debug("Skipped pocket filling on an outline OpenCV cannot measure")
+            continue
         if defects is None:
             continue
         max_depth = min(cv2.boundingRect(contour)[2:]) * SOLID_POCKET_FRACTION

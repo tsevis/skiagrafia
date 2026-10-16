@@ -290,3 +290,19 @@ class TestSolidifyMask:
         mask[50:170, 150:250] = 0
 
         assert solidify_mask(mask)[100, 200] == 0
+
+    def test_an_outline_opencv_cannot_measure_fails_nothing(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        # OpenCV refuses a self-intersecting outline; on 165.png (a trackpad)
+        # that failed the whole image.
+        import processors.mask_ops as mask_ops
+
+        def refuse(*_args: object) -> None:
+            raise mask_ops.cv2.error("The convex hull indices are not monotonous")
+
+        monkeypatch.setattr(mask_ops.cv2, "convexityDefects", refuse)
+        mask = _phone_like()
+        mask[60:66, 80:86] = 0
+
+        assert solidify_mask(mask)[63, 83] == 255
