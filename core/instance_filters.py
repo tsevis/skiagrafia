@@ -4,11 +4,21 @@ Both run per label, after segmentation and before a layer is accepted.
 """
 from __future__ import annotations
 
+import logging
+from typing import Protocol
+
 import numpy as np
 from numpy.typing import NDArray
 
 from core.pipeline_geometry import mask_containment
 from core.pipeline_results import PipelineResult
+
+logger = logging.getLogger(__name__)
+
+
+class EdgeRefiner(Protocol):
+    def refine(self, image: NDArray[np.uint8], mask: NDArray[np.uint8]) -> NDArray[np.uint8]: ...
+
 
 #: A same-label instance this much inside one at least NESTED_AREA_RATIO times
 #: its area is a picture of the object on the object, not another object.
@@ -74,3 +84,18 @@ interrogator: object, image: NDArray[np.uint8], proposals: list, result: Pipelin
                 continue
         kept.append(proposal)
     return kept
+
+
+def refined_edges(
+    refiner: EdgeRefiner, image: NDArray[np.uint8], proposals: list, result: PipelineResult
+) -> list:
+    """Proposals with each mask's edge redrawn; a refiner failure keeps SAM's."""
+    refined = []
+    for mask, detection, layer_label, is_manual in proposals:
+        try:
+            mask = refiner.refine(image, mask)
+        except (ImportError, OSError, RuntimeError, ValueError) as exc:
+            logger.warning("Edge refinement failed for '%s'", layer_label, exc_info=True)
+            result.warnings.append(f"Kept the unrefined edge of '{layer_label}': {exc}")
+        refined.append((mask, detection, layer_label, is_manual))
+    return refined

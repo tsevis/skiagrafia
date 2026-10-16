@@ -635,3 +635,47 @@ class TestVerifyObjects:
         layers = self._parents(tmp_path, verify_objects=True)
 
         assert [layer.bbox for layer in layers] == [(0, 0, 30, 60)]
+
+
+class _MarkingEdgeRefiner:
+    """Clears one pixel, so a test can tell the refined mask from SAM's."""
+
+    def refine(self, image: np.ndarray, mask: np.ndarray) -> np.ndarray:
+        marked = mask.copy()
+        marked[20, 20] = 0
+        return marked
+
+
+class TestEdgeRefiner:
+    def test_layers_use_the_refined_edge(self, tmp_path: Path) -> None:
+        refiner = _RecordingRefiner()
+        caps = _make_caps(
+            FakeInterrogator([_candidate("phone")]),
+            FakeDetector(default=(8, 8, 56, 56)),
+            FakeSegmenter(),
+            alpha_refiner=refiner,
+        )
+        orch = Orchestrator(
+            capabilities=caps, output_dir=tmp_path / "out", edge_refiner=_MarkingEdgeRefiner()
+        )
+
+        assert orch.process(_write_image(tmp_path / "in.png")).error is None
+        assert refiner.masks[0][20, 20] == 0
+
+    def test_a_refiner_that_cannot_load_keeps_sams_edge(self, tmp_path: Path) -> None:
+        # A missing einops/kornia failed every image instead of one step.
+        class _Unloadable:
+            def refine(self, image: np.ndarray, mask: np.ndarray) -> np.ndarray:
+                raise ImportError("This modeling file requires einops, kornia")
+
+        caps = _make_caps(
+            FakeInterrogator([_candidate("phone")]),
+            FakeDetector(default=(8, 8, 56, 56)),
+            FakeSegmenter(),
+        )
+        orch = Orchestrator(capabilities=caps, output_dir=tmp_path / "out", edge_refiner=_Unloadable())
+
+        result = orch.process(_write_image(tmp_path / "in.png"))
+
+        assert result.error is None
+        assert [layer.label for layer in result.layers] == ["phone"]

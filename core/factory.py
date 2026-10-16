@@ -15,6 +15,7 @@ from typing import TYPE_CHECKING, Any
 from core.contracts import CapabilitySet
 from core.interrogation import GuidedInterrogator, InterrogationSettings
 from core.knowledge import KnowledgePack
+from models.birefnet_refiner import BiRefNetEdgeRefiner
 from models.grounded_sam import GroundedSAM
 from models.vitmatte_refiner import VitMatteRefiner
 from models.vlm_client import (
@@ -222,3 +223,10 @@ def build_knowledge_pack(
     if knowledge_pack_path:
         return KnowledgePack.load(knowledge_pack_path)
     return None
+
+
+def build_edge_refiner(prefs: dict[str, Any]) -> BiRefNetEdgeRefiner | None:
+    """The BiRefNet edge refiner when ``refine_edges`` is on, else None."""
+    if not prefs.get("refine_edges", False):
+        return None
+    return BiRefNetEdgeRefiner(ModelManager(get_models_dir(prefs)).resolve("BiRefNet"))
