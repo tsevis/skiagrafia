@@ -338,8 +338,8 @@ class Orchestrator(DetectionPolicyMixin):
         accepted: list,
         masks: dict[str, NDArray[np.uint8]],
         children_by_parent: dict[str, list[str]],
-    ) -> bool:
-        """True when this mask is an object already accepted.
+    ) -> str | None:
+        """The label of the accepted layer this mask duplicates, or None.
 
         Containment and overlapping boxes alone do not imply duplication --
         only near-identical masks do. The duplicate's parts are merged into
@@ -352,13 +352,13 @@ class Orchestrator(DetectionPolicyMixin):
             None,
         )
         if duplicate is None:
-            return False
+            return None
         existing_label = duplicate[1].display_label
         extra = children_by_parent.get(parent.display_label, [])
         children_by_parent[existing_label] = list(
             dict.fromkeys(children_by_parent.get(existing_label, []) + extra)
         )
-        return True
+        return existing_label
 
     def _final_mask(self, mask: NDArray[np.uint8]) -> NDArray[np.uint8]:
         """The refined mask, made solid when this run asked for it."""
@@ -452,7 +452,17 @@ class Orchestrator(DetectionPolicyMixin):
             if self._edge_refiner is not None:
                 proposals = refined_edges(self._edge_refiner, image, proposals, result)
             for mask, detection, layer_label, is_manual in proposals:
-                if self._fold_into_duplicate(mask, parent, accepted, masks, children_by_parent):
+                kept_as = self._fold_into_duplicate(
+                    mask, parent, accepted, masks, children_by_parent
+                )
+                if kept_as is not None:
+                    # A different label on the same region would otherwise
+                    # vanish without a trace: the layer keeps the first name.
+                    if kept_as != layer_label:
+                        result.warnings.append(
+                            f"'{layer_label}' found the same region as '{kept_as}' "
+                            f"and was merged into that layer."
+                        )
                     continue
                 self._accept_parent(
                     mask, detection, layer_label, is_manual, parent, accepted, masks

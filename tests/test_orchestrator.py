@@ -332,6 +332,24 @@ class TestProcessParentDedup:
         labels = [layer.label for layer in result.layers]
         assert labels == ["thing a"]
 
+    def test_a_label_folded_into_a_duplicate_is_reported(self, tmp_path: Path) -> None:
+        image_path = _write_image(tmp_path / "img.png")
+        candidates = [_candidate("name tag"), _candidate("medal ribbon")]
+        box = (0, 0, IMG_SIZE, IMG_SIZE)
+        detector = FakeDetector(boxes={"name tag": box, "medal ribbon": box})
+        full_mask = np.full((IMG_SIZE, IMG_SIZE), 255, dtype=np.uint8)
+        segmenter = FakeSegmenter(
+            mask_by_label={"name tag": full_mask, "medal ribbon": full_mask}
+        )
+        caps = _make_caps(FakeInterrogator(candidates), detector, segmenter)
+        orch = Orchestrator(capabilities=caps, output_dir=tmp_path / "out")
+
+        result = orch.process(image_path)
+
+        folded = [w for w in result.warnings if "'medal ribbon'" in w]
+        assert len(folded) == 1
+        assert "'name tag'" in folded[0]
+
 
 class TestProcessChildren:
     def test_child_accepted_and_subtracted_from_body_mask(self, tmp_path: Path) -> None:
