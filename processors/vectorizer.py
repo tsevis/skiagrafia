@@ -57,9 +57,10 @@ def trace_mask(
     inverted = cv2.bitwise_not(mask)
 
     # VTracer only accepts file paths.  A private temporary directory keeps
-    # cleanup bounded even if conversion fails part way through.
+    # cleanup bounded even if conversion fails part way through.  PNG, not
+    # BMP: VTracer's bundled BMP decoder panics on full-size photo masks.
     with tempfile.TemporaryDirectory(prefix="skiagrafia-vtracer-") as temp_dir:
-        in_path = str(Path(temp_dir) / "mask.bmp")
+        in_path = str(Path(temp_dir) / "mask.png")
         out_path = str(Path(temp_dir) / "mask.svg")
         if not cv2.imwrite(in_path, inverted):
             raise RuntimeError("VTracer could not write its temporary input image.")

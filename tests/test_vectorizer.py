@@ -70,6 +70,14 @@ class TestTraceMask:
         )
         assert "<svg" in svg
 
+    def test_full_size_photo_mask_is_traced(self) -> None:
+        # VTracer's bundled BMP decoder panics on masks this large (a 37.5 MP
+        # stock photo), so the temporary input must not be a BMP.
+        mask = np.zeros((6082, 6164), dtype=np.uint8)
+        mask[100:200, 100:200] = 255
+        svg = trace_mask(mask)
+        assert "<path" in svg
+
 
 # ── assemble_svg ─────────────────────────────────────────────────────────────
 
